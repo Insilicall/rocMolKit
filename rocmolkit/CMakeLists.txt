@@ -21,7 +21,7 @@ list(REMOVE_ITEM ROCMOLKIT_CPP_SOURCES ${ROCMOLKIT_HIP_SOURCES})
 list(FILTER ROCMOLKIT_HIP_SOURCES EXCLUDE REGEX "/(butina|tfd)\\.hip\\.cpp$")
 list(FILTER ROCMOLKIT_HIP_SOURCES EXCLUDE REGEX "/tfd/")
 
-if(ROCMOLKIT_HIP_SOURCES)
+if(ROCMOLKIT_HIP_SOURCES AND hip_FOUND)
     set_source_files_properties(${ROCMOLKIT_HIP_SOURCES} PROPERTIES LANGUAGE HIP)
     add_library(rocmolkit_core SHARED ${ROCMOLKIT_HIP_SOURCES} ${ROCMOLKIT_CPP_SOURCES})
 
@@ -32,12 +32,13 @@ if(ROCMOLKIT_HIP_SOURCES)
         $<INSTALL_INTERFACE:include>
     )
 
-    target_link_libraries(rocmolkit_core PUBLIC
-        hip::host
-        hip::device
-        roc::hipblas
-        hip::hiprand
-    )
+    target_link_libraries(rocmolkit_core PUBLIC hip::host hip::device)
+    if(hipblas_FOUND)
+        target_link_libraries(rocmolkit_core PUBLIC roc::hipblas)
+    endif()
+    if(hiprand_FOUND)
+        target_link_libraries(rocmolkit_core PUBLIC hip::hiprand)
+    endif()
 
     set_target_properties(rocmolkit_core PROPERTIES
         POSITION_INDEPENDENT_CODE ON
@@ -48,6 +49,11 @@ if(ROCMOLKIT_HIP_SOURCES)
             LIBRARY DESTINATION lib)
 else()
     add_library(rocmolkit_core INTERFACE)
+    target_include_directories(rocmolkit_core INTERFACE
+        $<BUILD_INTERFACE:${ROCMOLKIT_INCLUDE_DIR}>
+        $<INSTALL_INTERFACE:include>
+    )
+    install(TARGETS rocmolkit_core EXPORT rocmolkit-targets)
 endif()
 
 # ─── RDKit extensions (C++ puro) ────────────────────────────

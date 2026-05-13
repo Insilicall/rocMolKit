@@ -35,11 +35,15 @@ if(NOT DEFINED ROCM_PATH)
 endif()
 list(APPEND CMAKE_PREFIX_PATH "${ROCM_PATH}" "${ROCM_PATH}/lib/cmake")
 
-find_package(hip REQUIRED)
-find_package(hipblas REQUIRED)
-find_package(hiprand REQUIRED)
-# rocsolver é opcional na fase 0; algumas operações de MMFF podem usar
+find_package(hip QUIET)
+find_package(hipblas QUIET)
+find_package(hiprand QUIET)
 find_package(rocsolver QUIET)
+
+if(NOT hip_FOUND)
+    message(WARNING "rocMolKit: HIP runtime not found — only header-only / CPU targets will build. "
+                    "Install ROCm SDK to build GPU targets.")
+endif()
 
 message(STATUS "rocMolKit: ROCm at ${ROCM_PATH}")
 message(STATUS "rocMolKit: GPU_TARGETS = ${GPU_TARGETS}")
