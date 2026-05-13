@@ -35,14 +35,17 @@ if(NOT DEFINED ROCM_PATH)
 endif()
 list(APPEND CMAKE_PREFIX_PATH "${ROCM_PATH}" "${ROCM_PATH}/lib/cmake")
 
-find_package(hip QUIET)
-find_package(hipblas QUIET)
-find_package(hiprand QUIET)
-find_package(rocsolver QUIET)
-
-if(NOT hip_FOUND)
-    message(WARNING "rocMolKit: HIP runtime not found — only header-only / CPU targets will build. "
-                    "Install ROCm SDK to build GPU targets.")
+include(CheckLanguage)
+check_language(HIP)
+if(CMAKE_HIP_COMPILER)
+    enable_language(HIP)
+    find_package(hip QUIET)
+    find_package(hipblas QUIET)
+    find_package(hiprand QUIET)
+    find_package(rocsolver QUIET)
+else()
+    message(WARNING "rocMolKit: HIP compiler not found — only CPU/header targets will build. "
+                    "Install ROCm SDK (hipcc) to build GPU code.")
 endif()
 
 message(STATUS "rocMolKit: ROCm at ${ROCM_PATH}")
