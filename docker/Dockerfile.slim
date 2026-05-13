@@ -36,7 +36,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && printf 'Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600\n' \
         > /etc/apt/preferences.d/rocm-pin-600 \
     && apt-get update && apt-get install -y --no-install-recommends \
-        build-essential cmake ninja-build git \
+        build-essential ninja-build git \
         python${PYTHON_VERSION} python${PYTHON_VERSION}-dev python3-pip \
         libboost-python-dev libeigen3-dev \
         hipcc hip-dev hip-runtime-amd \
@@ -50,19 +50,24 @@ ENV PATH=/opt/rocm/bin:$PATH \
     ROCM_PATH=/opt/rocm
 
 RUN python${PYTHON_VERSION} -m pip install --no-cache-dir \
+        cmake \
         scikit-build-core nanobind numpy rdkit-pypi
 
 WORKDIR /src
 COPY . /src
 
-RUN cmake -S . -B /build -GNinja \
+RUN mkdir -p /install \
+    && cmake -S . -B /build -GNinja \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_INSTALL_PREFIX=/install \
+        -DCMAKE_HIP_COMPILER=/opt/rocm/bin/hipcc \
+        -DCMAKE_HIP_PLATFORM=amd \
         -DGPU_TARGETS="${GPU_TARGETS}" \
         -DROCMOLKIT_BUILD_TESTS=OFF \
     && cmake --build /build --parallel \
     && cmake --install /build \
-    && find /install -name '*.so*' -type f -exec strip --strip-unneeded {} + 2>/dev/null || true
+    && find /install -name '*.so*' -type f -exec strip --strip-unneeded {} + 2>/dev/null || true \
+    && touch /install/.built
 
 # ─────────────────────────────────────────────────────────────
 # STAGE 2: runtime — ubuntu + ROCm runtime seletivo (~700 MB–1 GB)
