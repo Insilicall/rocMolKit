@@ -1,0 +1,15 @@
+# Lista legada — não é mais usada pela versão nova do Dockerfile.slim,
+# que instala via apt (rocm-hip-runtime + rocblas + rocrand + hipblas + hiprand).
+#
+# Mantida como referência caso alguém queira voltar à abordagem multi-stage
+# com cópia seletiva (estágio com rocm/dev-ubuntu).
+
+# /opt/rocm/lib/libamdhip64.so.6
+# /opt/rocm/lib/libhsa-runtime64.so.1
+# /opt/rocm/lib/libamd_comgr.so.2
+# /opt/rocm/lib/librocblas.so.4
+# /opt/rocm/lib/librocrand.so.1
+# /opt/rocm/lib/libhiprand.so.1
+# /opt/rocm/lib/libhipblas.so.2
+# /opt/rocm/lib/librocsolver.so.0
+# /opt/rocm/lib/libroctracer64.so.4

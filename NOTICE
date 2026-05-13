@@ -1,0 +1,14 @@
+rocMolKit
+Copyright 2026 rodolpho
+
+This product is a port of nvMolKit (https://github.com/NVIDIA-Digital-Bio/nvMolKit)
+to the AMD ROCm/HIP platform.
+
+nvMolKit is licensed under the Apache License, Version 2.0:
+    Copyright NVIDIA Corporation
+    https://github.com/NVIDIA-Digital-Bio/nvMolKit/blob/main/LICENSE
+
+The conversion from CUDA to HIP was performed using the AMD HIPIFY toolchain.
+Manual modifications were applied where automatic conversion was insufficient.
+
+This port maintains the original Apache 2.0 license. See LICENSE for full terms.

@@ -1,0 +1,75 @@
+# Estrutura espelha o upstream nvMolKit:
+#   src/                  kernels HIP + lógica core
+#   rdkit_extensions/     C++ puro, extensões do RDKit
+#   nvmolkit/             bindings Python (boost-python)
+#
+# Fase 1: alvos compilam (cmake configure passa). Build real depende de hipcc.
+
+set(ROCMOLKIT_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
+
+# ─── Core HIP library ───────────────────────────────────────
+file(GLOB_RECURSE ROCMOLKIT_HIP_SOURCES CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/*.hip.cpp"
+)
+file(GLOB_RECURSE ROCMOLKIT_CPP_SOURCES CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp"
+)
+list(REMOVE_ITEM ROCMOLKIT_CPP_SOURCES ${ROCMOLKIT_HIP_SOURCES})
+
+# Excluir butina (Fase 6) e tfd (Fase 7) por enquanto — usam features sem
+# equivalente direto em ROCm (CUDA Graphs Conditional).
+list(FILTER ROCMOLKIT_HIP_SOURCES EXCLUDE REGEX "/(butina|tfd)\\.hip\\.cpp$")
+list(FILTER ROCMOLKIT_HIP_SOURCES EXCLUDE REGEX "/tfd/")
+
+if(ROCMOLKIT_HIP_SOURCES)
+    set_source_files_properties(${ROCMOLKIT_HIP_SOURCES} PROPERTIES LANGUAGE HIP)
+    add_library(rocmolkit_core SHARED ${ROCMOLKIT_HIP_SOURCES} ${ROCMOLKIT_CPP_SOURCES})
+
+    target_include_directories(rocmolkit_core PUBLIC
+        $<BUILD_INTERFACE:${ROCMOLKIT_INCLUDE_DIR}>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/rdkit_extensions>
+        $<INSTALL_INTERFACE:include>
+    )
+
+    target_link_libraries(rocmolkit_core PUBLIC
+        hip::host
+        hip::device
+        roc::hipblas
+        hip::hiprand
+    )
+
+    set_target_properties(rocmolkit_core PROPERTIES
+        POSITION_INDEPENDENT_CODE ON
+        HIP_ARCHITECTURES "${GPU_TARGETS}"
+    )
+
+    install(TARGETS rocmolkit_core EXPORT rocmolkit-targets
+            LIBRARY DESTINATION lib)
+else()
+    add_library(rocmolkit_core INTERFACE)
+endif()
+
+# ─── RDKit extensions (C++ puro) ────────────────────────────
+file(GLOB ROCMOLKIT_RDKIT_EXT
+    "${CMAKE_CURRENT_SOURCE_DIR}/rdkit_extensions/*.cpp"
+)
+if(ROCMOLKIT_RDKIT_EXT)
+    add_library(rocmolkit_rdkit_ext STATIC ${ROCMOLKIT_RDKIT_EXT})
+    target_include_directories(rocmolkit_rdkit_ext PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/rdkit_extensions
+    )
+    set_target_properties(rocmolkit_rdkit_ext PROPERTIES
+        POSITION_INDEPENDENT_CODE ON
+    )
+endif()
+
+# ─── Python bindings (boost-python ou nanobind) ─────────────
+# Fase 2+: ativar quando ETKDG estiver compilando.
+if(ROCMOLKIT_BUILD_PYTHON_BINDINGS AND TARGET rocmolkit_core)
+    # add_subdirectory(nvmolkit)   # depois do hipify dos bindings
+endif()
+
+install(DIRECTORY ${ROCMOLKIT_INCLUDE_DIR}/
+        DESTINATION include
+        FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp")

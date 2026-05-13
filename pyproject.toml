@@ -1,0 +1,41 @@
+[build-system]
+requires = ["scikit-build-core>=0.8", "nanobind>=2.0"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "rocmolkit"
+version = "0.1.0"
+description = "GPU-accelerated RDKit operations on AMD GPUs via HIP/ROCm"
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.10"
+authors = [{ name = "rodolpho" }]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Chemistry",
+]
+dependencies = [
+    "numpy>=1.24",
+    "rdkit-pypi>=2023.9",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=7", "pytest-benchmark"]
+torch = ["torch"]
+
+[project.urls]
+Homepage = "https://github.com/rodolpho/rocMolKit"
+Issues = "https://github.com/rodolpho/rocMolKit/issues"
+
+[tool.scikit-build]
+cmake.version = ">=3.21"
+cmake.build-type = "Release"
+build.verbose = false
+wheel.packages = ["rocmolkit"]
+
+[tool.scikit-build.cmake.define]
+ROCMOLKIT_BUILD_PYTHON_BINDINGS = "ON"
+ROCMOLKIT_BUILD_TESTS = "OFF"
+GPU_TARGETS = "gfx1100;gfx90a;gfx942"

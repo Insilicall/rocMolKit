@@ -1,0 +1,109 @@
+# syntax=docker/dockerfile:1.6
+# rocMolKit runtime slim — base ubuntu puro + pacotes ROCm seletivos via apt.
+# NÃO usa rocm/dev-ubuntu (~13 GB). Usa ubuntu:22.04 (~30 MB) + apt selectivo.
+#
+# Build: docker build -f docker/Dockerfile.slim -t rocmolkit:slim .
+# Run:   docker run --device=/dev/kfd --device=/dev/dri --group-add video rocmolkit:slim
+
+ARG ROCM_VERSION=6.2.4
+ARG GPU_TARGETS="gfx1100;gfx90a;gfx942"
+ARG PYTHON_VERSION=3.11
+ARG UBUNTU_CODENAME=jammy
+
+# ─────────────────────────────────────────────────────────────
+# STAGE 1: builder — ubuntu + ROCm SDK seletivo (~3–4 GB)
+# ─────────────────────────────────────────────────────────────
+FROM ubuntu:22.04 AS builder
+
+ARG ROCM_VERSION
+ARG GPU_TARGETS
+ARG PYTHON_VERSION
+ARG UBUNTU_CODENAME
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# Adiciona repo AMD ROCm + instala SOMENTE o que precisa para compilar.
+# rocm-hip-sdk = compilador hipcc + runtime + headers comuns.
+# Se quiser mais enxuto: rocm-hip-runtime-dev + hipcc + rocblas-dev manualmente.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates curl gnupg lsb-release \
+    && curl -fsSL https://repo.radeon.com/rocm/rocm.gpg.key \
+        | gpg --dearmor -o /etc/apt/keyrings/rocm.gpg \
+    && echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/${ROCM_VERSION} ${UBUNTU_CODENAME} main" \
+        > /etc/apt/sources.list.d/rocm.list \
+    && echo "Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600" \
+        > /etc/apt/preferences.d/rocm-pin-600 \
+    && apt-get update && apt-get install -y --no-install-recommends \
+        build-essential cmake ninja-build git \
+        python${PYTHON_VERSION} python${PYTHON_VERSION}-dev python3-pip \
+        libboost-python-dev libeigen3-dev \
+        hipcc hip-dev hip-runtime-amd \
+        rocblas-dev hipblas-dev \
+        rocrand-dev hiprand-dev \
+        rocsolver-dev hipsolver-dev \
+        hipcub-dev rocprim-dev rocthrust-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV PATH=/opt/rocm/bin:$PATH \
+    ROCM_PATH=/opt/rocm
+
+RUN python${PYTHON_VERSION} -m pip install --no-cache-dir \
+        scikit-build-core nanobind numpy rdkit-pypi
+
+WORKDIR /src
+COPY . /src
+
+RUN cmake -S . -B /build -GNinja \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX=/install \
+        -DGPU_TARGETS="${GPU_TARGETS}" \
+        -DROCMOLKIT_BUILD_TESTS=OFF \
+    && cmake --build /build --parallel \
+    && cmake --install /build \
+    && find /install -name '*.so*' -type f -exec strip --strip-unneeded {} + 2>/dev/null || true
+
+# ─────────────────────────────────────────────────────────────
+# STAGE 2: runtime — ubuntu + ROCm runtime seletivo (~700 MB–1 GB)
+# ─────────────────────────────────────────────────────────────
+FROM ubuntu:22.04 AS runtime
+
+ARG ROCM_VERSION
+ARG PYTHON_VERSION
+ARG UBUNTU_CODENAME
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    LD_LIBRARY_PATH=/opt/rocm/lib \
+    PATH=/opt/rocm/bin:$PATH \
+    PYTHONUNBUFFERED=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates curl gnupg \
+    && curl -fsSL https://repo.radeon.com/rocm/rocm.gpg.key \
+        | gpg --dearmor -o /etc/apt/keyrings/rocm.gpg \
+    && echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/${ROCM_VERSION} ${UBUNTU_CODENAME} main" \
+        > /etc/apt/sources.list.d/rocm.list \
+    && apt-get update && apt-get install -y --no-install-recommends \
+        python${PYTHON_VERSION} python3-pip \
+        libpython${PYTHON_VERSION} libstdc++6 libgomp1 libnuma1 libelf1 \
+        libdrm2 libdrm-amdgpu1 \
+        rocm-hip-runtime \
+        rocblas hipblas \
+        rocrand hiprand \
+    && apt-get purge -y curl gnupg \
+    && apt-get autoremove -y \
+    && rm -rf /var/lib/apt/lists/* \
+              /var/cache/apt/* \
+              /usr/share/doc /usr/share/man /usr/share/locale \
+              /opt/rocm/share/doc /opt/rocm/share/man \
+              /opt/rocm/llvm/share /opt/rocm/llvm/lib/clang/*/share \
+              /opt/rocm/include
+
+RUN python${PYTHON_VERSION} -m pip install --no-cache-dir numpy rdkit-pypi \
+    && find / -type d -name '__pycache__' -exec rm -rf {} + 2>/dev/null || true \
+    && find /opt/rocm -name '*.so*' -type f -exec strip --strip-unneeded {} + 2>/dev/null || true
+
+COPY --from=builder /install /usr/local
+
+ENTRYPOINT ["python3"]

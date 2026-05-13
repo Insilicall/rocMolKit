@@ -1,0 +1,84 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-cpu-smoke:
+    # CI público sem GPU AMD: roda hipify + cmake configure (compile pode falhar sem GPU).
+    # Validação real fica no runner self-hosted (job rocm-runner abaixo).
+    runs-on: ubuntu-22.04
+    container:
+      image: rocm/dev-ubuntu-22.04:6.2
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build deps
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            cmake ninja-build python3-dev python3-pip \
+            libboost-python-dev libeigen3-dev
+          pip install scikit-build-core nanobind numpy
+
+      - name: CMake configure
+        run: |
+          cmake -S . -B build -GNinja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DGPU_TARGETS="gfx1100" \
+            -DROCMOLKIT_BUILD_TESTS=OFF
+
+      - name: CMake build (only what compiles without GPU)
+        run: cmake --build build --target rocmolkit_core || true
+
+  docker-slim-size:
+    # Verifica que a imagem slim fica abaixo do orçamento.
+    runs-on: ubuntu-22.04
+    needs: build-cpu-smoke
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build slim
+        run: |
+          docker build -f docker/Dockerfile.slim -t rocmolkit:slim \
+            --build-arg GPU_TARGETS="gfx1100" .
+
+      - name: Check size budget (< 2 GB)
+        run: |
+          size=$(docker image inspect rocmolkit:slim --format='{{.Size}}')
+          mb=$((size / 1024 / 1024))
+          echo "rocmolkit:slim = ${mb} MB"
+          if [ "$mb" -gt 2048 ]; then
+            echo "FAIL: imagem acima do orçamento (2048 MB)"
+            exit 1
+          fi
+
+  rocm-runner:
+    # Job real com GPU AMD — exige runner self-hosted.
+    if: false  # ativar quando o runner estiver online
+    runs-on: [self-hosted, rocm]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build + test
+        run: |
+          docker build -f docker/Dockerfile.devel -t rocmolkit:devel .
+          docker run --rm \
+            --device=/dev/kfd --device=/dev/dri \
+            --group-add video \
+            -v ${{ github.workspace }}:/workspace \
+            rocmolkit:devel \
+            bash -c "cmake -S /workspace -B /workspace/build -GNinja -DROCMOLKIT_BUILD_TESTS=ON && \
+                     cmake --build /workspace/build && \
+                     ctest --test-dir /workspace/build --output-on-failure"
+
+      - name: Numerical parity gate
+        run: |
+          docker run --rm \
+            --device=/dev/kfd --device=/dev/dri --group-add video \
+            -v ${{ github.workspace }}:/workspace \
+            rocmolkit:devel \
+            python3 /workspace/tools/numerical_diff.py etkdg /workspace/tests/data/spice_100.smi

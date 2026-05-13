@@ -1,0 +1,17 @@
+build/
+dist/
+install/
+*.egg-info/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.venv/
+venv/
+.idea/
+.vscode/
+*.so
+*.dylib
+.DS_Store
+hipify.log
+upstream/
