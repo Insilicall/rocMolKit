@@ -295,17 +295,25 @@ std::optional<DeviceCoordResult> embedMolecules(const std::vector<RDKit::ROMol*>
                                                             streamPtr,
                                                             backend);
       if (_dbg && omp_get_thread_num() == 0) std::fprintf(stderr, "[setup] BfgsBatchMinimizer OK\n");
+      if (_dbg && omp_get_thread_num() == 0) std::fprintf(stderr, "[setup] before caches\n");
       std::unordered_map<const RDKit::ROMol*, nvMolKit::DistGeom::EnergyForceContribsHost>   dgCache;
       std::unordered_map<const RDKit::ROMol*, nvMolKit::DistGeom::Energy3DForceContribsHost> etkCache;
+      if (_dbg && omp_get_thread_num() == 0) std::fprintf(stderr, "[setup] PinnedHostVector positions\n");
       // Pinned reusable buffers for common copies.
       PinnedHostVector<double>                                                               positionsScratch;
+      if (_dbg && omp_get_thread_num() == 0) std::fprintf(stderr, "[setup] PinnedHostVector active\n");
       PinnedHostVector<uint8_t>                                                              activeScratch;
+      if (_dbg && omp_get_thread_num() == 0) std::fprintf(stderr, "[setup] PinnedHostVector failures\n");
       PinnedHostVector<int16_t>                                                              failuresScratch;
+      if (_dbg && omp_get_thread_num() == 0) std::fprintf(stderr, "[setup] ETKDGDriver default ctor\n");
       detail::ETKDGDriver                                                                    driver;
+      if (_dbg && omp_get_thread_num() == 0) std::fprintf(stderr, "[setup] driver OK; entering while\n");
 
       while (!workComplete.load()) {
+        if (_dbg && omp_get_thread_num() == 0) std::fprintf(stderr, "[setup] while iter: Scheduler.dispatch\n");
         // Dispatch work for this thread
         std::vector<int> molIds = Scheduler.dispatch(effectiveBatchSize);
+        if (_dbg && omp_get_thread_num() == 0) std::fprintf(stderr, "[setup] dispatch -> %zu mols\n", molIds.size());
 
         if (molIds.empty()) {
           workComplete.store(true);
