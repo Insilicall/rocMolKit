@@ -22,13 +22,19 @@ set(ROCMOLKIT_PHASE2_BINDINGS
     uffOptimization
     batchedForcefield
     conformerRmsd
-    array_helpers
+    arrayHelpers
 )
 
 # Each name corresponds to a `_<NameCamelCase>.so` plus `<source>.cpp`.
 foreach(_binding IN LISTS ROCMOLKIT_PHASE2_BINDINGS)
     set(_module "_${_binding}")
-    set(_src "${CMAKE_CURRENT_SOURCE_DIR}/${_binding}.cpp")
+    # Source filename uses snake_case while module name is camelCase only for
+    # arrayHelpers (matches the BOOST_PYTHON_MODULE name in array_helpers.cpp).
+    if(_binding STREQUAL "arrayHelpers")
+        set(_src "${CMAKE_CURRENT_SOURCE_DIR}/array_helpers.cpp")
+    else()
+        set(_src "${CMAKE_CURRENT_SOURCE_DIR}/${_binding}.cpp")
+    endif()
 
     if(NOT EXISTS "${_src}")
         message(WARNING "rocMolKit: binding source missing: ${_src}")
