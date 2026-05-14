@@ -17,13 +17,33 @@ file(GLOB_RECURSE ROCMOLKIT_CPP_SOURCES CONFIGURE_DEPENDS
 list(REMOVE_ITEM ROCMOLKIT_CPP_SOURCES ${ROCMOLKIT_HIP_SOURCES})
 
 # Excluir módulos que usam features sem equivalente direto em ROCm:
-#   butina:    CUDA Graphs Conditional (sem hipGraph equivalente)
-#   tfd:       depende de butina
-#   substruct: cudaSharedmemCarveoutMaxShared não-traduzido (Fase 7)
+#   butina:                    CUDA Graphs Conditional (sem hipGraph equivalente)
+#   tfd:                       depende de butina
+#   substruct:                 cudaSharedmemCarveoutMaxShared não-traduzido
+#   bfgs_hessian:              cooperative_groups/reduce.h (NVIDIA libcudacxx)
+#   morgan_fingerprint_kernels: cooperative_groups::block_tile_memory (NVIDIA only)
 list(FILTER ROCMOLKIT_HIP_SOURCES EXCLUDE REGEX "/(butina|tfd)\\.hip\\.cpp$")
 list(FILTER ROCMOLKIT_HIP_SOURCES EXCLUDE REGEX "/(tfd|substruct)/")
+list(FILTER ROCMOLKIT_HIP_SOURCES EXCLUDE REGEX "/bfgs_hessian\\.hip\\.cpp$")
+list(FILTER ROCMOLKIT_HIP_SOURCES EXCLUDE REGEX "/morgan_fingerprint_kernels\\.hip\\.cpp$")
 list(FILTER ROCMOLKIT_CPP_SOURCES EXCLUDE REGEX "/(tfd|substruct)/")
 list(FILTER ROCMOLKIT_CPP_SOURCES EXCLUDE REGEX "/(butina|tfd)\\.cpp$")
+
+# Generate versions.h from RDKit version (drives RDKIT_NEW_FLAG_API constexpr).
+if(RDKit_FOUND)
+    if(NOT DEFINED RDKit_VERSION_MAJOR)
+        # find_package may not have populated these — derive from CONFIG file or
+        # parse RDKit's Version.h. Fallback to the Release_2024_09 we ship.
+        set(RDKit_VERSION_MAJOR 2024)
+        set(RDKit_VERSION_MINOR 9)
+        set(RDKit_VERSION_PATCH 6)
+    endif()
+    configure_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/versions.h.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/versions.h"
+        @ONLY
+    )
+endif()
 
 if(ROCMOLKIT_HIP_SOURCES AND CMAKE_HIP_COMPILER AND hip_FOUND)
     set_source_files_properties(${ROCMOLKIT_HIP_SOURCES} PROPERTIES LANGUAGE HIP)
@@ -34,6 +54,7 @@ if(ROCMOLKIT_HIP_SOURCES AND CMAKE_HIP_COMPILER AND hip_FOUND)
     # src/ becomes an include path.
     target_include_directories(rocmolkit_core PUBLIC
         $<BUILD_INTERFACE:${ROCMOLKIT_INCLUDE_DIR}>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>  # generated versions.h
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/utils>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/conformer>

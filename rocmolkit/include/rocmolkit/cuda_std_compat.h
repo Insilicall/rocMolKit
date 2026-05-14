@@ -7,15 +7,19 @@
 
 #include <span>
 #include <tuple>
+#include <array>
 #include <cstddef>
 #include <type_traits>
 #include <utility>
+#include <optional>
+#include <variant>
 
 // Make code that writes `cuda::std::span<T>` resolve to `std::span<T>`.
 namespace cuda {
 namespace std {
     using ::std::span;
     using ::std::tuple;
+    using ::std::array;
     using ::std::byte;
     using ::std::nullptr_t;
     using ::std::size_t;
@@ -23,15 +27,26 @@ namespace std {
 
     using ::std::pair;
     using ::std::make_pair;
+    using ::std::make_tuple;
     using ::std::tuple_size;
     using ::std::tuple_element;
     using ::std::tuple_element_t;
     using ::std::get;
+    using ::std::tie;
+
+    using ::std::optional;
+    using ::std::variant;
+    using ::std::nullopt;
+    using ::std::nullopt_t;
 
     using ::std::is_same;
     using ::std::is_same_v;
     using ::std::enable_if;
     using ::std::enable_if_t;
+    using ::std::remove_const;
+    using ::std::remove_const_t;
+    using ::std::remove_reference;
+    using ::std::remove_reference_t;
 
     using ::std::move;
     using ::std::forward;
