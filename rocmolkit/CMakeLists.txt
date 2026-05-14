@@ -186,11 +186,14 @@ if(ROCMOLKIT_HIP_SOURCES AND CMAKE_HIP_COMPILER AND hip_FOUND)
     endif()
 
     # rdkit_extensions/ static lib provides constructForceFieldContribs etc.
-    # Whole-archive so the static lib symbols actually land in the SHARED .so
-    # (default linker behavior would discard unreferenced static symbols).
+    # Force the linker to keep every symbol via raw --whole-archive flag.
+    # The CMake 3.24+ generator expression $<LINK_LIBRARY:WHOLE_ARCHIVE,...>
+    # is cleaner but the CI runs with CMake 3.22 (Ubuntu jammy).
     if(TARGET rocmolkit_rdkit_ext)
         target_link_libraries(rocmolkit_core PRIVATE
-            $<LINK_LIBRARY:WHOLE_ARCHIVE,rocmolkit_rdkit_ext>
+            -Wl,--whole-archive
+            rocmolkit_rdkit_ext
+            -Wl,--no-whole-archive
         )
     endif()
 
