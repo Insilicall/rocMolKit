@@ -62,8 +62,10 @@ list(FILTER ROCMOLKIT_HIP_SOURCES EXCLUDE REGEX "/(tfd|substruct)/")
 # list(FILTER ROCMOLKIT_HIP_SOURCES EXCLUDE REGEX "/bfgs_hessian\\.hip\\.cpp$")
 # ROCm 7.x hipcub gained DeviceReduce::TransformReduce - re-include bfgs_minimize.
 # list(FILTER ROCMOLKIT_HIP_SOURCES EXCLUDE REGEX "/bfgs_minimize\\.hip\\.cpp$")
-# morgan_fingerprint_kernels re-included after block_tile_memory shim.
-# list(FILTER ROCMOLKIT_HIP_SOURCES EXCLUDE REGEX "/morgan_fingerprint_kernels\\.hip\\.cpp$")
+# morgan_fingerprint_kernels: cuda::std::span deduction in templated context
+# fails even with the shim. Re-excluded along with consumers.
+list(FILTER ROCMOLKIT_HIP_SOURCES EXCLUDE REGEX "/morgan_fingerprint_kernels\\.hip\\.cpp$")
+list(FILTER ROCMOLKIT_CPP_SOURCES EXCLUDE REGEX "/morgan_fingerprint(_gpu|_common)?\\.cpp$")
 list(FILTER ROCMOLKIT_HIP_SOURCES EXCLUDE REGEX "/similarity_kernels\\.hip\\.cpp$")
 # list(FILTER ROCMOLKIT_HIP_SOURCES EXCLUDE REGEX "/symmetric_eigensolver\\.hip\\.cpp$")
 list(FILTER ROCMOLKIT_CPP_SOURCES EXCLUDE REGEX "/(tfd|substruct|testutils)/")

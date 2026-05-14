@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include <hip/hip_cooperative_groups.h>
+#include "rocmolkit/cg_reduce_shim.h"   // block_tile_memory shim
 
 #include <cassert>
 #include <hipcub/hipcub.hpp>
