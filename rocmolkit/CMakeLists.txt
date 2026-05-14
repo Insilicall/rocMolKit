@@ -59,7 +59,9 @@ list(REMOVE_ITEM ROCMOLKIT_CPP_SOURCES ${ROCMOLKIT_HIP_SOURCES})
 list(FILTER ROCMOLKIT_HIP_SOURCES EXCLUDE REGEX "/(butina|tfd)\\.hip\\.cpp$")
 list(FILTER ROCMOLKIT_HIP_SOURCES EXCLUDE REGEX "/(tfd|substruct)/")
 # bfgs_hessian re-included after providing rocmolkit/cg_reduce_shim.h.
-# list(FILTER ROCMOLKIT_HIP_SOURCES EXCLUDE REGEX "/bfgs_hessian\\.hip\\.cpp$")
+# # bfgs_hessian temporarily excluded again to bisect the v0.2.0-alpha
+# segfault. Adds back the symbol updateInverseHessianBFGSBatch via stub.
+list(FILTER ROCMOLKIT_HIP_SOURCES EXCLUDE REGEX "/bfgs_hessian\\.hip\\.cpp$")
 # ROCm 7.x hipcub gained DeviceReduce::TransformReduce - re-include bfgs_minimize.
 # list(FILTER ROCMOLKIT_HIP_SOURCES EXCLUDE REGEX "/bfgs_minimize\\.hip\\.cpp$")
 # morgan_fingerprint_kernels: cuda::std::span deduction in templated context
