@@ -46,16 +46,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 ENV PATH=/root/.local/bin:$PATH
 
-# Python tooling via uv. RDKit C++ built from source (no conda).
+# Python tooling via uv. RDKit Python wrappers come from our /opt/rdkit
+# source build (RDK_BUILD_PYTHON_WRAPPERS=ON), NOT from PyPI - that way
+# Python rdkit + our boost-python bindings share the same boost ABI.
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
     && uv pip install --system --break-system-packages --no-cache-dir \
-        cmake scikit-build-core nanobind numpy rdkit \
+        cmake scikit-build-core nanobind numpy \
         pytest pytest-benchmark
 
 COPY tools/build_rdkit.sh /tmp/build_rdkit.sh
 RUN chmod +x /tmp/build_rdkit.sh && /tmp/build_rdkit.sh Release_2024_09_6
 ENV RDKIT_ROOT=/opt/rdkit \
-    LD_LIBRARY_PATH=/usr/local/lib:/opt/rdkit/lib:/opt/rocm/lib:/opt/rocm/lib/llvm/lib
+    LD_LIBRARY_PATH=/usr/local/lib:/opt/rdkit/lib:/opt/rocm/lib:/opt/rocm/lib/llvm/lib \
+    PYTHONPATH=/opt/rdkit/lib/python3.10/site-packages:/opt/rdkit/lib/python3/site-packages
 
 # Ensure /opt/rocm symlink exists (ROCm 7.x installs as /opt/rocm-7.2.3
 # without the unversioned symlink in some distros).
