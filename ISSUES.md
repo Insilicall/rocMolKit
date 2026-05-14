@@ -220,6 +220,55 @@ write that only manifests when the heap layout is unfortunate.
 - Compile host code paths with `-fsanitize=address` (HIP kernel TUs
   cannot use ASan but boost-python wrappers can).
 
+### Bisect refinement (May 14, late evening)
+
+Reproducible thresholds on the gfx1200 host:
+
+| Scenario | Result |
+|---|---|
+| Single mol per `EmbedMolecules` call, sequential CCO/benzene/… | 1–4 calls before SIGSEGV (non-deterministic within that range) |
+| Single batch of N mols in one call, default `BatchHardwareOptions` | N≤3 succeeds, N≥4 SIGSEGV during stage 1 (First Minimization) |
+| `OMP_NUM_THREADS=1` + sequential single-mol | 7/11 calls succeed before crash (vs 2/11 with default OMP) |
+| `OMP_NUM_THREADS=1` + batch N≥4 | Still SIGSEGV |
+| `HIP_LAUNCH_BLOCKING=1` | Crash arrives sooner — bug is *not* a kernel-launch race |
+| `batchesPerGpu=1` and `preprocessingThreads=1` | Helps sequential single-mol, does not save batch N≥4 |
+| `batchSize=1` + N≥4 | Still SIGSEGV |
+| Pure C++ `AsyncDeviceVector` stress (20×1000 alloc-free) | 0 crashes (allocator pattern alone is fine) |
+| Pure C++ driver calling `nvMolKit::embedMolecules` | Reproduces SIGSEGV |
+
+Things tried this session that did **not** fix it (and were reverted):
+
+- Replacing `hipMallocAsync`/`hipFreeAsync` with synchronous
+  `hipMalloc`/`hipFree` in `AsyncDeviceVector`/`AsyncDevicePtr` —
+  regressed: 1st CCO crashed.
+- Adding `hipStreamSynchronize(streamPtr)` at the end of the
+  `embedMolecules` OpenMP dispatch parallel region (catch pending
+  pinned-buffer copies before locals destruct) — together with the
+  sync-malloc change above, only got 1–2 sequential calls instead of
+  4. Reverted.
+- Adding `hipDeviceSynchronize()` inside `PinnedHostVector::~` /
+  `resize` / `clear` — regressed further.
+- `hipMemPoolSetAttribute(pool, hipMemPoolAttrReleaseThreshold, 0)` via
+  `std::call_once` (previous session) — broke even the first call.
+- `hipMemPoolTrimTo(pool, 0)` at end of `embedMolecules` (previous
+  session) — caused crashes on previously-working molecules.
+
+The pattern (more sync makes it worse, less concurrency makes it
+better) does **not** match a classic stream-ordering race. It is
+consistent with either a HIP 7.2.3 driver bug specific to `gfx1200`,
+or with a host-side memory corruption that compounds when scheduled
+work runs concurrently with the host loop.
+
+The bug threshold is **N=4 mols in one batch** and **~4 sequential
+single-mol calls**. Below those thresholds the library is correct
+(numerical parity already verified bit-exact within ETKDG noise).
+
+Practical workaround for users until ROCm 7.3+ ships and the bug is
+re-bisectable with `rocgdb`: invoke `EmbedMolecules` from a fresh
+subprocess per (batch≤3) call.
+
+This is a known limitation of the v0.2.0-alpha release.
+
 ## Phase 1 fat removed from runtime image (cumulative)
 
 | Category | Before | After | Saving |
