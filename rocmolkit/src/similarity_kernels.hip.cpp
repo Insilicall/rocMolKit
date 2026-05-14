@@ -145,10 +145,10 @@ __device__ void crossSimilarityKernelTensorOp(const cuda::std::span<const kThrea
 
   int threadID_in_group = lane_id % 4;
 
-  const int warpid = __shfl_sync(0xffffffff, threadIdx.x / 32, 0);
+  const int warpid = __shfl_sync(0xffffffffffffffffULL, threadIdx.x / 32, 0);
 
-  int warp_id_x = __shfl_sync(0xffffffff, (threadIdx.x / 32) % NUM_WARP_X, 0);
-  int warp_id_y = __shfl_sync(0xffffffff, (threadIdx.x / 32) / NUM_WARP_X, 0);
+  int warp_id_x = __shfl_sync(0xffffffffffffffffULL, (threadIdx.x / 32) % NUM_WARP_X, 0);
+  int warp_id_y = __shfl_sync(0xffffffffffffffffULL, (threadIdx.x / 32) / NUM_WARP_X, 0);
 
   __shared__ kThreadReductionType AB_smem[2 * (BLOCK_TILE_SIZE_X + BLOCK_TILE_SIZE_Y)][BLOCK_TILE_SIZE_K + 1];
 

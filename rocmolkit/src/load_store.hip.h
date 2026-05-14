@@ -75,7 +75,7 @@ __device__ void load_gmem_to_smem_tensorop(
   T                              A_smem_tile[BLOCK_TILE_SIZE_Y][BLOCK_TILE_SIZE_K + 1],
   T                              B_smem_tile[BLOCK_TILE_SIZE_X][BLOCK_TILE_SIZE_K + 1]  // take care of bank conflict
 ) {
-  const size_t warpid = __shfl_sync(0xffffffff, threadIdx.x / 32, 0);
+  const size_t warpid = __shfl_sync(0xffffffffffffffffULL, threadIdx.x / 32, 0);
   int          lane_id;
   get_lane(lane_id);
 
@@ -333,7 +333,7 @@ __device__ void load_gmem_to_smem_simt(const cuda::std::span<const T> A,
                                        int A_smem_k_reduced[BLOCK_TILE_SIZE_Y],
                                        int B_smem_k_reduced[BLOCK_TILE_SIZE_X]) {
   // little to no effect on perf
-  const size_t warpid = __shfl_sync(0xffffffff, threadIdx.x / 32, 0);
+  const size_t warpid = __shfl_sync(0xffffffffffffffffULL, threadIdx.x / 32, 0);
   int          lane_id;
   get_lane(lane_id);
 
