@@ -116,12 +116,16 @@ ARG UBUNTU_CODENAME
 ARG GPU_TARGETS
 
 ENV DEBIAN_FRONTEND=noninteractive \
-    LD_LIBRARY_PATH=/opt/rocm/lib \
+    LD_LIBRARY_PATH=/usr/local/lib:/opt/rocm/lib:/opt/rocm/lib/llvm/lib \
     PATH=/opt/rocm/bin:$PATH \
     PYTHONUNBUFFERED=1
 
+# Boost 1.83 runtime is needed for the rocmolkit boost-python bindings —
+# Ubuntu jammy ships 1.74 which has the wrong SONAME, so the pybind .so
+# fails ImportError at runtime. Pull from the same PPA the builder used.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        ca-certificates curl gnupg \
+        ca-certificates curl gnupg software-properties-common \
+    && add-apt-repository -y ppa:mhier/libboost-latest \
     && curl -fsSL https://repo.radeon.com/rocm/rocm.gpg.key \
         | gpg --dearmor -o /etc/apt/keyrings/rocm.gpg \
     && echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/${ROCM_VERSION} ${UBUNTU_CODENAME} main" \
@@ -132,6 +136,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         python${PYTHON_VERSION} python3-pip \
         libpython${PYTHON_VERSION} libstdc++6 libgomp1 libnuma1 libelf1 \
         libdrm2 libdrm-amdgpu1 \
+        libboost1.83-all \
         hip-runtime-amd hsa-rocr comgr \
         rocblas \
         rocrand hiprand \
@@ -173,6 +178,12 @@ RUN python${PYTHON_VERSION} -m pip install --no-cache-dir 'numpy<2' rdkit-pypi \
     && find /opt/rocm -name '*.so*' -type f -exec strip --strip-unneeded {} + 2>/dev/null || true
 
 COPY --from=builder /install /usr/local
+
+# Smoke test: the bindings must import end-to-end at build time. This
+# catches missing runtime libs (libboost_python, libomp, librocmolkit_core)
+# before the image is ever pushed. No GPU is touched so it runs in CI.
+RUN python${PYTHON_VERSION} -c "from rocmolkit._embedMolecules import EmbedMolecules, BatchHardwareOptions; print('_embedMolecules import OK')" \
+    && python${PYTHON_VERSION} -c "from rocmolkit._mmffOptimization import MMFFOptimizeMoleculesConfs; print('_mmffOptimization import OK')"
 
 # Diagnóstico de tamanho — aparece no log do build para guiar próximos cortes.
 RUN echo "=== runtime image breakdown ===" \

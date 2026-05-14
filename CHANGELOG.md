@@ -2,6 +2,34 @@
 
 All notable changes to rocMolKit will be documented here.
 
+## [unreleased]
+
+### Fixed
+- **Dockerfile.slim runtime imports**: published v0.3.2-alpha-slim
+  image cannot `import rocmolkit._embedMolecules`. Two packaging gaps:
+  (1) `LD_LIBRARY_PATH` was `/opt/rocm/lib` only — missing
+  `/usr/local/lib` (where `librocmolkit_core.so` is COPY'd in) and
+  `/opt/rocm/lib/llvm/lib` (where `libomp.so` lives); (2) the runtime
+  stage installed neither `libboost1.83-all` nor any other source of
+  `libboost_python310.so.1.83.0`, so the boost-python binding failed
+  ImportError. Added the boost runtime via the same `ppa:mhier/libboost-latest`
+  the builder uses, and a build-time `python3 -c "from rocmolkit._embedMolecules
+  import ..."` smoke test that fails the build (and CI) on regression.
+
+### Changed
+- **`tools/benchmark.py` rewritten**: drops the `--n`-only mode in favour
+  of an `(N, k)` sweep that exercises both GPU parallelism axes. CPU
+  baseline now uses RDKit's multi-threaded `EmbedMultipleConfs` —
+  honest comparison on a 12-thread Ryzen — with a `numThreads=1` row
+  alongside. GPU paths always pass `BatchHardwareOptions(gpuIds=[0])`
+  to pin the discrete device. Each phase is SIGALRM-bounded so a stuck
+  GPU does not wedge the whole run.
+
+### Added
+- **`tools/validate_gpu.sh`**: single-command post-reboot validation.
+  Refuses to run if it detects the leaked-VRAM state (>200 MB held with
+  no `/dev/kfd` holders), then runs the sweep against the devel image.
+
 ## [v0.3.2-alpha] — 2026-05-14
 
 ### Fixed
