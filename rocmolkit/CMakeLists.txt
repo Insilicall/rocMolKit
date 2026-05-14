@@ -93,10 +93,33 @@ if(ROCMOLKIT_HIP_SOURCES AND CMAKE_HIP_COMPILER AND hip_FOUND)
         target_link_libraries(rocmolkit_core PUBLIC hip::hiprand)
     endif()
 
-    # RDKit: include + libs (resolved in top-level CMakeLists.txt).
+    # RDKit: modern config exports targets as RDKit::<name>. Use the
+    # canonical set nvMolKit pulls (most of GraphMol + DistGeom + ForceField).
     if(RDKit_FOUND)
         target_include_directories(rocmolkit_core PUBLIC ${RDKit_INCLUDE_DIRS})
-        target_link_libraries(rocmolkit_core PUBLIC ${RDKit_LIBRARIES})
+        # Try modern RDKit::* targets first; fall back to file-glob libs.
+        set(_rdkit_targets
+            RDKit::rdkit_base
+            RDKit::RDGeneral RDKit::DataStructs RDKit::RDGeometryLib
+            RDKit::Alignment RDKit::EigenSolvers
+            RDKit::GraphMol RDKit::SmilesParse RDKit::FileParsers
+            RDKit::SubstructMatch RDKit::ChemTransforms
+            RDKit::DistGeometry RDKit::DistGeomHelpers
+            RDKit::ForceField RDKit::ForceFieldHelpers
+            RDKit::MolAlign RDKit::MolTransforms
+            RDKit::Descriptors RDKit::Fingerprints
+            RDKit::SimDivPickers
+        )
+        foreach(_t IN LISTS _rdkit_targets)
+            if(TARGET ${_t})
+                target_link_libraries(rocmolkit_core PUBLIC ${_t})
+            endif()
+        endforeach()
+        # Belt-and-suspenders: also link the raw .so files (handles any target
+        # we forgot to enumerate).
+        if(RDKit_LIBRARIES)
+            target_link_libraries(rocmolkit_core PUBLIC ${RDKit_LIBRARIES})
+        endif()
     endif()
 
     # Eigen (header-only) for the dist-geom builders.
