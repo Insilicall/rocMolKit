@@ -64,13 +64,17 @@ jobs:
         run: |
           # CMake >= 3.22 wants Clang directly for HIP language; hipcc
           # wrapper is rejected. ROCm 6.2 ships clang at this path.
-          ROCM_CLANG=$(ls /opt/rocm-*/llvm/bin/clang++ 2>/dev/null | head -1)
-          ROCM_CLANG=${ROCM_CLANG:-/opt/rocm/llvm/bin/clang++}
+          ROCM_PATH=$(ls -d /opt/rocm-* 2>/dev/null | head -1)
+          ROCM_PATH=${ROCM_PATH:-/opt/rocm}
+          ROCM_CLANG="$ROCM_PATH/llvm/bin/clang++"
           cmake -S . -B build -GNinja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_CXX_COMPILER="$ROCM_CLANG" \
             -DCMAKE_HIP_COMPILER="$ROCM_CLANG" \
             -DCMAKE_HIP_PLATFORM=amd \
+            -DCMAKE_HIP_FLAGS="--rocm-path=$ROCM_PATH" \
+            -DCMAKE_HIP_FLAGS_INIT="--rocm-path=$ROCM_PATH" \
+            -DROCM_PATH="$ROCM_PATH" \
             -DGPU_TARGETS="gfx1200;gfx1100" \
             -DRDKit_ROOT=/opt/rdkit \
             -DROCMOLKIT_BUILD_TESTS=OFF

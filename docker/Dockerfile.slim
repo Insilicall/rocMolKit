@@ -68,8 +68,9 @@ ENV RDKIT_ROOT=/opt/rdkit
 WORKDIR /src
 COPY . /src
 
-RUN ROCM_CLANG=$(ls /opt/rocm-*/llvm/bin/clang++ 2>/dev/null | head -1) \
-    && ROCM_CLANG=${ROCM_CLANG:-/opt/rocm/llvm/bin/clang++} \
+RUN ROCM_PATH=$(ls -d /opt/rocm-* 2>/dev/null | head -1) \
+    && ROCM_PATH=${ROCM_PATH:-/opt/rocm} \
+    && ROCM_CLANG="$ROCM_PATH/llvm/bin/clang++" \
     && mkdir -p /install \
     && cmake -S . -B /build -GNinja \
         -DCMAKE_BUILD_TYPE=Release \
@@ -77,6 +78,9 @@ RUN ROCM_CLANG=$(ls /opt/rocm-*/llvm/bin/clang++ 2>/dev/null | head -1) \
         -DCMAKE_CXX_COMPILER="$ROCM_CLANG" \
         -DCMAKE_HIP_COMPILER="$ROCM_CLANG" \
         -DCMAKE_HIP_PLATFORM=amd \
+        -DCMAKE_HIP_FLAGS="--rocm-path=$ROCM_PATH" \
+        -DCMAKE_HIP_FLAGS_INIT="--rocm-path=$ROCM_PATH" \
+        -DROCM_PATH="$ROCM_PATH" \
         -DGPU_TARGETS="${GPU_TARGETS}" \
         -DRDKit_ROOT=${RDKIT_ROOT} \
         -DROCMOLKIT_BUILD_TESTS=OFF \

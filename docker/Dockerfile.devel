@@ -49,16 +49,24 @@ COPY tools/build_rdkit.sh /tmp/build_rdkit.sh
 RUN chmod +x /tmp/build_rdkit.sh && /tmp/build_rdkit.sh Release_2024_09_6
 ENV RDKIT_ROOT=/opt/rdkit
 
+# Ensure /opt/rocm symlink exists (ROCm 7.x installs as /opt/rocm-7.2.3
+# without the unversioned symlink in some distros).
+RUN if [ ! -e /opt/rocm ]; then ln -s $(ls -d /opt/rocm-* | head -1) /opt/rocm; fi
+
 # Build + install rocmolkit so `import rocmolkit` works out of the box.
 COPY . /src
-RUN ROCM_CLANG=$(ls /opt/rocm-*/llvm/bin/clang++ 2>/dev/null | head -1) \
+RUN ROCM_PATH=$(ls -d /opt/rocm-* | head -1) \
+    && ROCM_CLANG="$ROCM_PATH/llvm/bin/clang++" \
     && cmake -S /src -B /tmp/build -GNinja \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_CXX_COMPILER="$ROCM_CLANG" \
         -DCMAKE_HIP_COMPILER="$ROCM_CLANG" \
         -DCMAKE_HIP_PLATFORM=amd \
+        -DCMAKE_HIP_FLAGS="--rocm-path=$ROCM_PATH" \
+        -DCMAKE_HIP_FLAGS_INIT="--rocm-path=$ROCM_PATH" \
         -DGPU_TARGETS="gfx1200;gfx1100;gfx90a;gfx942" \
         -DRDKit_ROOT=/opt/rdkit \
+        -DROCM_PATH="$ROCM_PATH" \
         -DROCMOLKIT_BUILD_PYTHON_BINDINGS=ON \
     && cmake --build /tmp/build --parallel \
     && cmake --install /tmp/build \
