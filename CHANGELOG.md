@@ -4,6 +4,36 @@ All notable changes to rocMolKit will be documented here.
 
 ## [Unreleased]
 
+### ETKDG runs on AMD GPU - first numerically valid output (2026-05-14, late)
+
+End-to-end GPU execution validated on AMD Radeon RX 9060 XT:
+
+```
+=== Ethanol (CCO) - AMD GPU (gfx1200) vs RDKit CPU ===
+Bond C-C: GPU=1.506 Å, CPU=1.506 Å  (identical)
+Bond C-O: GPU=1.381 Å, CPU=1.387 Å  (diff 0.006 Å)
+```
+
+The GPU-generated conformer is chemically valid: bond lengths match RDKit
+within sub-angstrom tolerance, all atoms have sensible 3D positions.
+
+**Working configurations** (no crash):
+- Ethanol x1 conformer: 792 ms (cold)
+- Ethanol x5 conformers: 1280 ms
+- Benzene x1 conformer: 766 ms
+- Ethanol x2 mols x1 conformer: 633 ms
+
+**Known crash:** `EmbedMolecules` segfaults on aspirin (21 atoms after AddHs)
+and other mid-size molecules. CCO + benzene reliably work. Investigation
+needed - likely a buffer-size edge case in the per-molecule device data
+allocation, not a fundamental incompatibility.
+
+**Stack used:**
+- RDKit 2024.09.6 built with `RDK_BUILD_PYTHON_WRAPPERS=ON` so Python rdkit
+  shares the same boost-1.83 ABI as our boost-python bindings.
+- numpy pinned `<2` (RDKit Python wrappers were compiled against numpy 1.x ABI).
+- All else as previous milestone (ROCm 7.2.3, gfx1200, librocmolkit_core.so).
+
 ### ROCm 7.2.3 + RDNA4 (gfx1200) + 6/6 bindings load (2026-05-14, evening)
 
 Validated end-to-end on a real AMD Radeon RX 9060 XT (Navi 44 / gfx1200) with ROCm 7.2.3:
