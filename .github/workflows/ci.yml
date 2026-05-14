@@ -196,8 +196,15 @@ jobs:
         # doubles in size per arch. The CI budget is per-arch; users who
         # need multi-arch slim build it themselves with
         # GPU_TARGETS="gfx1100;gfx1200".
+        #
+        # --platform linux/amd64 + --load: docker/setup-buildx-action defaults
+        # to multi-platform builds (amd64 + arm64), which roughly triples the
+        # measured image size. We only target amd64, so pin it explicitly.
         run: |
-          docker build -f docker/Dockerfile.slim -t rocmolkit:slim \
+          docker buildx build \
+            --platform linux/amd64 \
+            --load \
+            -f docker/Dockerfile.slim -t rocmolkit:slim \
             --build-arg GPU_TARGETS="gfx1100" .
 
       - name: Check size budget (< 2.5 GB)

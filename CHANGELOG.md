@@ -2,6 +2,38 @@
 
 All notable changes to rocMolKit will be documented here.
 
+## [v0.3.1-alpha] — 2026-05-14
+
+### Fixed
+- **Slim image was unusable on v0.3.0-alpha**: `import rocmolkit`
+  failed in the published `ghcr.io/insilicall/rocmolkit:slim` because
+  the Python package and all `.so` bindings were going to
+  `${Python_SITELIB}` (absolute path) in the discarded builder stage
+  instead of into `/install` for the COPY into the runtime stage. The
+  install destination is now configurable via
+  `ROCMOLKIT_PYTHON_INSTALL_DIR`, and `Dockerfile.slim` sets it to a
+  path under `CMAKE_INSTALL_PREFIX` so the artefacts actually ride
+  the COPY into `/usr/local/lib/python3.10/dist-packages/rocmolkit`.
+- `Dockerfile.slim` pins `numpy<2` (rdkit-pypi was compiled against
+  numpy 1.x ABI; under 2.x every rdkit import emits a loud
+  "_ARRAY_API not found" warning).
+- CI `python-bindings-probe` was on `rocm/dev-ubuntu-22.04:6.2`, but
+  `bfgs_minimize.hip.cpp` uses `hipcub::DeviceReduce::TransformReduce`
+  which only exists in ROCm 7.x. Bumped to 7.2.3 so the job actually
+  exercises the same toolchain everything else uses.
+- CI `docker-slim-size` budget gate now uses
+  `docker buildx build --platform linux/amd64 --load`. The
+  `setup-buildx-action` default produces a manifest list (amd64 +
+  arm64), tripling the reported image size and breaking the per-arch
+  2.5 GB budget gate.
+- `docker-publish` slim image now also includes `gfx1200` so RX
+  9060/9070 owners can actually run the published artefact.
+
+### Verified
+- Slim image at 2018 MB, `import rocmolkit` clean,
+  `rocmolkit.safe.{embed,mmff_optimize,uff_optimize}_molecule` all
+  importable from a fresh `docker run`.
+
 ## [v0.3.0-alpha] — 2026-05-14
 
 ### Added
