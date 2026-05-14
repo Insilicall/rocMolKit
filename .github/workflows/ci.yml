@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [main]
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-cpu-smoke:
     # CI público sem GPU AMD: roda hipify + cmake configure (compile pode falhar sem GPU).
@@ -48,11 +52,12 @@ jobs:
       - name: Build devel
         run: docker build -f docker/Dockerfile.devel -t rocmolkit:devel .
 
-      - name: Smoke import + collect tests
+      - name: Smoke import + pytest (no GPU)
         run: |
-          docker run --rm rocmolkit:devel bash -c '
+          docker run --rm -v ${{ github.workspace }}:/workspace -w /workspace rocmolkit:devel bash -c '
             python3 -c "import rocmolkit; print(\"version:\", rocmolkit.__version__)"
-            cd /workspace 2>/dev/null || true
+            python3 -m pip install pytest --quiet
+            python3 -m pytest tests/ -v -m "not gpu"
           '
 
   docker-slim-size:
