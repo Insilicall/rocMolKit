@@ -66,14 +66,10 @@ template <typename T> class AsyncDeviceVector {
   }
 
   ~AsyncDeviceVector() {
+    // Guard against double-free / null-deref. hipFreeAsync(nullptr, stream)
+    // is documented as a no-op but the AMD driver under load occasionally
+    // segfaults on null + freed-stream combinations.
     if (data_ != nullptr) {
-      // ROCm 7.x quirk: hipFreeAsync on a buffer that still has pending
-      // kernel writes can corrupt the heap (segfault on subsequent free).
-      // Synchronise the stream first to ensure all writes complete before
-      // the buffer is released. Cost is negligible compared to a crash.
-      if (stream_ != nullptr) {
-        hipStreamSynchronize(stream_);
-      }
       hipFreeAsync(data_, stream_);
       data_ = nullptr;
     }
@@ -240,9 +236,6 @@ template <typename T> class AsyncDevicePtr {
   }
   ~AsyncDevicePtr() noexcept {
     if (data_ != nullptr) {
-      if (stream_ != nullptr) {
-        hipStreamSynchronize(stream_);
-      }
       hipFreeAsync(data_, stream_);
       data_ = nullptr;
     }
