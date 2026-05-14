@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include <hipcub/device/device_reduce.hpp>
+#include <hipcub/warp/warp_reduce.hpp>
 
 #include "etkdg_impl.h"
 

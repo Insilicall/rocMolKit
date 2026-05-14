@@ -38,6 +38,42 @@ inline void cudaGraphSetConditional(cudaGraphConditionalHandle, int) {
 #define NVMOLKIT_CUDA_CC_120 0
 #endif
 
+// Warp primitives that hipify-perl missed:
+// __shfl_sync(mask, val, src) — NVIDIA only. HIP has __shfl(val, src) without
+//   the mask (AMD warps execute uniformly within wavefront, mask is implicit).
+// __syncwarp() — NVIDIA primitive. AMD wavefront is implicitly synchronized,
+//   but HIP exposes __builtin_amdgcn_wave_barrier() for explicit fences.
+// Both are __device__ functions, only meaningful inside kernels.
+#if defined(__HIP_DEVICE_COMPILE__) || defined(__HIP_PLATFORM_AMD__)
+    #ifndef __shfl_sync
+        #define __shfl_sync(mask, val, src) __shfl((val), (src))
+    #endif
+    #ifndef __shfl_down_sync
+        #define __shfl_down_sync(mask, val, delta) __shfl_down((val), (delta))
+    #endif
+    #ifndef __shfl_up_sync
+        #define __shfl_up_sync(mask, val, delta) __shfl_up((val), (delta))
+    #endif
+    #ifndef __shfl_xor_sync
+        #define __shfl_xor_sync(mask, val, lane_mask) __shfl_xor((val), (lane_mask))
+    #endif
+    #ifndef __syncwarp
+        #define __syncwarp(...) __builtin_amdgcn_wave_barrier()
+    #endif
+    #ifndef __ballot_sync
+        #define __ballot_sync(mask, predicate) __ballot((predicate))
+    #endif
+    #ifndef __any_sync
+        #define __any_sync(mask, predicate) __any((predicate))
+    #endif
+    #ifndef __all_sync
+        #define __all_sync(mask, predicate) __all((predicate))
+    #endif
+    #ifndef __activemask
+        #define __activemask() ((unsigned)-1)  // AMD wavefront is uniformly active
+    #endif
+#endif
+
 // Memory carveout symbol — hipify-perl não trata em todos os casos.
 // Aliases para o símbolo HIP equivalente.
 #ifndef cudaSharedmemCarveoutMaxShared

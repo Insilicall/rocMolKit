@@ -49,6 +49,10 @@ if(ROCMOLKIT_HIP_SOURCES AND CMAKE_HIP_COMPILER AND hip_FOUND)
     # aliases are available without editing each upstream source.
     target_compile_options(rocmolkit_core PRIVATE
         -include "${ROCMOLKIT_INCLUDE_DIR}/rocmolkit/hip_compat.h"
+        # Boost MPL on Ubuntu jammy (1.74) uses constexpr conversions that
+        # clang 17+ flags as errors. Suppress just this category.
+        -Wno-enum-constexpr-conversion
+        -Wno-deprecated-declarations
     )
 
     target_link_libraries(rocmolkit_core PUBLIC hip::host hip::device)
