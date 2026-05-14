@@ -165,6 +165,29 @@ Pure-C++ driver `tests/repro/embed_pure_cpp.cpp` with explicit
   crash is during initialization / first iteration, not during
   multi-iteration convergence.
 
+### **ROOT CAUSE LOCALIZED (May 14, evening)**
+
+Instrumentation in `etkdg.cpp` proved the crash is **not** during ETKDG
+stages and **not** during BfgsBatchMinimizer setup. Crash happens
+**between invocations** — `EmbedMolecules` works for the first 3-4 calls
+and then segfaults on the 4th/5th, even with identical small molecules
+(CCO, benzene). Sequence of working invocations followed by silent
+crash is reproducible.
+
+This is **state leak between invocations**: some GPU resource (stream,
+allocator pool, BFGS buffer, ETKDG context cache) is not fully released
+between `EmbedMolecules` calls and accumulates until the heap or driver
+runs out / corrupts.
+
+Suspects:
+- `ScopedStream` destructor not synchronising before `hipStreamDestroy`
+- `BfgsBatchMinimizer` destructor leaking device memory
+- Static / OMP-thread-local caches in `nvMolKit::DGeomHelpers::prepareEmbedderArgs`
+- `hipMallocAsync` memory pool growing without bound
+
+Single-call use works fine. The crash signature is non-deterministic
+because the leaked state's exact shape varies by what came before.
+
 Next step blocker: **rocgdb 7.2.3 does not yet support gfx1200**
 ("AMDGCN architecture 0x45 is not supported"). Without device
 debugger we cannot capture the kernel that faults. Either need to:
