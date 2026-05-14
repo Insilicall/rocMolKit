@@ -97,8 +97,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libpython${PYTHON_VERSION} libstdc++6 libgomp1 libnuma1 libelf1 \
         libdrm2 libdrm-amdgpu1 \
         hip-runtime-amd hsa-rocr comgr \
-        rocblas hipblas \
+        rocblas \
         rocrand hiprand \
+    # Drop transitive heavy deps not used in Phase 1-5: rocsolver (1.7 GB),
+    # rocsparse (1.4 GB), hipsolver/hipsparse. ETKDG/MMFF do not call them.
+    # Use --auto-remove cautiously — explicit purge only.
+    && apt-get purge -y --auto-remove \
+        rocsolver rocsparse hipsolver hipsparse 2>/dev/null || true \
     && apt-get purge -y curl gnupg \
     && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/* \
@@ -109,13 +114,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
               /opt/rocm/llvm/bin /opt/rocm/llvm/libexec \
               /opt/rocm/include /opt/rocm/bin/clang* \
               /opt/rocm/lib/cmake \
-    # Tensile kernels: keep only the gfx target we actually build for.
-    # Saves ~2-3 GB. The build arg GPU_TARGETS may have multiple; keep all listed.
-    && KEEP_PATTERN="$(echo "${GPU_TARGETS}" | sed 's/;/\\|/g')" \
-    && find /opt/rocm/lib/rocblas/library -type f \
-        \( -name '*.hsaco' -o -name 'TensileLibrary_*.dat' \) \
-        | grep -v -E "_(${KEEP_PATTERN})\." \
-        | xargs -r rm -f \
+              /opt/rocm/lib/librocsolver* /opt/rocm/lib/librocsparse* \
+              /opt/rocm/lib/libhipsolver* /opt/rocm/lib/libhipsparse* \
+    # Tensile kernels: ROCm 6.2 layout uses
+    #   /opt/rocm/lib/rocblas/library/Kernels.so-NNN-gfx*.hsaco
+    #   /opt/rocm/lib/rocblas/library/TensileLibrary_*_gfx*.[dat|co]
+    # Keep ONLY files that match one of the GPU_TARGETS arches. List first to
+    # confirm pattern, then delete.
+    && KEEP_PATTERN="$(echo "${GPU_TARGETS}" | sed 's/;/|/g')" \
+    && echo "=== Tensile files BEFORE filter (sample) ===" \
+    && ls /opt/rocm/lib/rocblas/library/ 2>/dev/null | head -10 \
+    && echo "=== KEEP arches: ${KEEP_PATTERN} ===" \
+    && find /opt/rocm/lib/rocblas/library -maxdepth 1 -type f \
+        ! -regex ".*\(${KEEP_PATTERN}\).*" \
+        -delete 2>/dev/null || true \
+    && echo "=== Tensile files AFTER filter ===" \
+    && du -sh /opt/rocm/lib/rocblas/ \
     && find / -type d -name '__pycache__' -exec rm -rf {} + 2>/dev/null || true
 
 RUN python${PYTHON_VERSION} -m pip install --no-cache-dir numpy rdkit-pypi \
