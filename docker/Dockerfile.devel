@@ -31,6 +31,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libfreetype6-dev \
         clang-tidy clang-format \
         hipcc hip-dev hip-runtime-amd hipify-clang \
+        rocm-device-libs rocm-llvm \
         rocblas-dev hipblas-dev \
         rocrand-dev hiprand-dev \
         rocsolver-dev hipsolver-dev \
