@@ -92,7 +92,14 @@ RUN ROCM_PATH=$(ls -d /opt/rocm-* 2>/dev/null | head -1) \
         -DROCM_PATH="$ROCM_PATH" \
         -DGPU_TARGETS="${GPU_TARGETS}" \
         -DRDKit_ROOT=${RDKIT_ROOT} \
+        -DROCMOLKIT_BUILD_PYTHON_BINDINGS=ON \
         -DROCMOLKIT_BUILD_TESTS=OFF \
+        # Force Python install destination INTO the install tree so that
+        # COPY --from=builder /install actually carries the .py files and
+        # boost-python .so bindings into the runtime image. Without this
+        # override the rules use Python_SITELIB (absolute /usr/lib/...)
+        # which lives in the discarded builder, not in /install.
+        -DROCMOLKIT_PYTHON_INSTALL_DIR=/install/lib/python${PYTHON_VERSION}/dist-packages/rocmolkit \
     && cmake --build /build --parallel \
     && cmake --install /build \
     && find /install -name '*.so*' -type f -exec strip --strip-unneeded {} + 2>/dev/null || true \
@@ -161,7 +168,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && du -sh /opt/rocm/lib/rocblas/ \
     && find / -type d -name '__pycache__' -exec rm -rf {} + 2>/dev/null || true
 
-RUN python${PYTHON_VERSION} -m pip install --no-cache-dir numpy rdkit-pypi \
+RUN python${PYTHON_VERSION} -m pip install --no-cache-dir 'numpy<2' rdkit-pypi \
     && find / -type d -name '__pycache__' -exec rm -rf {} + 2>/dev/null || true \
     && find /opt/rocm -name '*.so*' -type f -exec strip --strip-unneeded {} + 2>/dev/null || true
 

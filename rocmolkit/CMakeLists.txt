@@ -233,9 +233,20 @@ install(DIRECTORY ${ROCMOLKIT_INCLUDE_DIR}/
 # `import rocmolkit` works after `cmake --install`. The compiled bindings
 # (_embedMolecules.so etc.) install themselves via nvmolkit/CMakeLists.txt
 # into the same destination.
+#
+# ROCMOLKIT_PYTHON_INSTALL_DIR overrides the destination. Default is the
+# build-time Python's site-packages — works for in-place installs (devel
+# image, local cmake --install). For multi-stage Docker builds where the
+# install tree is COPY'd into a different runtime image, pass an explicit
+# path under CMAKE_INSTALL_PREFIX so the artefacts actually end up in the
+# install tree (Python_SITELIB is absolute and ignores CMAKE_INSTALL_PREFIX).
 find_package(Python COMPONENTS Interpreter REQUIRED)
+if(NOT DEFINED ROCMOLKIT_PYTHON_INSTALL_DIR)
+    set(ROCMOLKIT_PYTHON_INSTALL_DIR "${Python_SITELIB}/rocmolkit"
+        CACHE PATH "Where to install the rocmolkit Python package and its compiled .so bindings.")
+endif()
 install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/"
-        DESTINATION "${Python_SITELIB}/rocmolkit"
+        DESTINATION "${ROCMOLKIT_PYTHON_INSTALL_DIR}"
         FILES_MATCHING
             PATTERN "*.py"
             PATTERN "src" EXCLUDE

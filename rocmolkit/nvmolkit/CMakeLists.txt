@@ -67,6 +67,6 @@ foreach(_binding IN LISTS ROCMOLKIT_PHASE2_BINDINGS)
         CXX_STANDARD 20
     )
     install(TARGETS ${_module}
-        LIBRARY DESTINATION ${Python_SITELIB}/rocmolkit
+        LIBRARY DESTINATION ${ROCMOLKIT_PYTHON_INSTALL_DIR}
     )
 endforeach()
