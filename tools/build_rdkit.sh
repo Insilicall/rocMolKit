@@ -17,6 +17,10 @@ RDKIT_VERSION="${1:-Release_2024_09_6}"
 PREFIX="${RDKIT_PREFIX:-/opt/rdkit}"
 JOBS="${JOBS:-$(nproc)}"
 SRC="${RDKIT_SRC:-/tmp/rdkit-src}"
+# Python wrappers: ON by default (devel image needs them so that RDKit
+# Python and our boost-python bindings share boost ABI). Slim runtime
+# can build without them since it uses rdkit-pypi at runtime.
+WITH_PYTHON="${RDKIT_BUILD_PYTHON:-ON}"
 
 echo "=== Building RDKit ${RDKIT_VERSION} (jobs=${JOBS}, prefix=${PREFIX}) ==="
 
@@ -35,7 +39,7 @@ cmake .. -GNinja \
     -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
     -DRDK_INSTALL_INTREE=OFF \
     -DRDK_INSTALL_STATIC_LIBS=OFF \
-    -DRDK_BUILD_PYTHON_WRAPPERS=ON \
+    -DRDK_BUILD_PYTHON_WRAPPERS=${WITH_PYTHON} \
     -DRDK_INSTALL_PYTHON_TESTS=OFF \
     -DRDK_BUILD_CPP_TESTS=OFF \
     -DRDK_BUILD_LONG_RUNNING_TESTS=OFF \

@@ -66,8 +66,9 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
 # librdkit-dev is 5 years old (2021.09). This is in the BUILDER stage only,
 # so the .so artifacts copy out but the toolchain (~3 GB of git/cmake/boost)
 # is discarded with the stage.
+# Skip Python wrappers in slim - the runtime uses rdkit-pypi via uv.
 COPY tools/build_rdkit.sh /tmp/build_rdkit.sh
-RUN chmod +x /tmp/build_rdkit.sh && /tmp/build_rdkit.sh Release_2024_09_6
+RUN chmod +x /tmp/build_rdkit.sh && RDKIT_BUILD_PYTHON=OFF /tmp/build_rdkit.sh Release_2024_09_6
 ENV RDKIT_ROOT=/opt/rdkit
 
 WORKDIR /src
