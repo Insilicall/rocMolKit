@@ -77,6 +77,7 @@ FROM ubuntu:22.04 AS runtime
 ARG ROCM_VERSION
 ARG PYTHON_VERSION
 ARG UBUNTU_CODENAME
+ARG GPU_TARGETS
 
 ENV DEBIAN_FRONTEND=noninteractive \
     LD_LIBRARY_PATH=/opt/rocm/lib \
@@ -95,7 +96,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         python${PYTHON_VERSION} python3-pip \
         libpython${PYTHON_VERSION} libstdc++6 libgomp1 libnuma1 libelf1 \
         libdrm2 libdrm-amdgpu1 \
-        rocm-hip-runtime \
+        hip-runtime-amd hsa-rocr comgr \
         rocblas hipblas \
         rocrand hiprand \
     && apt-get purge -y curl gnupg \
@@ -103,9 +104,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
               /var/cache/apt/* \
               /usr/share/doc /usr/share/man /usr/share/locale \
-              /opt/rocm/share/doc /opt/rocm/share/man \
-              /opt/rocm/llvm/share /opt/rocm/llvm/lib/clang/*/share \
-              /opt/rocm/include
+              /opt/rocm/share \
+              /opt/rocm/llvm/share /opt/rocm/llvm/include /opt/rocm/llvm/lib/clang/*/share \
+              /opt/rocm/llvm/bin /opt/rocm/llvm/libexec \
+              /opt/rocm/include /opt/rocm/bin/clang* \
+              /opt/rocm/lib/cmake \
+    # Tensile kernels: keep only the gfx target we actually build for.
+    # Saves ~2-3 GB. The build arg GPU_TARGETS may have multiple; keep all listed.
+    && KEEP_PATTERN="$(echo "${GPU_TARGETS}" | sed 's/;/\\|/g')" \
+    && find /opt/rocm/lib/rocblas/library -type f \
+        \( -name '*.hsaco' -o -name 'TensileLibrary_*.dat' \) \
+        | grep -v -E "_(${KEEP_PATTERN})\." \
+        | xargs -r rm -f \
+    && find / -type d -name '__pycache__' -exec rm -rf {} + 2>/dev/null || true
 
 RUN python${PYTHON_VERSION} -m pip install --no-cache-dir numpy rdkit-pypi \
     && find / -type d -name '__pycache__' -exec rm -rf {} + 2>/dev/null || true \
