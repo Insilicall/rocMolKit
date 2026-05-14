@@ -39,12 +39,16 @@ inline void cudaGraphSetConditional(cudaGraphConditionalHandle, int) {
 #endif
 
 // Warp primitives that hipify-perl missed:
-// __shfl_sync(mask, val, src) — NVIDIA only. HIP has __shfl(val, src) without
-//   the mask (AMD warps execute uniformly within wavefront, mask is implicit).
-// __syncwarp() — NVIDIA primitive. AMD wavefront is implicitly synchronized,
-//   but HIP exposes __builtin_amdgcn_wave_barrier() for explicit fences.
-// Both are __device__ functions, only meaningful inside kernels.
-#if defined(__HIP_DEVICE_COMPILE__) || defined(__HIP_PLATFORM_AMD__)
+// __shfl_sync(mask, val, src), __syncwarp(), __ballot_sync(), etc.
+//
+// ROCm 7.x provides these as proper functions in
+// /opt/rocm-*/include/hip/amd_detail/amd_hip_bf16.h and friends, so our
+// macro definitions would clash and cause "redefinition as different kind
+// of symbol" errors.
+//
+// We only define the shims when running against ROCm 6.x (HIP_VERSION_MAJOR < 7).
+// hip_runtime.h sets HIP_VERSION_MAJOR.
+#if defined(__HIP_PLATFORM_AMD__) && defined(HIP_VERSION_MAJOR) && (HIP_VERSION_MAJOR < 7)
     #ifndef __shfl_sync
         #define __shfl_sync(mask, val, src) __shfl((val), (src))
     #endif
