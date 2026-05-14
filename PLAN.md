@@ -104,8 +104,8 @@ A oficial usa `rocm/dev-ubuntu-22.04` (~10–15 GB) como runtime. Isso é desnec
 
 | # | Fase | Entregável | Critério de aceitação | Estimativa |
 |---|---|---|---|---|
-| 0 | **Scaffold** | repo + LICENSE/NOTICE + CI esqueleto + Dockerfile multi-stage | `docker build` passa, imagem < orçamento | 1–2 dias **(✅ feito; imagem ~2-3 GB realista)** |
-| 1 | **Hipify mecânico + build core** | todos `.cu` → `.hip.cpp`, CMake compila a lib HIP | `cmake --build rocmolkit_core` sem erros | 3–7 dias **(mecânica ✅; iterando ajustes manuais — `.cuh` includes, `cuda::std::span` shim, `NVMOLKIT_CUDA_CC_*` macros, librdkit-dev no apt)** |
+| 0 | **Scaffold** | repo + LICENSE/NOTICE + CI esqueleto + Dockerfile multi-stage | `docker build` passa, imagem < orçamento | 1–2 dias **(✅ feito; imagem 2.04 GB)** |
+| 1 | **Hipify mecânico + build core** | todos `.cu` → `.hip.cpp`, CMake compila a lib HIP | `cmake --build rocmolkit_core` sem erros | 3–7 dias **(✅ DONE — 45/45 obj compilados, 8 arquivos excluídos para Phase 4-7 reescrita)** |
 | 2 | **ETKDG funcional** | `EmbedMolecules` retorna conformers válidos | paridade com RDKit em SPICE-100 (RMSD < 0.1 Å vs nvMolKit) | 2–3 sem |
 | 3 | **MMFF94 funcional** | `MMFFOptimizeMoleculesConfs` converge | energia final dentro de 1e-3 kcal/mol vs RDKit | 2–3 sem |
 | 4 | **Tuning AMD** | benchmark vs RDKit CPU em RX 7900 XTX e/ou MI210 | ≥ 5× speedup em batch ≥ 100 mols | contínuo |

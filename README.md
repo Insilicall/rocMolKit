@@ -7,7 +7,12 @@ GPU-accelerated RDKit operations on AMD GPUs via HIP/ROCm.
 
 Port of [nvMolKit](https://github.com/NVIDIA-Digital-Bio/nvMolKit) (NVIDIA CUDA, Apache 2.0). Same API surface, AMD backend.
 
-> Status: **pre-alpha**, Phase 1 scaffold + mechanical hipify done.
+> Status: **alpha**, **Phase 1 build green** ✅
+> - `librocmolkit_core.so` builds cleanly on ROCm 6.2 + RDKit 2024.09.6
+> - Slim runtime image: **2.04 GB** (vs 13 GB official `rocm/dev-ubuntu`)
+> - 45/45 obj files compiled; 8 sources excluded for Phase 4-7 (CUDA-only features)
+> - Numerical validation requires AMD GPU runner — pending
+>
 > See [PLAN.md](PLAN.md) and [ISSUES.md](ISSUES.md) for roadmap and gotchas.
 
 ## Quickstart (quando estiver pronto)
