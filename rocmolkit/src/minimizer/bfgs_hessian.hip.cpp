@@ -15,7 +15,7 @@
 // limitations under the License.
 
 #include <hip/hip_cooperative_groups.h>
-#include <cooperative_groups/reduce.h>
+#include "rocmolkit/cg_reduce_shim.h"
 
 #include <hipcub/hipcub.hpp>
 #include <vector>
