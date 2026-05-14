@@ -104,25 +104,6 @@ std::optional<DeviceCoordResult> embedMolecules(const std::vector<RDKit::ROMol*>
   auto dbg = [](const char* m) { std::fprintf(stderr, "[setup] %s\n", m); std::fflush(stderr); };
   if (_dbg) dbg("entered embedMolecules");
 
-  // ROCm 7.x hipMallocAsync's default pool keeps allocations cached up to
-  // a high-watermark threshold across calls, causing accumulating heap
-  // pressure that segfaults on the 4th-5th invocation. Force the release
-  // threshold to 0 once per process so the pool returns memory eagerly.
-  {
-    static std::once_flag pool_attr_flag;
-    std::call_once(pool_attr_flag, []() {
-      int nDev = 0;
-      hipGetDeviceCount(&nDev);
-      uint64_t threshold = 0;
-      for (int i = 0; i < nDev; ++i) {
-        hipMemPool_t pool = nullptr;
-        if (hipDeviceGetDefaultMemPool(&pool, i) == hipSuccess && pool != nullptr) {
-          hipMemPoolSetAttribute(pool, hipMemPoolAttrReleaseThreshold, &threshold);
-        }
-      }
-    });
-  }
-
   if (!params.useRandomCoords) {
     throw std::runtime_error("ETKDG requires useRandomCoords to be true. Please set it in the EmbedParameters.");
   }
