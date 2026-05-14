@@ -11,6 +11,19 @@
 
 namespace cooperative_groups {
 
+// NVIDIA's block_tile_memory<N> is an opaque shared-memory allocation type
+// used by this_thread_block(shared) to size dynamic tile partitions.
+// AMD HIP cooperative_groups does tile partitioning without the extra
+// allocation, so block_tile_memory<N> can be an empty type and the
+// this_thread_block(shared) overload can simply ignore its argument.
+template <unsigned int N>
+struct block_tile_memory { /* empty */ };
+
+template <unsigned int N>
+__device__ thread_block this_thread_block(block_tile_memory<N>& /*shared*/) {
+    return this_thread_block();
+}
+
 template <typename T>
 struct plus {
     __host__ __device__ T operator()(const T& a, const T& b) const { return a + b; }
