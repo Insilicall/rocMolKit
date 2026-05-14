@@ -26,6 +26,7 @@ jobs:
           apt-get install -y --no-install-recommends \
             cmake ninja-build python3-dev python3-pip \
             libboost-python-dev libeigen3-dev \
+            librdkit-dev rdkit-data \
             hipblas-dev hiprand-dev rocblas-dev rocrand-dev \
             hipcub-dev rocprim-dev rocthrust-dev || true
           pip install scikit-build-core nanobind numpy
@@ -37,8 +38,11 @@ jobs:
             -DGPU_TARGETS="gfx1100" \
             -DROCMOLKIT_BUILD_TESTS=OFF
 
-      - name: CMake build (only what compiles without GPU)
-        run: cmake --build build --target rocmolkit_core || true
+      - name: CMake build rocmolkit_core
+        # No more `|| true` - we want real failures to surface. The Docker
+        # builder uses the same toolchain so any compile error here will also
+        # block the slim image.
+        run: cmake --build build --target rocmolkit_core
 
   docker-devel-smoke:
     # Build do Dockerfile.devel + smoke import (sem GPU, só valida que tudo se

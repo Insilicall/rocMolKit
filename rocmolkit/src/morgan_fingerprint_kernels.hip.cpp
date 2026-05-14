@@ -18,8 +18,7 @@
 
 #include <cassert>
 #include <hipcub/hipcub.hpp>
-#include <cuda/std/span>
-#include <cuda/std/tuple>
+#include "rocmolkit/cuda_std_compat.h"
 namespace cg = cooperative_groups;
 
 #include "cuda_error_check.h"

@@ -17,7 +17,7 @@
 #include <climits>
 #include <cmath>
 #include <hipcub/hipcub.hpp>
-#include <cuda/std/span>
+#include "rocmolkit/cuda_std_compat.h"
 
 #include "conformer_rmsd.h"
 #include "cuda_error_check.h"

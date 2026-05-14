@@ -18,7 +18,7 @@
 
 #include <DataStructs/ExplicitBitVect.h>
 
-#include <cuda/std/span>
+#include "rocmolkit/cuda_std_compat.h"
 #include <optional>
 
 #include "device_vector.h"

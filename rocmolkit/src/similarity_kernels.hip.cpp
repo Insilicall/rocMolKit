@@ -15,7 +15,7 @@
 // limitations under the License.
 
 #include <hipcub/hipcub.hpp>
-#include <cuda/std/span>
+#include "rocmolkit/cuda_std_compat.h"
 
 #include "device_vector.h"
 #include "load_store.cuh"

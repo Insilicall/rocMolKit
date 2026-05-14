@@ -20,7 +20,7 @@
 #include <hip/hip_runtime.h>
 
 #include <cstdio>
-#include <cuda/std/span>
+#include "rocmolkit/cuda_std_compat.h"
 #include <stdexcept>
 #include <vector>
 
