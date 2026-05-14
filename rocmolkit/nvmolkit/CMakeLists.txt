@@ -49,10 +49,16 @@ foreach(_binding IN LISTS ROCMOLKIT_PHASE2_BINDINGS)
             Boost::python
             Python::Module
     )
+    target_compile_options(${_module} PRIVATE
+        -include "${ROCMOLKIT_INCLUDE_DIR}/rocmolkit/hip_compat.h"
+        -Wno-enum-constexpr-conversion
+        -Wno-deprecated-declarations
+    )
     set_target_properties(${_module} PROPERTIES
         POSITION_INDEPENDENT_CODE ON
         PREFIX ""
         SUFFIX ".so"
+        CXX_STANDARD 20
     )
     install(TARGETS ${_module}
         LIBRARY DESTINATION ${Python_SITELIB}/rocmolkit
