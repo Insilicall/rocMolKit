@@ -153,6 +153,27 @@ Suspect call sites (need bisect down further):
   (newly re-enabled) — these were excluded under ROCm 6.2 and are the
   most recent additions. Strong candidates.
 
+### Bisect refinement (May 14)
+
+Pure-C++ driver `tests/repro/embed_pure_cpp.cpp` with explicit
+`maxIterations` argument:
+
+- `maxIterations=0` → throws "All parameters must be greater than 0"
+  (parameter validation rejects 0). Not useful as a bisect knob.
+- `maxIterations=1` → crashes during the first `embedMolecules` call,
+  **before any printable progress past "embed(maxIter=1)..."**. So the
+  crash is during initialization / first iteration, not during
+  multi-iteration convergence.
+
+Next step blocker: **rocgdb 7.2.3 does not yet support gfx1200**
+("AMDGCN architecture 0x45 is not supported"). Without device
+debugger we cannot capture the kernel that faults. Either need to:
+
+- Wait for ROCm release that adds gfx1200 to rocgdb.
+- Test on a gfx1100 GPU (RX 7900 XTX/XT) where rocgdb works.
+- Add manual `hipDeviceSynchronize() + hipGetLastError()` checks after
+  every kernel launch in `etkdg_impl.cpp` to find the failing one.
+
 ### Hypothesis
 
 Something between RDKit 2024.09.6 Python wrappers, our boost-python
