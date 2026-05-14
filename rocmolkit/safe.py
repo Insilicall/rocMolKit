@@ -151,3 +151,112 @@ def embed_molecules(
     for m in mols:
         embed_molecule(m, seed=seed, max_retries=max_retries, timeout=timeout)
     return mols
+
+
+_MMFF_WORKER = """
+import sys, json
+from rdkit import Chem
+from rocmolkit import _embedMolecules  # registers BatchHardwareOptions converter
+from rocmolkit._mmffOptimization import MMFFOptimizeMoleculesConfs
+
+mol_pickle_hex = sys.argv[1]
+max_iters = int(sys.argv[2])
+
+m = Chem.Mol(bytes.fromhex(mol_pickle_hex))
+if m.GetNumConformers() == 0:
+    sys.exit(3)  # caller error: no conformer to optimize
+
+energies = MMFFOptimizeMoleculesConfs([m], maxIters=max_iters)
+
+# Pull back the optimised coordinates of conformer 0.
+c = m.GetConformer(0)
+coords = [[c.GetAtomPosition(i).x, c.GetAtomPosition(i).y, c.GetAtomPosition(i).z]
+          for i in range(m.GetNumAtoms())]
+print(json.dumps({"energies": energies[0], "coords": coords}))
+"""
+
+
+def mmff_optimize_molecule(
+    mol: Chem.Mol,
+    *,
+    max_iters: int = 200,
+    max_retries: int = 8,
+    timeout: float = 30.0,
+) -> list[float]:
+    """Optimise an existing conformer with MMFF94 in a fresh subprocess.
+
+    The mol must already have at least one Conformer (run ETKDG or
+    ``embed_molecule`` first). This helper isolates each call in a
+    subprocess for the same reason as ``embed_molecule``: MMFF stress
+    runs of 30+ sequential calls reproduce the same state-leak SIGSEGV
+    as ETKDG, just with lower per-call probability.
+
+    Returns the list of energies (one per conformer) and updates the
+    mol's conformer coordinates in-place.
+
+    Raises ``EmbedFailure`` after ``max_retries`` segfaults.
+    """
+    if mol.GetNumConformers() == 0:
+        raise ValueError(
+            "mmff_optimize_molecule requires the mol to already have a "
+            "Conformer; call embed_molecule(mol) or RDKit's EmbedMolecule first."
+        )
+
+    pickle_hex = mol.ToBinary().hex()
+    last_reason: Optional[str] = None
+
+    for attempt in range(1, max_retries + 1):
+        try:
+            r = subprocess.run(
+                [sys.executable, "-c", _MMFF_WORKER, pickle_hex, str(max_iters)],
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired:
+            last_reason = f"timeout after {timeout}s"
+            continue
+
+        if r.returncode == 3:
+            raise ValueError("subprocess saw mol with 0 conformers")
+
+        if r.returncode != 0 or not r.stdout.strip():
+            last_reason = f"rc={r.returncode}"
+            continue
+
+        try:
+            payload = json.loads(r.stdout.strip().splitlines()[-1])
+        except (json.JSONDecodeError, IndexError):
+            last_reason = f"bad output: {r.stdout!r}"
+            continue
+
+        # Update mol's coords with optimised ones.
+        conf = mol.GetConformer(0)
+        for i, (x, y, z) in enumerate(payload["coords"]):
+            conf.SetAtomPosition(i, Point3D(x, y, z))
+        return payload["energies"]
+
+    raise EmbedFailure(
+        f"Exhausted {max_retries} subprocess attempts; last reason: {last_reason}. "
+        "This is the known ROCm 7.2.3 + gfx1200 state-leak bug; see ISSUES.md."
+    )
+
+
+def mmff_optimize_molecules(
+    mols: list[Chem.Mol],
+    *,
+    max_iters: int = 200,
+    max_retries: int = 8,
+    timeout: float = 30.0,
+) -> list[list[float]]:
+    """Optimise a list of molecules, one subprocess per molecule.
+
+    Returns a list of energy-lists (one per input mol). Each mol is
+    updated in-place with its optimised coordinates.
+    """
+    return [
+        mmff_optimize_molecule(
+            m, max_iters=max_iters, max_retries=max_retries, timeout=timeout
+        )
+        for m in mols
+    ]
