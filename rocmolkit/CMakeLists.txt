@@ -7,6 +7,37 @@
 
 set(ROCMOLKIT_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
+# ─── RDKit extensions (C++ puro) ────────────────────────────
+# Defined BEFORE rocmolkit_core so the core target can link against it.
+file(GLOB ROCMOLKIT_RDKIT_EXT
+    "${CMAKE_CURRENT_SOURCE_DIR}/rdkit_extensions/*.cpp"
+)
+if(ROCMOLKIT_RDKIT_EXT AND RDKit_FOUND)
+    add_library(rocmolkit_rdkit_ext STATIC ${ROCMOLKIT_RDKIT_EXT})
+    target_include_directories(rocmolkit_rdkit_ext PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/rdkit_extensions
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/utils
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/forcefields
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/minimizer
+        ${ROCMOLKIT_INCLUDE_DIR}
+        ${RDKit_INCLUDE_DIRS}
+    )
+    target_link_libraries(rocmolkit_rdkit_ext PUBLIC ${RDKit_LIBRARIES})
+    if(hip_FOUND)
+        target_link_libraries(rocmolkit_rdkit_ext PUBLIC hip::host)
+    endif()
+    target_compile_options(rocmolkit_rdkit_ext PRIVATE
+        -include "${ROCMOLKIT_INCLUDE_DIR}/rocmolkit/hip_compat.h"
+        -Wno-enum-constexpr-conversion
+        -Wno-deprecated-declarations
+    )
+    set_target_properties(rocmolkit_rdkit_ext PROPERTIES
+        POSITION_INDEPENDENT_CODE ON
+        CXX_STANDARD 20
+    )
+endif()
+
 # ─── Core HIP library ───────────────────────────────────────
 file(GLOB_RECURSE ROCMOLKIT_HIP_SOURCES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.hip.cpp"
@@ -146,6 +177,15 @@ if(ROCMOLKIT_HIP_SOURCES AND CMAKE_HIP_COMPILER AND hip_FOUND)
         target_link_libraries(rocmolkit_core PUBLIC Boost::headers)
     endif()
 
+    # rdkit_extensions/ static lib provides constructForceFieldContribs etc.
+    # Whole-archive so the static lib symbols actually land in the SHARED .so
+    # (default linker behavior would discard unreferenced static symbols).
+    if(TARGET rocmolkit_rdkit_ext)
+        target_link_libraries(rocmolkit_core PRIVATE
+            $<LINK_LIBRARY:WHOLE_ARCHIVE,rocmolkit_rdkit_ext>
+        )
+    endif()
+
     set_target_properties(rocmolkit_core PROPERTIES
         POSITION_INDEPENDENT_CODE ON
     )
@@ -167,36 +207,6 @@ else()
         $<INSTALL_INTERFACE:include>
     )
     install(TARGETS rocmolkit_core EXPORT rocmolkit-targets)
-endif()
-
-# ─── RDKit extensions (C++ puro) ────────────────────────────
-file(GLOB ROCMOLKIT_RDKIT_EXT
-    "${CMAKE_CURRENT_SOURCE_DIR}/rdkit_extensions/*.cpp"
-)
-if(ROCMOLKIT_RDKIT_EXT AND RDKit_FOUND)
-    add_library(rocmolkit_rdkit_ext STATIC ${ROCMOLKIT_RDKIT_EXT})
-    target_include_directories(rocmolkit_rdkit_ext PUBLIC
-        ${CMAKE_CURRENT_SOURCE_DIR}/rdkit_extensions
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/utils
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/forcefields
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/minimizer
-        ${ROCMOLKIT_INCLUDE_DIR}
-        ${RDKit_INCLUDE_DIRS}
-    )
-    target_link_libraries(rocmolkit_rdkit_ext PUBLIC ${RDKit_LIBRARIES})
-    if(hip_FOUND)
-        target_link_libraries(rocmolkit_rdkit_ext PUBLIC hip::host)
-    endif()
-    target_compile_options(rocmolkit_rdkit_ext PRIVATE
-        -include "${ROCMOLKIT_INCLUDE_DIR}/rocmolkit/hip_compat.h"
-        -Wno-enum-constexpr-conversion
-        -Wno-deprecated-declarations
-    )
-    set_target_properties(rocmolkit_rdkit_ext PROPERTIES
-        POSITION_INDEPENDENT_CODE ON
-        CXX_STANDARD 20
-    )
 endif()
 
 # ─── Python bindings (boost-python) ─────────────────────────
