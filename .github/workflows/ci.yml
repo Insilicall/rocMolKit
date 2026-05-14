@@ -16,7 +16,7 @@ jobs:
     # Validação real fica no runner self-hosted (job rocm-runner abaixo).
     runs-on: ubuntu-22.04
     container:
-      image: rocm/dev-ubuntu-22.04:6.2
+      image: rocm/dev-ubuntu-22.04:7.2.3
     steps:
       - uses: actions/checkout@v4
 
@@ -42,7 +42,7 @@ jobs:
         with:
           path: /opt/rdkit
           # Bump key when bumping RDKIT version in tools/build_rdkit.sh
-          key: rdkit-Release_2024_09_6-${{ runner.os }}-rocm6.2
+          key: rdkit-Release_2024_09_6-${{ runner.os }}-rocm7.2
           # Save the cache even if the job ends in failure - lets the next
           # run skip the 10-minute RDKit rebuild while we iterate on rocmolkit_core.
           save-always: true
@@ -71,7 +71,7 @@ jobs:
             -DCMAKE_CXX_COMPILER="$ROCM_CLANG" \
             -DCMAKE_HIP_COMPILER="$ROCM_CLANG" \
             -DCMAKE_HIP_PLATFORM=amd \
-            -DGPU_TARGETS="gfx1100" \
+            -DGPU_TARGETS="gfx1200;gfx1100" \
             -DRDKit_ROOT=/opt/rdkit \
             -DROCMOLKIT_BUILD_TESTS=OFF
 
@@ -117,7 +117,7 @@ jobs:
             -DCMAKE_CXX_COMPILER="$ROCM_CLANG" \
             -DCMAKE_HIP_COMPILER="$ROCM_CLANG" \
             -DCMAKE_HIP_PLATFORM=amd \
-            -DGPU_TARGETS="gfx1100" \
+            -DGPU_TARGETS="gfx1200;gfx1100" \
             -DRDKit_ROOT=/opt/rdkit \
             -DROCMOLKIT_BUILD_PYTHON_BINDINGS=ON
           # Build whatever bindings are currently active in nvmolkit/CMakeLists.txt
@@ -154,7 +154,7 @@ jobs:
       - name: Build slim
         run: |
           docker build -f docker/Dockerfile.slim -t rocmolkit:slim \
-            --build-arg GPU_TARGETS="gfx1100" .
+            --build-arg GPU_TARGETS="gfx1200;gfx1100" .
 
       - name: Check size budget (< 2.5 GB)
         run: |

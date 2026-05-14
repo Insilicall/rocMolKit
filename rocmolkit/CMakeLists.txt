@@ -184,3 +184,21 @@ add_subdirectory(nvmolkit)
 install(DIRECTORY ${ROCMOLKIT_INCLUDE_DIR}/
         DESTINATION include
         FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp")
+
+# Install the Python package (__init__.py + any pure-Python modules) so that
+# `import rocmolkit` works after `cmake --install`. The compiled bindings
+# (_embedMolecules.so etc.) install themselves via nvmolkit/CMakeLists.txt
+# into the same destination.
+find_package(Python COMPONENTS Interpreter REQUIRED)
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/"
+        DESTINATION "${Python_SITELIB}/rocmolkit"
+        FILES_MATCHING
+            PATTERN "*.py"
+            PATTERN "src" EXCLUDE
+            PATTERN "rdkit_extensions" EXCLUDE
+            PATTERN "nvmolkit" EXCLUDE
+            PATTERN "tests" EXCLUDE
+            PATTERN "benchmarks" EXCLUDE
+            PATTERN "include" EXCLUDE
+            PATTERN "CMakeLists.txt" EXCLUDE
+)

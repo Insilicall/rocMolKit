@@ -4,7 +4,7 @@
 #
 # Build: docker build -f docker/Dockerfile.devel -t rocmolkit:devel .
 
-ARG ROCM_VERSION=6.2.4
+ARG ROCM_VERSION=7.2.3
 ARG UBUNTU_CODENAME=jammy
 
 FROM ubuntu:22.04
@@ -48,6 +48,21 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
 COPY tools/build_rdkit.sh /tmp/build_rdkit.sh
 RUN chmod +x /tmp/build_rdkit.sh && /tmp/build_rdkit.sh Release_2024_09_6
 ENV RDKIT_ROOT=/opt/rdkit
+
+# Build + install rocmolkit so `import rocmolkit` works out of the box.
+COPY . /src
+RUN ROCM_CLANG=$(ls /opt/rocm-*/llvm/bin/clang++ 2>/dev/null | head -1) \
+    && cmake -S /src -B /tmp/build -GNinja \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_CXX_COMPILER="$ROCM_CLANG" \
+        -DCMAKE_HIP_COMPILER="$ROCM_CLANG" \
+        -DCMAKE_HIP_PLATFORM=amd \
+        -DGPU_TARGETS="gfx1200;gfx1100;gfx90a;gfx942" \
+        -DRDKit_ROOT=/opt/rdkit \
+        -DROCMOLKIT_BUILD_PYTHON_BINDINGS=ON \
+    && cmake --build /tmp/build --parallel \
+    && cmake --install /tmp/build \
+    && rm -rf /tmp/build /src
 
 WORKDIR /workspace
 CMD ["bash"]
