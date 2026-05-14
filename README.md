@@ -62,6 +62,58 @@ params = ETKDGv3(); params.useRandomCoords = True
 EmbedMolecules(mols, params, 1)
 ```
 
+## Performance (preliminary, blocked on the open segfault)
+
+Measured on AMD Ryzen 5 7600 (12 threads) + AMD Radeon RX 9060 XT
+(gfx1200, 32 CUs, RDNA4) with ROCm 7.2.3, against
+`tests/data/druglike_100.smi` — 50 small drug-like molecules
+(median ~15 atoms with hydrogens). Run via
+`tools/benchmark.py tests/data/druglike_100.smi --n 50`.
+
+### ETKDG conformer generation
+
+| Pipeline | Wall time | Per-molecule | Success |
+|---|---|---|---|
+| RDKit CPU (sequential, single thread) | 0.21 s | 4.2 ms/mol (237 mol/s) | 50/50 |
+| rocMolKit GPU `safe.embed_molecule` (subprocess+retry) | 235 s | 4798 ms/mol (0.2 mol/s) | 49/50 |
+| rocMolKit GPU direct `EmbedMolecules`, batch≥4 | — | — | crashes (open bug) |
+
+### MMFF94 force-field optimisation (ETKDG-embedded mols)
+
+| Pipeline | Wall time | Per-molecule | Success |
+|---|---|---|---|
+| RDKit CPU ETKDG + MMFF, sequential | 0.38 s | 7.5 ms/mol (133 mol/s) | 50/50 |
+| rocMolKit GPU `MMFFOptimizeMoleculesConfs`, batch=30 | 1.01 s | 20.2 ms/mol (49 mol/s) | 50/50 |
+
+### GPU is working
+
+`/sys/class/drm/card1/device/gpu_busy_percent` sampled every 2 s
+during the run: **mean 74 %, peak 100 %, 90 of 121 samples above 50 %**.
+Confirms kernels are launching and the GPU is doing real work.
+
+### Honest take
+
+For small drug-like molecules **RDKit CPU is hard to beat today**.
+RDKit's ETKDG + MMFF94 are highly tuned in single-molecule paths and
+on a 12-thread Ryzen the per-molecule overhead is below 10 ms. The
+GPU advantage for batched force-field workloads only starts to show at
+much larger molecule sizes (proteins, peptides) and batch counts, both
+of which we can't run today because of the open ROCm 7.2.3 + gfx1200
+state-leak segfault — see [ISSUES.md](ISSUES.md). Once that's resolved
+(via a ROCm 7.3+ rocgdb session or a gfx1100 host where the bug
+reproduces under a working debugger), benchmarks will be re-run on the
+mlxmolkit-style N×k matrix where GPU tools traditionally win.
+
+The two messages worth sending now:
+
+1. **Functional**: ETKDG and MMFF94 produce the right answer (bond
+   lengths within 0.02 Å of RDKit, MMFF energies match qualitatively).
+2. **GPU-active**: kernels launch, the device runs at >70 % busy on
+   batch workloads, the BFGS minimiser converges to physically
+   sensible minima.
+
+Performance optimisation comes after the segfault root cause is fixed.
+
 ## Hardware
 
 ROCm 6.2+ em uma das GPUs:
