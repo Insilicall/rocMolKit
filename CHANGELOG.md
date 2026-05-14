@@ -4,6 +4,17 @@ All notable changes to rocMolKit will be documented here.
 
 ## [Unreleased]
 
+### Phase 2 — first Python binding compiled (2026-05-14)
+
+- `rocmolkit/nvmolkit/CMakeLists.txt` builds boost-python MODULE libraries
+  for `embedMolecules`, `mmffOptimization`, `uffOptimization`,
+  `batchedForcefield`, `conformerRmsd`, `array_helpers`.
+- `_embedMolecules.so` links successfully (verified in CI).
+- `ROCMOLKIT_BUILD_PYTHON_BINDINGS=ON` default.
+- Bindings still disabled (need Phase 4-7 kernels): fingerprints,
+  clustering, substructure, tfd.
+- `python-bindings-probe` CI job promoted from continue-on-error to gating.
+
 ### Phase 1 — mechanical hipify + green build (2026-05-14)
 
 #### Added

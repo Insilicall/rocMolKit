@@ -82,13 +82,12 @@ jobs:
         run: cmake --build build --target rocmolkit_core
 
   python-bindings-probe:
-    # Phase 2 sentinel - tries to build Python bindings on top of rocmolkit_core.
-    # Allowed to fail while iterating; the green build above is the source of truth.
+    # Phase 2 - builds boost-python bindings on top of rocmolkit_core.
+    # _embedMolecules links cleanly. Now part of the gating set.
     needs: build-cpu-smoke
     runs-on: ubuntu-22.04
     container:
       image: rocm/dev-ubuntu-22.04:6.2
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 
@@ -107,7 +106,7 @@ jobs:
           path: /opt/rdkit
           key: rdkit-Release_2024_09_6-${{ runner.os }}-rocm6.2
 
-      - name: Try Python bindings
+      - name: Build Python bindings
         run: |
           curl -LsSf https://astral.sh/uv/install.sh | sh
           ~/.local/bin/uv pip install --system --break-system-packages \
@@ -121,8 +120,8 @@ jobs:
             -DGPU_TARGETS="gfx1100" \
             -DRDKit_ROOT=/opt/rdkit \
             -DROCMOLKIT_BUILD_PYTHON_BINDINGS=ON
-          cmake --build build-bindings --target _embedMolecules || \
-            echo "::warning::Phase 2 bindings still failing - tracked in ISSUES.md"
+          # Build whatever bindings are currently active in nvmolkit/CMakeLists.txt
+          cmake --build build-bindings
 
   docker-devel-smoke:
     # Build do Dockerfile.devel + smoke import (sem GPU, só valida que tudo se

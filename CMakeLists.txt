@@ -22,8 +22,10 @@ endif()
 
 option(ROCMOLKIT_BUILD_TESTS "Build unit tests" OFF)
 option(ROCMOLKIT_BUILD_BENCHMARKS "Build benchmarks" OFF)
-# Phase 2 — bindings opt-in until they stabilize. Once green, flip default ON.
-option(ROCMOLKIT_BUILD_PYTHON_BINDINGS "Build Python bindings" OFF)
+# Phase 2 - default ON since _embedMolecules.so links cleanly. Other bindings
+# (fingerprints, clustering, substructure, TFD) stay off in nvmolkit/CMakeLists.txt
+# until their backing kernels port over (Phases 4-7).
+option(ROCMOLKIT_BUILD_PYTHON_BINDINGS "Build Python bindings" ON)
 
 if(NOT DEFINED GPU_TARGETS)
     set(GPU_TARGETS "gfx1100;gfx90a;gfx942" CACHE STRING "AMD GPU targets")
