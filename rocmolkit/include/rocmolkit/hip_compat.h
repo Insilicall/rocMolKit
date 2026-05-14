@@ -29,3 +29,15 @@ inline void cudaGraphSetConditional(cudaGraphConditionalHandle, int) {
     // No-op stub. Kernel que usa isso precisa ser substituído por loop CPU-side.
 }
 #endif
+
+// Memory carveout symbol — hipify-perl não trata em todos os casos.
+// Aliases para o símbolo HIP equivalente.
+#ifndef cudaSharedmemCarveoutMaxShared
+#define cudaSharedmemCarveoutMaxShared hipSharedMemCarveoutMaxShared
+#endif
+#ifndef cudaSharedmemCarveoutMaxL1
+#define cudaSharedmemCarveoutMaxL1 hipSharedMemCarveoutMaxL1
+#endif
+#ifndef cudaSharedmemCarveoutDefault
+#define cudaSharedmemCarveoutDefault hipSharedMemCarveoutDefault
+#endif

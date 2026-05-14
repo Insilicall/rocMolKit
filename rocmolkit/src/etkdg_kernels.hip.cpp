@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <cub/device/device_reduce.cuh>
+#include <hipcub/device/device_reduce.hpp>
 
 #include "etkdg_impl.h"
 

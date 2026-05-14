@@ -16,18 +16,30 @@ file(GLOB_RECURSE ROCMOLKIT_CPP_SOURCES CONFIGURE_DEPENDS
 )
 list(REMOVE_ITEM ROCMOLKIT_CPP_SOURCES ${ROCMOLKIT_HIP_SOURCES})
 
-# Excluir butina (Fase 6) e tfd (Fase 7) por enquanto — usam features sem
-# equivalente direto em ROCm (CUDA Graphs Conditional).
+# Excluir módulos que usam features sem equivalente direto em ROCm:
+#   butina:    CUDA Graphs Conditional (sem hipGraph equivalente)
+#   tfd:       depende de butina
+#   substruct: cudaSharedmemCarveoutMaxShared não-traduzido (Fase 7)
 list(FILTER ROCMOLKIT_HIP_SOURCES EXCLUDE REGEX "/(butina|tfd)\\.hip\\.cpp$")
-list(FILTER ROCMOLKIT_HIP_SOURCES EXCLUDE REGEX "/tfd/")
+list(FILTER ROCMOLKIT_HIP_SOURCES EXCLUDE REGEX "/(tfd|substruct)/")
+list(FILTER ROCMOLKIT_CPP_SOURCES EXCLUDE REGEX "/(tfd|substruct)/")
+list(FILTER ROCMOLKIT_CPP_SOURCES EXCLUDE REGEX "/(butina|tfd)\\.cpp$")
 
 if(ROCMOLKIT_HIP_SOURCES AND CMAKE_HIP_COMPILER AND hip_FOUND)
     set_source_files_properties(${ROCMOLKIT_HIP_SOURCES} PROPERTIES LANGUAGE HIP)
     add_library(rocmolkit_core SHARED ${ROCMOLKIT_HIP_SOURCES} ${ROCMOLKIT_CPP_SOURCES})
 
+    # Each upstream .cpp/.hip.cpp uses bare `#include "nvtx.h"` etc. (relative
+    # to its own subdir). Mirror nvMolKit's CMake behavior: every subdir of
+    # src/ becomes an include path.
     target_include_directories(rocmolkit_core PUBLIC
         $<BUILD_INTERFACE:${ROCMOLKIT_INCLUDE_DIR}>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/utils>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/conformer>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/forcefields>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/minimizer>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/data_structures>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/rdkit_extensions>
         $<INSTALL_INTERFACE:include>
     )

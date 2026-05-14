@@ -1,25 +1,18 @@
-// SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-// SPDX-License-Identifier: Apache-2.0
+// rocMolKit — NVTX shim (NO-OP).
+// Original nvMolKit uses NVIDIA Tools Extension for profiling annotations.
+// AMD equivalent is rocTX (roctracer/roctx.h). For now we ship a no-op shim
+// to keep API surface compatible without pulling roctracer at link time.
 //
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-// http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// To enable rocTX profiling later: link roctx64 and replace these no-ops with
+//   roctxRangePushA(name) / roctxRangePop() / roctxNameOsThread(...).
 
 #ifndef NVMOLKIT_UTILS_NVTX_H
 #define NVMOLKIT_UTILS_NVTX_H
 
 #include <string>
+#include <cstdint>
 
-#include "nvtx3/nvToolsExt.h"
-#include "nvtx3/nvToolsExtCudaRt.h"
+#include <hip/hip_runtime.h>
 
 namespace nvMolKit {
 
@@ -35,39 +28,19 @@ constexpr uint32_t kOrange = 0xFFFFA500;
 
 class ScopedNvtxRange {
  public:
-  explicit ScopedNvtxRange(const std::string& name, uint32_t color = NvtxColor::kGrey) {
-    pushWithColor(name.c_str(), color);
-  }
-  explicit ScopedNvtxRange(const char* name, uint32_t color = NvtxColor::kGrey) { pushWithColor(name, color); }
+  explicit ScopedNvtxRange(const std::string& /*name*/, uint32_t /*color*/ = NvtxColor::kGrey) noexcept {}
+  explicit ScopedNvtxRange(const char* /*name*/, uint32_t /*color*/ = NvtxColor::kGrey) noexcept {}
   ScopedNvtxRange(const ScopedNvtxRange&)            = delete;
   ScopedNvtxRange& operator=(const ScopedNvtxRange&) = delete;
   ScopedNvtxRange(ScopedNvtxRange&&)                 = delete;
   ScopedNvtxRange& operator=(ScopedNvtxRange&&)      = delete;
-
-  void pop() noexcept {
-    if (!popped_) {
-      nvtxRangePop();
-      popped_ = true;
-    }
-  }
-
-  ~ScopedNvtxRange() noexcept { pop(); }
-
- private:
-  void pushWithColor(const char* name, uint32_t color) {
-    nvtxEventAttributes_t attrib = {};
-    attrib.version               = NVTX_VERSION;
-    attrib.size                  = NVTX_EVENT_ATTRIB_STRUCT_SIZE;
-    attrib.colorType             = NVTX_COLOR_ARGB;
-    attrib.color                 = color;
-    attrib.messageType           = NVTX_MESSAGE_TYPE_ASCII;
-    attrib.message.ascii         = name;
-    nvtxRangePushEx(&attrib);
-  }
-
-  bool popped_ = false;
+  void             pop() noexcept {}
+  ~ScopedNvtxRange() noexcept = default;
 };
 
 }  // namespace nvMolKit
+
+// Free-function API used by upstream code (e.g. utils/device.cpp).
+inline void nvtxNameCudaStreamA(hipStream_t /*stream*/, const char* /*name*/) noexcept {}
 
 #endif  // NVMOLKIT_UTILS_NVTX_H
