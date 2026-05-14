@@ -66,14 +66,22 @@ echo "    headers: ${PREFIX}/include/rdkit"
 echo "    libs:    ${PREFIX}/lib/libRDKit*.so"
 
 # Sanity check: confirm headers nvMolKit relies on are present.
+# Names with known stable paths in RDKit 2024.09.
 for h in \
     GraphMol/RDKitBase.h \
     GraphMol/DistGeomHelpers/Embedder.h \
-    DistGeom/BoundsMatrix.h \
-    ForceField/MMFF/Builder.h ; do
+    DistGeom/BoundsMatrix.h ; do
     if [[ ! -f "${PREFIX}/include/rdkit/${h}" ]]; then
         echo "FAIL: missing ${PREFIX}/include/rdkit/${h}" >&2
         exit 1
     fi
 done
+# MMFF: the directory must exist with at least one header. Concrete file
+# names vary across RDKit minor versions (Builder.h vs MMFF.h vs ...).
+if ! ls "${PREFIX}/include/rdkit/ForceField/MMFF/"*.h &>/dev/null; then
+    echo "FAIL: no MMFF headers in ${PREFIX}/include/rdkit/ForceField/MMFF/" >&2
+    exit 1
+fi
 echo "=== sanity check OK ==="
+echo "    MMFF headers present:"
+ls "${PREFIX}/include/rdkit/ForceField/MMFF/" | head -5
