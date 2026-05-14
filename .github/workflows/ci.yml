@@ -67,13 +67,16 @@ jobs:
           ROCM_PATH=$(ls -d /opt/rocm-* 2>/dev/null | head -1)
           ROCM_PATH=${ROCM_PATH:-/opt/rocm}
           ROCM_CLANG="$ROCM_PATH/llvm/bin/clang++"
+          DEVICE_LIB=$(find "$ROCM_PATH/lib/llvm/lib/clang/"*/lib/amdgcn/bitcode -maxdepth 0 -type d 2>/dev/null | head -1)
+          DEVICE_LIB=${DEVICE_LIB:-$ROCM_PATH/amdgcn/bitcode}
+          HIP_FLAGS="--rocm-path=$ROCM_PATH --rocm-device-lib-path=$DEVICE_LIB"
           cmake -S . -B build -GNinja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_CXX_COMPILER="$ROCM_CLANG" \
             -DCMAKE_HIP_COMPILER="$ROCM_CLANG" \
             -DCMAKE_HIP_PLATFORM=amd \
-            -DCMAKE_HIP_FLAGS="--rocm-path=$ROCM_PATH" \
-            -DCMAKE_HIP_FLAGS_INIT="--rocm-path=$ROCM_PATH" \
+            -DCMAKE_HIP_FLAGS="$HIP_FLAGS" \
+            -DCMAKE_HIP_FLAGS_INIT="$HIP_FLAGS" \
             -DROCM_PATH="$ROCM_PATH" \
             -DGPU_TARGETS="gfx1200;gfx1100" \
             -DRDKit_ROOT=/opt/rdkit \
@@ -118,13 +121,16 @@ jobs:
           ROCM_CLANG=$(ls /opt/rocm-*/llvm/bin/clang++ 2>/dev/null | head -1)
           ROCM_PATH=$(ls -d /opt/rocm-* 2>/dev/null | head -1)
           ROCM_CLANG="$ROCM_PATH/llvm/bin/clang++"
+          DEVICE_LIB=$(find "$ROCM_PATH/lib/llvm/lib/clang/"*/lib/amdgcn/bitcode -maxdepth 0 -type d 2>/dev/null | head -1)
+          DEVICE_LIB=${DEVICE_LIB:-$ROCM_PATH/amdgcn/bitcode}
+          HIP_FLAGS="--rocm-path=$ROCM_PATH --rocm-device-lib-path=$DEVICE_LIB"
           cmake -S . -B build-bindings -GNinja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_CXX_COMPILER="$ROCM_CLANG" \
             -DCMAKE_HIP_COMPILER="$ROCM_CLANG" \
             -DCMAKE_HIP_PLATFORM=amd \
-            -DCMAKE_HIP_FLAGS="--rocm-path=$ROCM_PATH" \
-            -DCMAKE_HIP_FLAGS_INIT="--rocm-path=$ROCM_PATH" \
+            -DCMAKE_HIP_FLAGS="$HIP_FLAGS" \
+            -DCMAKE_HIP_FLAGS_INIT="$HIP_FLAGS" \
             -DROCM_PATH="$ROCM_PATH" \
             -DGPU_TARGETS="gfx1200;gfx1100" \
             -DRDKit_ROOT=/opt/rdkit \

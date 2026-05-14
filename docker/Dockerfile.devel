@@ -57,13 +57,17 @@ RUN if [ ! -e /opt/rocm ]; then ln -s $(ls -d /opt/rocm-* | head -1) /opt/rocm; 
 COPY . /src
 RUN ROCM_PATH=$(ls -d /opt/rocm-* | head -1) \
     && ROCM_CLANG="$ROCM_PATH/llvm/bin/clang++" \
+    && DEVICE_LIB=$(find "$ROCM_PATH/lib/llvm/lib/clang/"*/lib/amdgcn/bitcode -maxdepth 0 -type d 2>/dev/null | head -1) \
+    && DEVICE_LIB=${DEVICE_LIB:-$ROCM_PATH/amdgcn/bitcode} \
+    && HIP_FLAGS="--rocm-path=$ROCM_PATH --rocm-device-lib-path=$DEVICE_LIB" \
+    && echo "HIP_FLAGS=$HIP_FLAGS" \
     && cmake -S /src -B /tmp/build -GNinja \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_CXX_COMPILER="$ROCM_CLANG" \
         -DCMAKE_HIP_COMPILER="$ROCM_CLANG" \
         -DCMAKE_HIP_PLATFORM=amd \
-        -DCMAKE_HIP_FLAGS="--rocm-path=$ROCM_PATH" \
-        -DCMAKE_HIP_FLAGS_INIT="--rocm-path=$ROCM_PATH" \
+        -DCMAKE_HIP_FLAGS="$HIP_FLAGS" \
+        -DCMAKE_HIP_FLAGS_INIT="$HIP_FLAGS" \
         -DGPU_TARGETS="gfx1200;gfx1100;gfx90a;gfx942" \
         -DRDKit_ROOT=/opt/rdkit \
         -DROCM_PATH="$ROCM_PATH" \
