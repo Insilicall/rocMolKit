@@ -44,7 +44,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get update && apt-get install -y --no-install-recommends \
         build-essential ninja-build git \
         python${PYTHON_VERSION} python${PYTHON_VERSION}-dev python3-pip \
-        libboost1.83-dev libeigen3-dev zlib1g-dev libbz2-dev \
+        libboost1.83-all-dev libeigen3-dev zlib1g-dev libbz2-dev \
         libfreetype6-dev \
         hipcc hip-dev hip-runtime-amd \
         rocm-device-libs rocm-llvm \
