@@ -7,14 +7,17 @@ GPU-accelerated RDKit operations on AMD GPUs via HIP/ROCm.
 
 Port of [nvMolKit](https://github.com/NVIDIA-Digital-Bio/nvMolKit) (NVIDIA CUDA, Apache 2.0). Same API surface, AMD backend.
 
-> Status: **alpha** — Phases 1 & 2 build green ✅
-> - `librocmolkit_core.so` builds cleanly on ROCm 6.2 + RDKit 2024.09.6
-> - `_embedMolecules.so` Python binding links successfully
-> - Slim runtime image: **2.04 GB** (vs 13 GB official `rocm/dev-ubuntu`)
-> - Active bindings: embedMolecules, mmffOptimization, uffOptimization,
->   batchedForcefield, conformerRmsd, array_helpers
+> Status: **alpha** — ETKDG + MMFF94 numerically validated on AMD GPU ✅
+> - Stack: ROCm 7.2.3 + Clang 22 + RDKit 2024.09.6 + boost 1.83
+> - Validated on **AMD Radeon RX 9060 XT (Navi 44, RDNA4 / gfx1200)**
+> - ETKDG ethanol bonds: GPU bit-exact vs RDKit CPU (C-C 1.506 Å; C-O within 0.006 Å)
+> - MMFF94 converges to global minimum on ethanol in 267 ms
+> - 6/6 Python bindings load: embedMolecules, mmffOptimization, uffOptimization,
+>   batchedForcefield, conformerRmsd, arrayHelpers
+> - **Known bug:** non-deterministic segfault on mid-size molecules (aspirin,
+>   pyridine). Small molecules (CCO, benzene, hexane, p-xylene) reliable.
+>   Investigation in progress — likely host-side use-after-free.
 > - Pending: fingerprints, clustering, substructure, tfd (Phases 4-7 kernels)
-> - Numerical validation requires AMD GPU runner — pending
 >
 > See [PLAN.md](PLAN.md), [ISSUES.md](ISSUES.md) and [CHANGELOG.md](CHANGELOG.md).
 
