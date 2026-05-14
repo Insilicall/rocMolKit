@@ -45,6 +45,12 @@ list(APPEND CMAKE_PREFIX_PATH "${ROCM_PATH}" "${ROCM_PATH}/lib/cmake")
 include(CheckLanguage)
 check_language(HIP)
 if(CMAKE_HIP_COMPILER)
+    # CMake 4.x (ROCm 7.x) requires CMAKE_HIP_ARCHITECTURES to be set BEFORE
+    # enable_language(HIP), otherwise it fails with "Failed to find a default
+    # HIP architecture". Map our GPU_TARGETS into it.
+    if(NOT DEFINED CMAKE_HIP_ARCHITECTURES)
+        set(CMAKE_HIP_ARCHITECTURES "${GPU_TARGETS}" CACHE STRING "HIP archs" FORCE)
+    endif()
     enable_language(HIP)
     find_package(hip QUIET)
     find_package(hipblas QUIET)
