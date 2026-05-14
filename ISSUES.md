@@ -272,12 +272,26 @@ gfx1200 + ROCm 7.2.3:
 |---|---|---|---|
 | `EmbedMolecules` (ETKDG) | ~65% per-call | crashes at **N≥4** | crashes after ~4 calls |
 | `MMFFOptimizeMoleculesConfs` | reliable | OK at **N=30** (tested) | crashes after ~30 calls |
+| `UFFOptimizeMoleculesConfs` | reliable | OK at **N=8** (tested) | crashes on **2nd** call |
 
 So for MMFF, the direct binding is fine for typical batch workloads
 (`MMFFOptimizeMoleculesConfs(big_list, ...)` in one call). The
 `rocmolkit.safe.mmff_optimize_molecule(s)` wrapper exists for the
 sequential-call pattern (e.g. iterating mols one by one in a loop)
-where the same state-leak does eventually fire.
+where the same state-leak does eventually fire. UFF behaves like
+ETKDG — sequential calls are unreliable from call 2; use
+`rocmolkit.safe.uff_optimize_molecule(s)`.
+
+### Other bindings — current status
+
+| Module | Status | Notes |
+|---|---|---|
+| `_embedMolecules` | ✅ via `safe` | ETKDG; primary feature |
+| `_mmffOptimization` | ✅ via `safe` (or batch direct) | MMFF94 |
+| `_uffOptimization` | ✅ via `safe` (or batch direct) | UFF; needs `vdwThresh` + `ignoreInterfragInteractions` per-mol |
+| `_batchedForcefield` | ✅ loads, exposes `MMFFProperties`, `NativeMMFFBatchedForcefield`, `NativeUFFBatchedForcefield`, `buildMMFFPropertiesFromRDKit` | Not stress-tested |
+| `_arrayHelpers` | ⚠️ loads but exposes nothing public from Python | Provides `nvMolKit::PyArray` type registration consumed by `_conformerRmsd`. Needs explicit `from rocmolkit import _arrayHelpers` before using `_conformerRmsd`. |
+| `_conformerRmsd` | ⚠️ partially | `GetConformerRMSMatrix(mol)` runs but returns an opaque `_arrayHelpers._arrayHelpers` object with no Python accessors and no buffer protocol. Needs additional binding work to expose values to numpy/lists. |
 
 ### **Workaround: `rocmolkit.safe`** (validated, 100% reliable)
 

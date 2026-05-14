@@ -45,14 +45,20 @@ def test_embed_single_mol_returns_conformer() -> None:
 
 @pytest.mark.gpu
 def test_embed_molecules_list() -> None:
-    """The list helper handles multiple mols sequentially."""
+    """The list helper handles multiple mols sequentially.
+
+    Retries are bumped above the library default because CI is sensitive
+    to the long tail: at ~35% per-call SIGSEGV the joint probability of
+    8 retries failing for any one of 3 mols is ~0.07%, which still
+    surfaces as flake every few hundred CI runs.
+    """
     from rdkit import Chem
     from rdkit.Chem import AddHs
 
     from rocmolkit.safe import embed_molecules
 
     mols = [AddHs(Chem.MolFromSmiles(s)) for s in ("CCO", "c1ccccc1", "CC(=O)O")]
-    embed_molecules(mols, seed=42)
+    embed_molecules(mols, seed=42, max_retries=15)
 
     for m in mols:
         assert m.GetNumConformers() == 1
@@ -74,6 +80,24 @@ def test_mmff_after_embed_lowers_energy() -> None:
     # Ethanol global min is around -1.34 kcal/mol; require it converges to a
     # negative energy (any minimisation should beat the random embed).
     assert energies[0] < 0.0, f"MMFF did not lower energy below 0: {energies[0]}"
+
+
+@pytest.mark.gpu
+def test_uff_after_embed_returns_energy() -> None:
+    """UFF should return a finite per-conformer energy."""
+    import math
+
+    from rdkit import Chem
+    from rdkit.Chem import AddHs
+
+    from rocmolkit.safe import embed_molecule, uff_optimize_molecule
+
+    m = AddHs(Chem.MolFromSmiles("CCO"))
+    embed_molecule(m, seed=42)
+    energies = uff_optimize_molecule(m, max_iters=200)
+
+    assert len(energies) == 1
+    assert math.isfinite(energies[0]), f"UFF returned non-finite energy {energies[0]}"
 
 
 @pytest.mark.gpu

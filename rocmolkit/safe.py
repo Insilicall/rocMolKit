@@ -265,3 +265,133 @@ def mmff_optimize_molecules(
         )
         for m in mols
     ]
+
+
+_UFF_WORKER = """
+import sys, json
+from rdkit import Chem
+from rocmolkit import _embedMolecules  # registers BatchHardwareOptions
+from rocmolkit._uffOptimization import UFFOptimizeMoleculesConfs
+
+mol_pickle_hex = sys.argv[1]
+max_iters = int(sys.argv[2])
+vdw_thresh = float(sys.argv[3])
+ignore_interfrag = sys.argv[4] == "1"
+
+m = Chem.Mol(bytes.fromhex(mol_pickle_hex))
+if m.GetNumConformers() == 0:
+    sys.exit(3)
+
+energies = UFFOptimizeMoleculesConfs(
+    [m], max_iters, [vdw_thresh], [ignore_interfrag]
+)
+
+c = m.GetConformer(0)
+coords = [[c.GetAtomPosition(i).x, c.GetAtomPosition(i).y, c.GetAtomPosition(i).z]
+          for i in range(m.GetNumAtoms())]
+print(json.dumps({"energies": energies[0], "coords": coords}))
+"""
+
+
+def uff_optimize_molecule(
+    mol: Chem.Mol,
+    *,
+    max_iters: int = 200,
+    vdw_thresh: float = 10.0,
+    ignore_interfrag_interactions: bool = True,
+    max_retries: int = 8,
+    timeout: float = 30.0,
+) -> list[float]:
+    """Optimise an existing conformer with UFF in a fresh subprocess.
+
+    UFF reproduces the same state-leak segfault as ETKDG when called
+    sequentially — observed crash on the second back-to-back call.
+    Batch calls (one ``UFFOptimizeMoleculesConfs`` with N mols) work
+    fine; this helper exists for the iterative-loop pattern.
+
+    Args:
+        mol: RDKit molecule that already has at least one Conformer.
+        max_iters: Max UFF optimisation iterations (default 200).
+        vdw_thresh: Cutoff above which van der Waals terms are dropped
+            (default 10.0, matching RDKit's UFFOptimizeMoleculeConfs).
+        ignore_interfrag_interactions: Whether to skip nonbonded terms
+            between disconnected fragments (default True, matching RDKit).
+        max_retries: Subprocess retries on segfault.
+        timeout: Per-attempt seconds.
+
+    Returns:
+        List of (per-conformer) energies; updates mol coords in-place.
+    """
+    if mol.GetNumConformers() == 0:
+        raise ValueError(
+            "uff_optimize_molecule requires the mol to already have a "
+            "Conformer; call embed_molecule(mol) or RDKit's EmbedMolecule first."
+        )
+
+    pickle_hex = mol.ToBinary().hex()
+    last_reason: Optional[str] = None
+
+    for attempt in range(1, max_retries + 1):
+        try:
+            r = subprocess.run(
+                [
+                    sys.executable, "-c", _UFF_WORKER,
+                    pickle_hex,
+                    str(max_iters),
+                    str(vdw_thresh),
+                    "1" if ignore_interfrag_interactions else "0",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                cwd="/",
+            )
+        except subprocess.TimeoutExpired:
+            last_reason = f"timeout after {timeout}s"
+            continue
+
+        if r.returncode == 3:
+            raise ValueError("subprocess saw mol with 0 conformers")
+
+        if r.returncode != 0 or not r.stdout.strip():
+            last_reason = f"rc={r.returncode}"
+            continue
+
+        try:
+            payload = json.loads(r.stdout.strip().splitlines()[-1])
+        except (json.JSONDecodeError, IndexError):
+            last_reason = f"bad output: {r.stdout!r}"
+            continue
+
+        conf = mol.GetConformer(0)
+        for i, (x, y, z) in enumerate(payload["coords"]):
+            conf.SetAtomPosition(i, Point3D(x, y, z))
+        return payload["energies"]
+
+    raise EmbedFailure(
+        f"Exhausted {max_retries} subprocess attempts; last reason: {last_reason}. "
+        "This is the known ROCm 7.2.3 + gfx1200 state-leak bug; see ISSUES.md."
+    )
+
+
+def uff_optimize_molecules(
+    mols: list[Chem.Mol],
+    *,
+    max_iters: int = 200,
+    vdw_thresh: float = 10.0,
+    ignore_interfrag_interactions: bool = True,
+    max_retries: int = 8,
+    timeout: float = 30.0,
+) -> list[list[float]]:
+    """UFF-optimise a list of molecules, one subprocess per molecule."""
+    return [
+        uff_optimize_molecule(
+            m,
+            max_iters=max_iters,
+            vdw_thresh=vdw_thresh,
+            ignore_interfrag_interactions=ignore_interfrag_interactions,
+            max_retries=max_retries,
+            timeout=timeout,
+        )
+        for m in mols
+    ]
