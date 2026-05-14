@@ -36,7 +36,7 @@ jobs:
             ghcr.io/${{ steps.repo.outputs.owner }}/rocmolkit:slim
             ghcr.io/${{ steps.repo.outputs.owner }}/rocmolkit:${{ github.ref_name }}-slim
           build-args: |
-            GPU_TARGETS=gfx1100;gfx90a;gfx942
+            GPU_TARGETS=gfx1100;gfx1200;gfx90a;gfx942
           cache-from: type=gha
           cache-to: type=gha,mode=max
 

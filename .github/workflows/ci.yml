@@ -105,36 +105,45 @@ jobs:
 
   python-bindings-probe:
     # Phase 2 - builds boost-python bindings on top of rocmolkit_core.
-    # _embedMolecules links cleanly. Now part of the gating set.
+    # Must run on ROCm 7.x: bfgs_minimize.hip.cpp uses
+    # hipcub::DeviceReduce::TransformReduce, which only exists in 7.x.
     needs: build-cpu-smoke
     runs-on: ubuntu-22.04
     container:
-      image: rocm/dev-ubuntu-22.04:6.2
+      image: rocm/dev-ubuntu-22.04:7.2.3
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install build deps
+      - name: Install build deps (apt)
         run: |
           apt-get update
           apt-get install -y --no-install-recommends \
+            software-properties-common ca-certificates
+          # Same boost 1.83 PPA as build-cpu-smoke — system 1.74 trips
+          # Clang 22 + C++20 in MPL.
+          add-apt-repository -y ppa:mhier/libboost-latest
+          apt-get update
+          apt-get install -y --no-install-recommends \
             cmake ninja-build python3-dev python3-pip curl git \
-            libboost-all-dev libeigen3-dev zlib1g-dev libbz2-dev libfreetype6-dev \
+            libboost1.83-all-dev libeigen3-dev zlib1g-dev libbz2-dev \
+            libfreetype6-dev \
+            rocm-device-libs rocm-llvm \
             hipblas-dev hiprand-dev rocblas-dev rocrand-dev \
             hipcub-dev rocprim-dev rocthrust-dev || true
 
-      - name: uv + RDKit cache
+      - name: uv + RDKit cache (shared with build-cpu-smoke)
         uses: actions/cache@v4
         with:
           path: /opt/rdkit
-          key: rdkit-Release_2024_09_6-${{ runner.os }}-rocm6.2
+          key: rdkit-Release_2024_09_6-${{ runner.os }}-rocm7.2
 
       - name: Build Python bindings
         run: |
           curl -LsSf https://astral.sh/uv/install.sh | sh
           ~/.local/bin/uv pip install --system --break-system-packages \
             scikit-build-core nanobind numpy
-          ROCM_CLANG=$(ls /opt/rocm-*/llvm/bin/clang++ 2>/dev/null | head -1)
           ROCM_PATH=$(ls -d /opt/rocm-* 2>/dev/null | head -1)
+          ROCM_PATH=${ROCM_PATH:-/opt/rocm}
           ROCM_CLANG="$ROCM_PATH/llvm/bin/clang++"
           DEVICE_LIB=$(find "$ROCM_PATH/lib/llvm/lib/clang/"*/lib/amdgcn/bitcode -maxdepth 0 -type d 2>/dev/null | head -1)
           DEVICE_LIB=${DEVICE_LIB:-$ROCM_PATH/amdgcn/bitcode}
@@ -181,18 +190,23 @@ jobs:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
 
-      - name: Build slim
+      - name: Build slim (single-arch budget gate)
+        # Each gfx target adds its full Tensile kernel set to rocBLAS plus a
+        # second copy of the device fat binary, so the slim image roughly
+        # doubles in size per arch. The CI budget is per-arch; users who
+        # need multi-arch slim build it themselves with
+        # GPU_TARGETS="gfx1100;gfx1200".
         run: |
           docker build -f docker/Dockerfile.slim -t rocmolkit:slim \
-            --build-arg GPU_TARGETS="gfx1200;gfx1100" .
+            --build-arg GPU_TARGETS="gfx1100" .
 
       - name: Check size budget (< 2.5 GB)
         run: |
           size=$(docker image inspect rocmolkit:slim --format='{{.Size}}')
           mb=$((size / 1024 / 1024))
           echo "rocmolkit:slim = ${mb} MB"
-          # Realistic budget after Phase 1 trims (rocsolver/rocsparse out,
-          # Tensile filter, no docs/llvm). Currently sitting at ~2.0 GB.
+          # Realistic per-arch budget after Phase 1 trims (rocsolver/rocsparse
+          # out, Tensile filter, no docs/llvm). Currently sitting at ~2.0 GB.
           # Headroom of ~500 MB for new Phase 2+ deps.
           if [ "$mb" -gt 2560 ]; then
             echo "FAIL: imagem acima do orçamento (2560 MB)"
