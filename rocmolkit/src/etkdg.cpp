@@ -509,6 +509,20 @@ std::optional<DeviceCoordResult> embedMolecules(const std::vector<RDKit::ROMol*>
     }
   }
   updateExceptionRegistry.rethrow();
+
+  // ROCm 7.x hipMallocAsync keeps a memory pool that grows across invocations.
+  // Without explicit trim, repeated EmbedMolecules calls leak GPU memory and
+  // eventually corrupt the heap (segfault on 4th-5th call). Trim each device
+  // we touched back to 0 reserved bytes on the way out.
+  for (int devId : gpuIdsToUse) {
+    const WithDevice dev(devId);
+    cudaCheckErrorNoThrow(hipDeviceSynchronize());
+    hipMemPool_t pool = nullptr;
+    if (hipDeviceGetDefaultMemPool(&pool, devId) == hipSuccess && pool != nullptr) {
+      cudaCheckErrorNoThrow(hipMemPoolTrimTo(pool, 0));
+    }
+  }
+
   return std::nullopt;
 }
 
