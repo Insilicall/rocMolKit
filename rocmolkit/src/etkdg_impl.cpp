@@ -141,6 +141,23 @@ void ETKDGDriver::iterate() {
       stages_[i]->execute(*context_);
     }
 
+    // ROCMOLKIT_DEBUG_STAGES: sync + check after each stage to localise crashes.
+    // Set ROCMOLKIT_DEBUG_STAGES=1 in the environment to enable.
+    static const bool debugStages = std::getenv("ROCMOLKIT_DEBUG_STAGES") != nullptr;
+    if (debugStages) {
+      std::fprintf(stderr, "[rocmolkit] iter=%d stage[%zu/%zu]=%s ... ",
+                   iteration_, i, numStages, stages_[i]->name().c_str());
+      std::fflush(stderr);
+      hipError_t syncErr = hipStreamSynchronize(stream_);
+      hipError_t lastErr = hipGetLastError();
+      if (syncErr != hipSuccess || lastErr != hipSuccess) {
+        std::fprintf(stderr, "ERROR sync=%d last=%d (%s / %s)\n",
+                     syncErr, lastErr, hipGetErrorString(syncErr), hipGetErrorString(lastErr));
+      } else {
+        std::fprintf(stderr, "OK\n");
+      }
+    }
+
     launchCollectAndFilterFailuresKernel(*context_, static_cast<int>(i), stream_);
   }
 
