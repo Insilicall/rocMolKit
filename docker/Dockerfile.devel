@@ -54,7 +54,8 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
 
 COPY tools/build_rdkit.sh /tmp/build_rdkit.sh
 RUN chmod +x /tmp/build_rdkit.sh && /tmp/build_rdkit.sh Release_2024_09_6
-ENV RDKIT_ROOT=/opt/rdkit
+ENV RDKIT_ROOT=/opt/rdkit \
+    LD_LIBRARY_PATH=/usr/local/lib:/opt/rdkit/lib:/opt/rocm/lib:/opt/rocm/lib/llvm/lib
 
 # Ensure /opt/rocm symlink exists (ROCm 7.x installs as /opt/rocm-7.2.3
 # without the unversioned symlink in some distros).
