@@ -70,6 +70,7 @@ RUN mkdir -p /install \
     && cmake -S . -B /build -GNinja \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_INSTALL_PREFIX=/install \
+        -DCMAKE_CXX_COMPILER=/opt/rocm/bin/hipcc \
         -DCMAKE_HIP_COMPILER=/opt/rocm/bin/hipcc \
         -DCMAKE_HIP_PLATFORM=amd \
         -DGPU_TARGETS="${GPU_TARGETS}" \

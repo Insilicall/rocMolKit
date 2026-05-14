@@ -64,6 +64,9 @@ jobs:
         run: |
           cmake -S . -B build -GNinja \
             -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_CXX_COMPILER=/opt/rocm/bin/hipcc \
+            -DCMAKE_HIP_COMPILER=/opt/rocm/bin/hipcc \
+            -DCMAKE_HIP_PLATFORM=amd \
             -DGPU_TARGETS="gfx1100" \
             -DRDKit_ROOT=/opt/rdkit \
             -DROCMOLKIT_BUILD_TESTS=OFF
