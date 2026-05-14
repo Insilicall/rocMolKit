@@ -10,6 +10,12 @@
 
 #pragma once
 
+// Pull HIP_VERSION_MAJOR before any version gating below.
+// hip_version.h is the lightweight header that just defines the version macros;
+// hip_runtime.h pulls it transitively but is much heavier.
+#if __has_include(<hip/hip_version.h>)
+    #include <hip/hip_version.h>
+#endif
 #include <hip/hip_runtime.h>
 
 // CUDA Graphs Conditional Nodes (cudaGraphConditionalHandle, cudaGraphSetConditional)
