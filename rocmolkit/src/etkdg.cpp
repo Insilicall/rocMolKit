@@ -241,6 +241,7 @@ std::optional<DeviceCoordResult> embedMolecules(const std::vector<RDKit::ROMol*>
   }
 
   // Assign streams to the specified GPU devices
+  if (_dbg) dbg("creating streams");
   const int numThreadsGpuBatching = effectivebatchesPerGpu * static_cast<int>(gpuIdsToUse.size());
   for (int i = 0; i < numThreadsGpuBatching; ++i) {
     const int        deviceId = gpuIdsToUse[i % gpuIdsToUse.size()];
@@ -248,6 +249,7 @@ std::optional<DeviceCoordResult> embedMolecules(const std::vector<RDKit::ROMol*>
     streamsPerThread.emplace_back();
     devicesPerThread.push_back(deviceId);
   }
+  if (_dbg) dbg("streams OK");
 
   // Per-thread device-output collectors (only used in DEVICE mode).
   std::vector<detail::DeviceCoordCollector> collectorsPerThread;
@@ -276,19 +278,23 @@ std::optional<DeviceCoordResult> embedMolecules(const std::vector<RDKit::ROMol*>
 
   std::unordered_map<const RDKit::ROMol*, std::vector<std::unique_ptr<Conformer>>> conformers;
 
+  if (_dbg) dbg("entering parallel dispatch");
   // Process molecules using Scheduler dispatch in parallel
   detail::OpenMPExceptionRegistry dispatchExceptionRegistry;
 #pragma omp parallel num_threads(numThreadsGpuBatching) default(shared)
   {
     try {
       hipStream_t     streamPtr = streamsPerThread[omp_get_thread_num()].stream();
+      if (_dbg && omp_get_thread_num() == 0) std::fprintf(stderr, "[setup] in parallel region, thread 0\n");
       const int        deviceId  = devicesPerThread[omp_get_thread_num()];
       const WithDevice dev(deviceId);
+      if (_dbg && omp_get_thread_num() == 0) std::fprintf(stderr, "[setup] making BfgsBatchMinimizer\n");
       auto             minimizer = std::make_unique<BfgsBatchMinimizer>(4,  // dataDim for ETKDG (4D distance geometry)
                                                             DebugLevel::NONE,
                                                             true,  // scaleGrads
                                                             streamPtr,
                                                             backend);
+      if (_dbg && omp_get_thread_num() == 0) std::fprintf(stderr, "[setup] BfgsBatchMinimizer OK\n");
       std::unordered_map<const RDKit::ROMol*, nvMolKit::DistGeom::EnergyForceContribsHost>   dgCache;
       std::unordered_map<const RDKit::ROMol*, nvMolKit::DistGeom::Energy3DForceContribsHost> etkCache;
       // Pinned reusable buffers for common copies.
