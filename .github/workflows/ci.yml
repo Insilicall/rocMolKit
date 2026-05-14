@@ -81,6 +81,49 @@ jobs:
         # block the slim image.
         run: cmake --build build --target rocmolkit_core
 
+  python-bindings-probe:
+    # Phase 2 sentinel - tries to build Python bindings on top of rocmolkit_core.
+    # Allowed to fail while iterating; the green build above is the source of truth.
+    needs: build-cpu-smoke
+    runs-on: ubuntu-22.04
+    container:
+      image: rocm/dev-ubuntu-22.04:6.2
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build deps
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            cmake ninja-build python3-dev python3-pip curl git \
+            libboost-all-dev libeigen3-dev zlib1g-dev libbz2-dev libfreetype6-dev \
+            hipblas-dev hiprand-dev rocblas-dev rocrand-dev \
+            hipcub-dev rocprim-dev rocthrust-dev || true
+
+      - name: uv + RDKit cache
+        uses: actions/cache@v4
+        with:
+          path: /opt/rdkit
+          key: rdkit-Release_2024_09_6-${{ runner.os }}-rocm6.2
+
+      - name: Try Python bindings
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          ~/.local/bin/uv pip install --system --break-system-packages \
+            scikit-build-core nanobind numpy
+          ROCM_CLANG=$(ls /opt/rocm-*/llvm/bin/clang++ 2>/dev/null | head -1)
+          cmake -S . -B build-bindings -GNinja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_CXX_COMPILER="$ROCM_CLANG" \
+            -DCMAKE_HIP_COMPILER="$ROCM_CLANG" \
+            -DCMAKE_HIP_PLATFORM=amd \
+            -DGPU_TARGETS="gfx1100" \
+            -DRDKit_ROOT=/opt/rdkit \
+            -DROCMOLKIT_BUILD_PYTHON_BINDINGS=ON
+          cmake --build build-bindings --target _embedMolecules || \
+            echo "::warning::Phase 2 bindings still failing - tracked in ISSUES.md"
+
   docker-devel-smoke:
     # Build do Dockerfile.devel + smoke import (sem GPU, só valida que tudo se
     # carrega como módulo Python).

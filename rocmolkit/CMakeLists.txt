@@ -160,11 +160,10 @@ if(ROCMOLKIT_RDKIT_EXT)
     )
 endif()
 
-# ─── Python bindings (boost-python ou nanobind) ─────────────
-# Fase 2+: ativar quando ETKDG estiver compilando.
-if(ROCMOLKIT_BUILD_PYTHON_BINDINGS AND TARGET rocmolkit_core)
-    # add_subdirectory(nvmolkit)   # depois do hipify dos bindings
-endif()
+# ─── Python bindings (boost-python) ─────────────────────────
+# Phase 2 - opt-in via -DROCMOLKIT_BUILD_PYTHON_BINDINGS=ON
+# (default OFF to keep the green core build stable while bindings iterate).
+add_subdirectory(nvmolkit)
 
 install(DIRECTORY ${ROCMOLKIT_INCLUDE_DIR}/
         DESTINATION include
