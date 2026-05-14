@@ -154,6 +154,31 @@ before scheduling on a device, and skip devices whose `gcnArchName`
 isn't in the binary's compiled set. The user-visible API stays the
 same; bugs vanish.
 
+### Driver VRAM leak after killed/aborted call
+
+When an `EmbedMolecules` call is killed mid-flight (timeout, SIGKILL,
+container kill), the HIP runtime leaks the call's VRAM allocation:
+`/sys/class/drm/card1/device/mem_info_vram_used` keeps reporting
+~2 GB held even after the process is gone and `lsof /dev/kfd` is
+empty. Subsequent calls can hang at GPU 100 % busy without producing
+output, presumably because the memory pool for the next allocation
+collides with the leaked region.
+
+Symptom: a fresh `docker run` of even the simplest case
+(1 mol × k=1) hangs forever after a previous test was force-killed.
+
+Recovery options (none of them clean):
+- Wait several minutes; the kernel sometimes reclaims.
+- Reload the AMD GPU module (`sudo modprobe -r amdgpu && sudo modprobe amdgpu`).
+- Reboot.
+
+Mitigation: don't kill `EmbedMolecules` calls; let them finish or
+fail naturally. The `safe.py` wrapper enforces a per-call timeout
+(`timeout=30.0` default) at the **subprocess** level — when that
+fires the subprocess gets SIGTERM, which appears to NOT trigger the
+leak (because the call is on a stream that gets cleanly destroyed by
+the dying subprocess's HIP runtime teardown).
+
 ### What this invalidates from earlier in this file
 
 Every "state-leak between calls" finding above this section was wrong

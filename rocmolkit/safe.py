@@ -29,14 +29,15 @@ from rdkit.Geometry import Point3D
 
 
 _WORKER = """
-import sys, json
+import os, sys, json
 from rdkit import Chem
 from rdkit.Chem import AddHs
 from rdkit.Chem.rdDistGeom import ETKDGv3
-from rocmolkit._embedMolecules import EmbedMolecules
+from rocmolkit._embedMolecules import EmbedMolecules, BatchHardwareOptions
 
 mol_pickle_hex = sys.argv[1]
 seed = int(sys.argv[2])
+gpu_id = int(sys.argv[3])
 
 m = Chem.Mol(bytes.fromhex(mol_pickle_hex))
 
@@ -44,7 +45,15 @@ p = ETKDGv3()
 p.useRandomCoords = True
 p.randomSeed = seed
 
-EmbedMolecules([m], p, 1)
+# Pin to a single discrete GPU. nvMolKit by default uses every device
+# returned by hipGetDeviceCount(), which on Ryzen + dGPU hosts also
+# enumerates the iGPU (gfx1036). The binary has no kernel for the iGPU,
+# so dispatch crashes with "No compatible code objects found". See
+# ISSUES.md "ROOT CAUSE FOUND".
+opts = BatchHardwareOptions()
+opts.gpuIds = [gpu_id]
+
+EmbedMolecules([m], p, 1, -1, opts)
 
 if m.GetNumConformers() == 0:
     sys.exit(2)
@@ -64,6 +73,7 @@ def embed_molecule(
     mol: Chem.Mol,
     *,
     seed: int = 42,
+    gpu_id: int = 0,
     max_retries: int = 8,
     timeout: float = 30.0,
 ) -> Chem.Mol:
@@ -73,6 +83,11 @@ def embed_molecule(
         mol: RDKit molecule. Hydrogens should already be added (call
             ``Chem.AddHs(mol)`` first if needed).
         seed: Random seed for ETKDGv3 (passed as ``randomSeed``).
+        gpu_id: Which discrete GPU to dispatch on. Defaults to 0 — the
+            first device returned by ``hipGetDeviceCount()``. Override
+            if you have multiple discrete GPUs and want a non-default
+            one. Pinning is essential on hosts where the iGPU is
+            enumerated alongside a dGPU; see ISSUES.md.
         max_retries: Maximum number of subprocess attempts. Each
             subprocess crash counts as one attempt; the next attempt
             starts in a fresh process.
@@ -92,7 +107,7 @@ def embed_molecule(
     for attempt in range(1, max_retries + 1):
         try:
             r = subprocess.run(
-                [sys.executable, "-c", _WORKER, pickle_hex, str(seed)],
+                [sys.executable, "-c", _WORKER, pickle_hex, str(seed), str(gpu_id)],
                 capture_output=True,
                 text=True,
                 timeout=timeout,
@@ -139,38 +154,40 @@ def embed_molecules(
     mols: list[Chem.Mol],
     *,
     seed: int = 42,
+    gpu_id: int = 0,
     max_retries: int = 8,
     timeout: float = 30.0,
 ) -> list[Chem.Mol]:
     """Embed a list of molecules, one subprocess per molecule.
 
-    The direct ``EmbedMolecules([m1, m2, ...], ...)`` batch path is
-    affected by a different threshold of the same bug (any batch with
-    N>=4 molecules SIGSEGVs reliably). Calling this helper trades batch
-    throughput for reliability — each molecule gets its own subprocess.
-
     Mutates each mol in-place (adds a Conformer); returns the list for
     chaining.
     """
     for m in mols:
-        embed_molecule(m, seed=seed, max_retries=max_retries, timeout=timeout)
+        embed_molecule(m, seed=seed, gpu_id=gpu_id,
+                       max_retries=max_retries, timeout=timeout)
     return mols
 
 
 _MMFF_WORKER = """
 import sys, json
 from rdkit import Chem
-from rocmolkit import _embedMolecules  # registers BatchHardwareOptions converter
+from rocmolkit._embedMolecules import BatchHardwareOptions
 from rocmolkit._mmffOptimization import MMFFOptimizeMoleculesConfs
 
 mol_pickle_hex = sys.argv[1]
 max_iters = int(sys.argv[2])
+gpu_id = int(sys.argv[3])
 
 m = Chem.Mol(bytes.fromhex(mol_pickle_hex))
 if m.GetNumConformers() == 0:
     sys.exit(3)  # caller error: no conformer to optimize
 
-energies = MMFFOptimizeMoleculesConfs([m], maxIters=max_iters)
+# Pin to a single discrete GPU (see ISSUES.md "ROOT CAUSE FOUND").
+opts = BatchHardwareOptions()
+opts.gpuIds = [gpu_id]
+
+energies = MMFFOptimizeMoleculesConfs([m], maxIters=max_iters, hardwareOptions=opts)
 
 # Pull back the optimised coordinates of conformer 0.
 c = m.GetConformer(0)
@@ -184,6 +201,7 @@ def mmff_optimize_molecule(
     mol: Chem.Mol,
     *,
     max_iters: int = 200,
+    gpu_id: int = 0,
     max_retries: int = 8,
     timeout: float = 30.0,
 ) -> list[float]:
@@ -212,7 +230,7 @@ def mmff_optimize_molecule(
     for attempt in range(1, max_retries + 1):
         try:
             r = subprocess.run(
-                [sys.executable, "-c", _MMFF_WORKER, pickle_hex, str(max_iters)],
+                [sys.executable, "-c", _MMFF_WORKER, pickle_hex, str(max_iters), str(gpu_id)],
                 capture_output=True,
                 text=True,
                 timeout=timeout,
@@ -251,6 +269,7 @@ def mmff_optimize_molecules(
     mols: list[Chem.Mol],
     *,
     max_iters: int = 200,
+    gpu_id: int = 0,
     max_retries: int = 8,
     timeout: float = 30.0,
 ) -> list[list[float]]:
@@ -261,7 +280,8 @@ def mmff_optimize_molecules(
     """
     return [
         mmff_optimize_molecule(
-            m, max_iters=max_iters, max_retries=max_retries, timeout=timeout
+            m, max_iters=max_iters, gpu_id=gpu_id,
+            max_retries=max_retries, timeout=timeout,
         )
         for m in mols
     ]
@@ -270,20 +290,24 @@ def mmff_optimize_molecules(
 _UFF_WORKER = """
 import sys, json
 from rdkit import Chem
-from rocmolkit import _embedMolecules  # registers BatchHardwareOptions
+from rocmolkit._embedMolecules import BatchHardwareOptions
 from rocmolkit._uffOptimization import UFFOptimizeMoleculesConfs
 
 mol_pickle_hex = sys.argv[1]
 max_iters = int(sys.argv[2])
 vdw_thresh = float(sys.argv[3])
 ignore_interfrag = sys.argv[4] == "1"
+gpu_id = int(sys.argv[5])
 
 m = Chem.Mol(bytes.fromhex(mol_pickle_hex))
 if m.GetNumConformers() == 0:
     sys.exit(3)
 
+opts = BatchHardwareOptions()
+opts.gpuIds = [gpu_id]
+
 energies = UFFOptimizeMoleculesConfs(
-    [m], max_iters, [vdw_thresh], [ignore_interfrag]
+    [m], max_iters, [vdw_thresh], [ignore_interfrag], opts
 )
 
 c = m.GetConformer(0)
@@ -299,6 +323,7 @@ def uff_optimize_molecule(
     max_iters: int = 200,
     vdw_thresh: float = 10.0,
     ignore_interfrag_interactions: bool = True,
+    gpu_id: int = 0,
     max_retries: int = 8,
     timeout: float = 30.0,
 ) -> list[float]:
@@ -340,6 +365,7 @@ def uff_optimize_molecule(
                     str(max_iters),
                     str(vdw_thresh),
                     "1" if ignore_interfrag_interactions else "0",
+                    str(gpu_id),
                 ],
                 capture_output=True,
                 text=True,
@@ -380,6 +406,7 @@ def uff_optimize_molecules(
     max_iters: int = 200,
     vdw_thresh: float = 10.0,
     ignore_interfrag_interactions: bool = True,
+    gpu_id: int = 0,
     max_retries: int = 8,
     timeout: float = 30.0,
 ) -> list[list[float]]:
@@ -390,6 +417,7 @@ def uff_optimize_molecules(
             max_iters=max_iters,
             vdw_thresh=vdw_thresh,
             ignore_interfrag_interactions=ignore_interfrag_interactions,
+            gpu_id=gpu_id,
             max_retries=max_retries,
             timeout=timeout,
         )
