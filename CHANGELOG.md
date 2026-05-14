@@ -4,6 +4,35 @@ All notable changes to rocMolKit will be documented here.
 
 ## [Unreleased]
 
+### ROCm 7.2.3 + RDNA4 (gfx1200) + 6/6 bindings load (2026-05-14, evening)
+
+Validated end-to-end on a real AMD Radeon RX 9060 XT (Navi 44 / gfx1200) with ROCm 7.2.3:
+
+- **All 6 Python bindings import cleanly** in the local image: `_embedMolecules`, `_mmffOptimization`, `_uffOptimization`, `_batchedForcefield`, `_conformerRmsd`, `_arrayHelpers`.
+- API surface exposed: `EmbedMolecules` / `EmbedMoleculesDevice`, `MMFFOptimizeMoleculesConfs(Device)`, `UFFOptimizeMoleculesConfs(Device)`, `MMFFProperties`, `NativeMMFFBatchedForcefield`, `NativeUFFBatchedForcefield`, `buildMMFFPropertiesFromRDKit`, `GetConformerRMSMatrix(Batch)`.
+- `rocminfo` inside the container detects gfx1200 + 32 CUs.
+
+#### ROCm 7.2.3 changes vs 6.2
+
+- `--rocm-device-lib-path=/opt/rocm-*/lib/llvm/lib/clang/<N>/lib/amdgcn/bitcode` is required (no auto-discovery).
+- `__shfl_sync(mask, ...)` mask must be **64-bit** (`0xffffffffffffffffULL`) — static_assert in `amd_warp_sync_functions.h`.
+- `__shfl_sync` / `__syncwarp` / `__ballot_sync` are now real functions in `amd_hip_bf16.h` — our shims gated to `HIP_VERSION_MAJOR < 7`.
+- `hipcub::DeviceReduce::TransformReduce` is available (was missing in 6.2) — re-included `bfgs_minimize.hip.cpp`.
+- CMake 4.x requires `CMAKE_HIP_ARCHITECTURES` set **before** `enable_language(HIP)`.
+
+#### Newly re-included sources (compile under ROCm 7.x)
+- `src/minimizer/bfgs_minimize.hip.cpp` (TransformReduce now available)
+- `src/minimizer/bfgs_hessian.hip.cpp` (with new `rocmolkit/cg_reduce_shim.h` for `cooperative_groups::reduce_store_async`)
+- `src/symmetric_eigensolver.hip.cpp` (`cuda::std::abs` shim sufficient)
+
+#### Still excluded
+- `morgan_fingerprint_kernels` + consumers — `cuda::std::span` deduction guides do not propagate via `using` in templated contexts; needs explicit deduction or std::span at call sites.
+- `similarity_kernels` + `similarity.cpp` — PTX inline asm (BMMA, async copy).
+- `butina`, `tfd`, `substruct` — CUDA Graphs Conditional Nodes / unported features.
+
+#### Open
+- Functional GPU test (`EmbedMolecules(mols, params, n)`) hits a Boost.Python ABI mismatch between the system boost-1.83 used by our bindings and the boost vendored inside `rdkit-pypi`. Resolution path: build RDKit Python wrappers ourselves (`RDK_BUILD_PYTHON_WRAPPERS=ON`) so RDKit Mol types share ABI with the rocmolkit bindings.
+
 ### Phase 2 — first Python binding compiled (2026-05-14)
 
 - `rocmolkit/nvmolkit/CMakeLists.txt` builds boost-python MODULE libraries
