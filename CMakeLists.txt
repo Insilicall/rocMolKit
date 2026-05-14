@@ -51,6 +51,23 @@ if(CMAKE_HIP_COMPILER)
     if(NOT DEFINED CMAKE_HIP_ARCHITECTURES)
         set(CMAKE_HIP_ARCHITECTURES "${GPU_TARGETS}" CACHE STRING "HIP archs" FORCE)
     endif()
+
+    # ROCm 7.x clang no longer auto-discovers the device library; tell it
+    # explicitly. Look for the actual versioned root (/opt/rocm-7.2.3/...).
+    if(NOT DEFINED ROCM_PATH)
+        if(DEFINED ENV{ROCM_PATH})
+            set(ROCM_PATH "$ENV{ROCM_PATH}")
+        else()
+            file(GLOB _rocm_candidates LIST_DIRECTORIES TRUE "/opt/rocm-*" "/opt/rocm")
+            list(GET _rocm_candidates -1 ROCM_PATH)
+        endif()
+    endif()
+    if(EXISTS "${ROCM_PATH}/amdgcn/bitcode" OR EXISTS "${ROCM_PATH}/lib/llvm/amdgcn/bitcode")
+        set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} --rocm-path=${ROCM_PATH}"
+            CACHE STRING "HIP flags" FORCE)
+        message(STATUS "rocMolKit: --rocm-path=${ROCM_PATH}")
+    endif()
+
     enable_language(HIP)
     find_package(hip QUIET)
     find_package(hipblas QUIET)
