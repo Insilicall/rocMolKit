@@ -99,6 +99,11 @@ std::optional<DeviceCoordResult> embedMolecules(const std::vector<RDKit::ROMol*>
                                                 CoordinateOutput                            output,
                                                 int                                         targetGpu) {
   const ScopedNvtxRange fullRange("EmbedMolecules");
+  // ROCMOLKIT_DEBUG_STAGES=1 logs each setup phase.
+  static const bool _dbg = std::getenv("ROCMOLKIT_DEBUG_STAGES") != nullptr;
+  auto dbg = [](const char* m) { std::fprintf(stderr, "[setup] %s\n", m); std::fflush(stderr); };
+  if (_dbg) dbg("entered embedMolecules");
+
   if (!params.useRandomCoords) {
     throw std::runtime_error("ETKDG requires useRandomCoords to be true. Please set it in the EmbedParameters.");
   }
@@ -144,10 +149,12 @@ std::optional<DeviceCoordResult> embedMolecules(const std::vector<RDKit::ROMol*>
   eargs.resize(mols.size());
 
   // Pre-initialize RDKit internal data structures to avoid race conditions
+  if (_dbg) dbg("pre-init prepareEmbedderArgs (dummy)");
   if (!mols.empty()) {
     detail::EmbedArgs dummyEarg;
     nvMolKit::DGeomHelpers::prepareEmbedderArgs(*mols[0], paramsCopy, dummyEarg);
   }
+  if (_dbg) dbg("dummy prepareEmbedderArgs OK");
 
   std::vector<RDKit::ROMol*> sortedMols = mols;
   std::sort(sortedMols.begin(), sortedMols.end(), [](const RDKit::ROMol* mol1, const RDKit::ROMol* mol2) {
@@ -172,6 +179,7 @@ std::optional<DeviceCoordResult> embedMolecules(const std::vector<RDKit::ROMol*>
   }
 
   // Prepare embedder args for each unique molecule (without duplication)
+  if (_dbg) dbg("parallel prepareEmbedderArgs loop");
   detail::OpenMPExceptionRegistry prepareExceptionRegistry;
 #pragma omp parallel for num_threads(numThreads) default(none) \
   shared(sortedMols, eargs, paramsCopy, prepareExceptionRegistry)
@@ -191,6 +199,7 @@ std::optional<DeviceCoordResult> embedMolecules(const std::vector<RDKit::ROMol*>
     }
   }
   prepareExceptionRegistry.rethrow();
+  if (_dbg) dbg("parallel prepareEmbedderArgs OK");
 
   // Set max iterations if not specified
   if (maxIterations == -1) {
