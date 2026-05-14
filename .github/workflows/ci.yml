@@ -24,33 +24,35 @@ jobs:
         run: |
           apt-get update
           apt-get install -y --no-install-recommends \
-            cmake ninja-build python3-dev python3-pip curl xz-utils \
-            libboost-python-dev libeigen3-dev \
+            cmake ninja-build python3-dev python3-pip curl git \
+            libboost-all-dev libeigen3-dev zlib1g-dev libbz2-dev \
             hipblas-dev hiprand-dev rocblas-dev rocrand-dev \
             hipcub-dev rocprim-dev rocthrust-dev || true
 
-      - name: Install Python build tools via uv (fast)
+      - name: Install Python build tools via uv
         run: |
           curl -LsSf https://astral.sh/uv/install.sh | sh
           ~/.local/bin/uv pip install --system --break-system-packages \
             scikit-build-core nanobind numpy
 
-      - name: Install RDKit (conda-forge, latest) via pixi
+      - name: Cache RDKit build
+        id: cache-rdkit
+        uses: actions/cache@v4
+        with:
+          path: /opt/rdkit
+          # Bump key when bumping RDKIT version in tools/build_rdkit.sh
+          key: rdkit-Release_2024_09_6-${{ runner.os }}-rocm6.2
+
+      - name: Build RDKit from source (cache miss only)
+        if: steps.cache-rdkit.outputs.cache-hit != 'true'
+        run: ./tools/build_rdkit.sh Release_2024_09_6
+        env:
+          JOBS: 4
+
+      - name: Wire RDKit
         run: |
-          curl -fsSL https://pixi.sh/install.sh | bash
-          export PATH="$HOME/.pixi/bin:$PATH"
-          pixi global install --channel conda-forge \
-            'rdkit>=2024.09' 'librdkit-devel>=2024.09' 'boost-cpp>=1.84'
-          # Probe install root (pixi global puts envs under ~/.pixi/envs/)
-          RDKIT_ROOT="$(find $HOME/.pixi/envs -maxdepth 2 -name 'rdkit' -type d | head -1 | xargs dirname)"
-          if [ -z "$RDKIT_ROOT" ] || [ ! -d "$RDKIT_ROOT/include" ]; then
-              # Fall back to combined env path
-              RDKIT_ROOT="$(ls -d $HOME/.pixi/envs/* 2>/dev/null | head -1)"
-          fi
-          echo "RDKIT_ROOT=$RDKIT_ROOT" >> $GITHUB_ENV
-          echo "$RDKIT_ROOT/lib" >> /etc/ld.so.conf.d/rdkit.conf && ldconfig
-          echo "=== headers ==="
-          find "$RDKIT_ROOT/include" -name 'BoundsMatrix.h' -o -name 'RDKitBase.h' | head -5
+          echo "RDKIT_ROOT=/opt/rdkit" >> $GITHUB_ENV
+          echo "/opt/rdkit/lib" > /etc/ld.so.conf.d/rdkit.conf && ldconfig
 
       - name: CMake configure
         env:

@@ -36,9 +36,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && printf 'Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600\n' \
         > /etc/apt/preferences.d/rocm-pin-600 \
     && apt-get update && apt-get install -y --no-install-recommends \
-        build-essential ninja-build git xz-utils \
+        build-essential ninja-build git \
         python${PYTHON_VERSION} python${PYTHON_VERSION}-dev python3-pip \
-        libboost-python-dev libeigen3-dev \
+        libboost-all-dev libeigen3-dev zlib1g-dev libbz2-dev \
         hipcc hip-dev hip-runtime-amd \
         rocblas-dev hipblas-dev \
         rocrand-dev hiprand-dev \
@@ -46,21 +46,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         hipcub-dev rocprim-dev rocthrust-dev \
     && rm -rf /var/lib/apt/lists/*
 
-ENV PATH=/root/.pixi/bin:/root/.local/bin:/opt/rocm/bin:$PATH \
+ENV PATH=/root/.local/bin:/opt/rocm/bin:$PATH \
     ROCM_PATH=/opt/rocm
 
-# Python build tools via uv (instant); RDKit headers via pixi (conda-forge,
-# real C++ devel kit — Ubuntu's librdkit-dev is RDKit 2021.09 and lacks
-# DistGeom helpers required by ETKDG).
+# Python build tools via uv (no conda; runtime stage stays clean).
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
     && uv pip install --system --break-system-packages --no-cache-dir \
-        cmake scikit-build-core nanobind numpy rdkit-pypi \
-    && curl -fsSL https://pixi.sh/install.sh | bash \
-    && pixi global install --channel conda-forge \
-        'rdkit>=2024.09' 'librdkit-devel>=2024.09' 'boost-cpp>=1.84'
+        cmake scikit-build-core nanobind numpy
 
-# Resolve pixi env path so CMake find_package picks RDKit up.
-ENV RDKIT_ROOT=/root/.pixi/envs/rdkit
+# RDKit C++ from source - no PyPI wheel ships the headers and Ubuntu jammy's
+# librdkit-dev is 5 years old (2021.09). This is in the BUILDER stage only,
+# so the .so artifacts copy out but the toolchain (~3 GB of git/cmake/boost)
+# is discarded with the stage.
+COPY tools/build_rdkit.sh /tmp/build_rdkit.sh
+RUN chmod +x /tmp/build_rdkit.sh && /tmp/build_rdkit.sh Release_2024_09_6
+ENV RDKIT_ROOT=/opt/rdkit
 
 WORKDIR /src
 COPY . /src
