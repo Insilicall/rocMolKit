@@ -32,8 +32,9 @@ list(FILTER ROCMOLKIT_HIP_SOURCES EXCLUDE REGEX "/bfgs_minimize\\.hip\\.cpp$")
 list(FILTER ROCMOLKIT_HIP_SOURCES EXCLUDE REGEX "/morgan_fingerprint_kernels\\.hip\\.cpp$")
 list(FILTER ROCMOLKIT_HIP_SOURCES EXCLUDE REGEX "/similarity_kernels\\.hip\\.cpp$")
 list(FILTER ROCMOLKIT_HIP_SOURCES EXCLUDE REGEX "/symmetric_eigensolver\\.hip\\.cpp$")
-list(FILTER ROCMOLKIT_CPP_SOURCES EXCLUDE REGEX "/(tfd|substruct)/")
+list(FILTER ROCMOLKIT_CPP_SOURCES EXCLUDE REGEX "/(tfd|substruct|testutils)/")
 list(FILTER ROCMOLKIT_CPP_SOURCES EXCLUDE REGEX "/(butina|tfd)\\.cpp$")
+list(FILTER ROCMOLKIT_HIP_SOURCES EXCLUDE REGEX "/testutils/")
 
 # Generate versions.h from RDKit version (drives RDKIT_NEW_FLAG_API constexpr).
 if(RDKit_FOUND)
@@ -74,12 +75,14 @@ if(ROCMOLKIT_HIP_SOURCES AND CMAKE_HIP_COMPILER AND hip_FOUND)
     # Force-include hip_compat.h in every translation unit so the
     # NVMOLKIT_CUDA_CC_* macros, cudaCheckError, and cudaSharedmemCarveout*
     # aliases are available without editing each upstream source.
+    # Use generator expressions to gate options by source language:
+    #   - HIP files get offload arch via HIP_ARCHITECTURES property already.
+    #   - All files (HIP+CXX) get -include and warning suppressions.
+    # CXX-only files (.cpp pure) must NOT see HIP-only flags like --offload-arch.
     target_compile_options(rocmolkit_core PRIVATE
-        -include "${ROCMOLKIT_INCLUDE_DIR}/rocmolkit/hip_compat.h"
-        # Boost MPL on Ubuntu jammy (1.74) uses constexpr conversions that
-        # clang 17+ flags as errors. Suppress just this category.
-        -Wno-enum-constexpr-conversion
-        -Wno-deprecated-declarations
+        $<$<COMPILE_LANGUAGE:CXX,HIP>:-include${ROCMOLKIT_INCLUDE_DIR}/rocmolkit/hip_compat.h>
+        $<$<COMPILE_LANGUAGE:CXX,HIP>:-Wno-enum-constexpr-conversion>
+        $<$<COMPILE_LANGUAGE:CXX,HIP>:-Wno-deprecated-declarations>
     )
 
     target_link_libraries(rocmolkit_core PUBLIC hip::host hip::device)
@@ -122,8 +125,15 @@ if(ROCMOLKIT_HIP_SOURCES AND CMAKE_HIP_COMPILER AND hip_FOUND)
 
     set_target_properties(rocmolkit_core PROPERTIES
         POSITION_INDEPENDENT_CODE ON
-        HIP_ARCHITECTURES "${GPU_TARGETS}"
     )
+
+    # Apply --offload-arch ONLY to HIP language sources. The HIP_ARCHITECTURES
+    # property leaks to all sources in CMake 3.30, breaking g++ on .cpp.
+    foreach(_arch IN LISTS GPU_TARGETS)
+        target_compile_options(rocmolkit_core PRIVATE
+            $<$<COMPILE_LANGUAGE:HIP>:--offload-arch=${_arch}>
+        )
+    endforeach()
 
     install(TARGETS rocmolkit_core EXPORT rocmolkit-targets
             LIBRARY DESTINATION lib)
