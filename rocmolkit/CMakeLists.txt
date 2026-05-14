@@ -76,6 +76,19 @@ if(ROCMOLKIT_HIP_SOURCES AND CMAKE_HIP_COMPILER AND hip_FOUND)
         endif()
     endif()
 
+    # OpenMP - used in bfgs_*, etkdg_*, tfd_*, substruct_* CPU paths.
+    find_package(OpenMP QUIET)
+    if(OpenMP_CXX_FOUND)
+        target_link_libraries(rocmolkit_core PUBLIC OpenMP::OpenMP_CXX)
+    endif()
+
+    # Boost - dynamic_bitset (header-only), shared_ptr (header-only).
+    # libboost-all-dev provides everything we need at apt level.
+    find_package(Boost QUIET COMPONENTS system filesystem serialization)
+    if(Boost_FOUND)
+        target_link_libraries(rocmolkit_core PUBLIC Boost::headers)
+    endif()
+
     set_target_properties(rocmolkit_core PROPERTIES
         POSITION_INDEPENDENT_CODE ON
         HIP_ARCHITECTURES "${GPU_TARGETS}"
