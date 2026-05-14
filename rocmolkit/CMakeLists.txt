@@ -154,10 +154,19 @@ if(ROCMOLKIT_RDKIT_EXT AND RDKit_FOUND)
     add_library(rocmolkit_rdkit_ext STATIC ${ROCMOLKIT_RDKIT_EXT})
     target_include_directories(rocmolkit_rdkit_ext PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/rdkit_extensions
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/utils
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/forcefields
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/minimizer
+        ${ROCMOLKIT_INCLUDE_DIR}
         ${RDKit_INCLUDE_DIRS}
     )
     target_link_libraries(rocmolkit_rdkit_ext PUBLIC ${RDKit_LIBRARIES})
+    if(hip_FOUND)
+        target_link_libraries(rocmolkit_rdkit_ext PUBLIC hip::host)
+    endif()
     target_compile_options(rocmolkit_rdkit_ext PRIVATE
+        -include "${ROCMOLKIT_INCLUDE_DIR}/rocmolkit/hip_compat.h"
         -Wno-enum-constexpr-conversion
         -Wno-deprecated-declarations
     )
