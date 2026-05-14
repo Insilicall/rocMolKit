@@ -30,6 +30,22 @@ inline void cudaGraphSetConditional(cudaGraphConditionalHandle, int) {
 }
 #endif
 
+// nvMolKit defines NVMOLKIT_CUDA_CC_* macros from CMAKE_CUDA_ARCHITECTURES at
+// configure time. They guard NVIDIA-specific SM-version-tuned kernels in
+// similarity_kernels.cu. On AMD they have no meaning — define them all as 0
+// so the runtime check (isComputeCapabilitySupported) returns false and the
+// generic fallback is taken. Phase 5 (similarity) may revisit this with
+// AMD-specific WMMA paths.
+#ifndef NVMOLKIT_CUDA_CC_80
+#define NVMOLKIT_CUDA_CC_80  0
+#define NVMOLKIT_CUDA_CC_86  0
+#define NVMOLKIT_CUDA_CC_89  0
+#define NVMOLKIT_CUDA_CC_90  0
+#define NVMOLKIT_CUDA_CC_100 0
+#define NVMOLKIT_CUDA_CC_103 0
+#define NVMOLKIT_CUDA_CC_120 0
+#endif
+
 // Memory carveout symbol — hipify-perl não trata em todos os casos.
 // Aliases para o símbolo HIP equivalente.
 #ifndef cudaSharedmemCarveoutMaxShared

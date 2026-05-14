@@ -44,6 +44,13 @@ if(ROCMOLKIT_HIP_SOURCES AND CMAKE_HIP_COMPILER AND hip_FOUND)
         $<INSTALL_INTERFACE:include>
     )
 
+    # Force-include hip_compat.h in every translation unit so the
+    # NVMOLKIT_CUDA_CC_* macros, cudaCheckError, and cudaSharedmemCarveout*
+    # aliases are available without editing each upstream source.
+    target_compile_options(rocmolkit_core PRIVATE
+        -include "${ROCMOLKIT_INCLUDE_DIR}/rocmolkit/hip_compat.h"
+    )
+
     target_link_libraries(rocmolkit_core PUBLIC hip::host hip::device)
     if(hipblas_FOUND)
         target_link_libraries(rocmolkit_core PUBLIC roc::hipblas)
