@@ -52,6 +52,28 @@ else()
                     "Install ROCm SDK (hipcc) to build GPU code.")
 endif()
 
+# RDKit: prefer the upstream CMake config, fall back to Debian/Ubuntu layout
+# (librdkit-dev installs headers in /usr/include/rdkit and libs as /usr/lib/x86_64-linux-gnu/libRDKit*.so).
+find_package(RDKit QUIET CONFIG)
+if(NOT RDKit_FOUND)
+    find_path(RDKIT_INCLUDE_DIR
+        NAMES GraphMol/RDKitBase.h
+        PATHS /usr/include/rdkit /usr/local/include/rdkit
+    )
+    file(GLOB _RDKIT_LIBS
+        "/usr/lib/x86_64-linux-gnu/libRDKit*.so"
+        "/usr/local/lib/libRDKit*.so"
+    )
+    if(RDKIT_INCLUDE_DIR AND _RDKIT_LIBS)
+        message(STATUS "rocMolKit: RDKit at ${RDKIT_INCLUDE_DIR} ($,${_RDKIT_LIBS} libs)")
+        set(RDKit_FOUND TRUE)
+        set(RDKit_INCLUDE_DIRS ${RDKIT_INCLUDE_DIR})
+        set(RDKit_LIBRARIES ${_RDKIT_LIBS})
+    else()
+        message(WARNING "rocMolKit: RDKit headers not found. apt-get install librdkit-dev.")
+    endif()
+endif()
+
 message(STATUS "rocMolKit: ROCm at ${ROCM_PATH}")
 message(STATUS "rocMolKit: GPU_TARGETS = ${GPU_TARGETS}")
 

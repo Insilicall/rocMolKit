@@ -59,6 +59,23 @@ if(ROCMOLKIT_HIP_SOURCES AND CMAKE_HIP_COMPILER AND hip_FOUND)
         target_link_libraries(rocmolkit_core PUBLIC hip::hiprand)
     endif()
 
+    # RDKit: include + libs (resolved in top-level CMakeLists.txt).
+    if(RDKit_FOUND)
+        target_include_directories(rocmolkit_core PUBLIC ${RDKit_INCLUDE_DIRS})
+        target_link_libraries(rocmolkit_core PUBLIC ${RDKit_LIBRARIES})
+    endif()
+
+    # Eigen (header-only) for the dist-geom builders.
+    find_package(Eigen3 QUIET NO_MODULE)
+    if(Eigen3_FOUND)
+        target_link_libraries(rocmolkit_core PUBLIC Eigen3::Eigen)
+    else()
+        find_path(EIGEN3_INCLUDE_DIR Eigen/Core PATHS /usr/include/eigen3)
+        if(EIGEN3_INCLUDE_DIR)
+            target_include_directories(rocmolkit_core PUBLIC ${EIGEN3_INCLUDE_DIR})
+        endif()
+    endif()
+
     set_target_properties(rocmolkit_core PROPERTIES
         POSITION_INDEPENDENT_CODE ON
         HIP_ARCHITECTURES "${GPU_TARGETS}"
