@@ -106,6 +106,42 @@ Excluded from Phase 1 build but kept in tree (will be ported in their phase):
    it (LLVM bitcode libs for archs we don't target) can be removed.
 3. **Wavefront 64 atomics on pre-gfx9 RDNA** if we ever target gfx1030.
 
+## Known bug — non-deterministic segfault (v0.2.0-alpha)
+
+`EmbedMolecules` and `MMFFOptimizeMoleculesConfs` work correctly on small
+molecules (CCO, benzene, hexane, p-xylene) most of the time but
+intermittently SIGSEGV with no error message. Mid-size molecules (aspirin,
+pyridine) crash more reliably. **Heisenbug — disappears under `gdb`**.
+
+### Investigated, did NOT fix
+
+- Adding `if (data_ != nullptr)` guards before every `hipFreeAsync` in
+  `AsyncDeviceVector` and `AsyncDevicePtr` (they were already guarded in
+  the move-assignment, but not in destructors). No effect.
+- Adding `hipStreamSynchronize(stream_)` before `hipFreeAsync` in the
+  destructors. **Made it worse** — caused crashes even on small mols
+  that previously worked. Reverted.
+- `HIP_LAUNCH_BLOCKING=1` does not stop the crash (so it is not pure
+  kernel async; some host-side issue is involved).
+
+### Hypothesis
+
+Something between RDKit 2024.09.6 Python wrappers, our boost-python
+bindings, and AMD HIP runtime corrupts memory non-deterministically.
+Possibilities: (a) rdkit-pypi style ABI drift between RDKit C++ and the
+Python wrappers we built; (b) AsyncDeviceVector's stream pointer becoming
+dangling when an `etkdg` context tears down; (c) a real device-side OOB
+write that only manifests when the heap layout is unfortunate.
+
+### Next investigation needs
+
+- `rocgdb` / `rocprofiler` tooling — install in the devel image.
+- Hack: try `HSA_TOOLS_LIB=libhsa-amd-aqlprofile.so` for trace.
+- Try compiling with `-fsanitize=address` on the host C++ paths only
+  (HIP kernel TUs cannot use ASan but the host code can).
+- Reproduce in isolation: minimal C++ test that allocates / frees an
+  `AsyncDeviceVector` 1000× and watches for heap corruption.
+
 ## Phase 1 fat removed from runtime image (cumulative)
 
 | Category | Before | After | Saving |
