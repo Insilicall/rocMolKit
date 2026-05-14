@@ -11,24 +11,20 @@
 
 namespace nvMolKit {
 
-// updateInverseHessianBFGSBatch — declared in bfgs_minimize.h.
-// Real signature lives in src/minimizer/bfgs_hessian.hip.cpp.
-// Replaying it here as a no-op host function. The BFGS update is what
-// makes the optimiser converge faster; without it, ETKDG should still
-// produce coordinates (just less optimised) but should not segfault.
-void updateInverseHessianBFGSBatch(int /*n*/,
-                                   const short* /*runFinished*/,
-                                   const int* /*startIndices*/,
-                                   const int* /*sizes*/,
-                                   double* /*hessianInv*/,
-                                   double* /*facShared*/,
-                                   double* /*faeShared*/,
-                                   double* /*sumDGradShared*/,
-                                   const double* /*xi*/,
-                                   int /*ldHess*/,
-                                   bool /*hessianFromIdentity*/,
-                                   const short* /*newlyFinished*/,
-                                   hipStream_t /*stream*/) {
+// Match the exact signature in src/minimizer/bfgs_hessian.h
+void updateInverseHessianBFGSBatch(int            /*numActiveSystems*/,
+                                   const int16_t* /*statuses*/,
+                                   const int*     /*hessianStarts*/,
+                                   const int*     /*atomStarts*/,
+                                   double*        /*invHessians*/,
+                                   double*        /*dGrads*/,
+                                   double*        /*xis*/,
+                                   double*        /*hessDGrads*/,
+                                   const double*  /*grads*/,
+                                   int            /*dataDim*/,
+                                   bool           /*hasLargeMolecule*/,
+                                   const int*     /*activeSystemIndices*/,
+                                   hipStream_t    /*stream*/) {
     // No-op stub for bisect.
 }
 
