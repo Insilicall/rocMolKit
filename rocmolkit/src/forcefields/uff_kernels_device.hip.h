@@ -19,7 +19,7 @@
 
 #include <cmath>
 
-#include "mmff_kernels_device.cuh"
+#include "mmff_kernels_device.hip.h"
 
 using namespace nvMolKit::FFKernelUtils;
 

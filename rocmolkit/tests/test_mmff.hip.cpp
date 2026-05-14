@@ -40,7 +40,7 @@
 #include "device.h"
 #include "ff_utils.h"
 #include "forcefield_constraints.h"
-#include "kernel_utils.cuh"
+#include "kernel_utils.hip.h"
 #include "mmff.h"
 #include "mmff_batched_forcefield.h"
 #include "mmff_flattened_builder.h"

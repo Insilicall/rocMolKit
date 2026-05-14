@@ -19,7 +19,7 @@
 #include <hipcub/hipcub.hpp>
 
 #include "butina.h"
-#include "cub_helpers.cuh"
+#include "cub_helpers.hip.h"
 #include "host_vector.h"
 #include "nvtx.h"
 

@@ -20,7 +20,7 @@
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
 
-#include "macros_ptx.cuh"
+#include "macros_ptx.hip.h"
 
 namespace nvMolKit {
 

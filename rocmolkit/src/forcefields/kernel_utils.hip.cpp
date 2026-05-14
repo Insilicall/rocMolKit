@@ -16,7 +16,7 @@
 
 #include <hipcub/hipcub.hpp>
 
-#include "kernel_utils.cuh"
+#include "kernel_utils.hip.h"
 
 namespace nvMolKit {
 namespace FFKernelUtils {

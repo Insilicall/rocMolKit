@@ -17,7 +17,7 @@
 #ifndef NVMOLKIT_MMFF_KERNELS_DEVICE_CUH
 #define NVMOLKIT_MMFF_KERNELS_DEVICE_CUH
 
-#include "kernel_utils.cuh"
+#include "kernel_utils.hip.h"
 
 using namespace nvMolKit::FFKernelUtils;
 

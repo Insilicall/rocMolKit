@@ -23,7 +23,7 @@
 #include <vector>
 
 #include "atom_data_packed.h"
-#include "boolean_tree.cuh"
+#include "boolean_tree.hip.h"
 #include "device_vector.h"
 #include "packed_bonds.h"
 

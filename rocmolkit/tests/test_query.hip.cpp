@@ -27,7 +27,7 @@
 
 #include "cuda_error_check.h"
 #include "device.h"
-#include "molecules_device.cuh"
+#include "molecules_device.hip.h"
 
 using nvMolKit::AsyncDeviceVector;
 using nvMolKit::checkReturnCode;

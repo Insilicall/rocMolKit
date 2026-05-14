@@ -18,7 +18,7 @@
 #include <gtest/gtest.h>
 
 #include "cuda_error_check.h"
-#include "device_timings.cuh"
+#include "device_timings.hip.h"
 
 using namespace nvMolKit;
 

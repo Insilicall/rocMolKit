@@ -27,7 +27,7 @@
 #include <vector>
 
 #include "device.h"
-#include "graph_labeler.cuh"
+#include "graph_labeler.hip.h"
 #include "substruct_search.h"
 #include "test_utils.h"
 #include "testutils/mol_data.h"

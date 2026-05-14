@@ -37,7 +37,7 @@
 #include "dist_geom_kernels.h"
 #include "embedder_utils.h"
 #include "ff_utils.h"
-#include "kernel_utils.cuh"
+#include "kernel_utils.hip.h"
 #include "test_utils.h"
 
 using namespace nvMolKit::DistGeom;

@@ -15,7 +15,7 @@
 // limitations under the License.
 
 #include "etkdg_stage_stereochem_checks.h"
-#include "kernel_utils.cuh"
+#include "kernel_utils.hip.h"
 namespace nvMolKit {
 namespace detail {
 

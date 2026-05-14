@@ -1,24 +1,16 @@
 // Compat shim para macros/símbolos do nvMolKit que não são CUDA padrão e
 // que o hipify-perl não consegue traduzir automaticamente.
 //
-// Inclua este header em qualquer .hip.cpp que use cudaCheckError ou aliases.
+// Force-included in every translation unit of rocmolkit_core via -include flag
+// in rocmolkit/CMakeLists.txt.
+//
+// NOTE: cudaCheckError is NOT defined here. nvMolKit ships its own
+// rocmolkit/src/utils/cuda_error_check.h that defines it (and is HIP-clean
+// already after hipify-perl). Defining it twice would cause -Wmacro-redefined.
 
 #pragma once
 
 #include <hip/hip_runtime.h>
-#include <stdexcept>
-#include <string>
-
-#ifndef cudaCheckError
-#define cudaCheckError(call)                                                              \
-    do {                                                                                  \
-        hipError_t _e = (call);                                                           \
-        if (_e != hipSuccess) {                                                           \
-            throw std::runtime_error(std::string("HIP error: ") + hipGetErrorString(_e) + \
-                                     " at " __FILE__ ":" + std::to_string(__LINE__));     \
-        }                                                                                 \
-    } while (0)
-#endif
 
 // CUDA Graphs Conditional Nodes (cudaGraphConditionalHandle, cudaGraphSetConditional)
 // não têm equivalente em hipGraph. Usado em src/butina.hip.cpp.

@@ -23,7 +23,7 @@
 #include "dist_geom_flattened_builder.h"
 #include "etkdg_impl.h"
 #include "etkdg_stage_distgeom_minimize.h"
-#include "forcefields/kernel_utils.cuh"
+#include "forcefields/kernel_utils.hip.h"
 #include "nvtx.h"
 
 using ::nvMolKit::detail::ETKDGContext;

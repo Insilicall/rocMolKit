@@ -18,9 +18,9 @@
 #include "rocmolkit/cuda_std_compat.h"
 
 #include "device_vector.h"
-#include "load_store.cuh"
+#include "load_store.hip.h"
 #include "similarity_kernels.h"
-#include "similarity_op.cuh"
+#include "similarity_op.hip.h"
 
 namespace nvMolKit {
 

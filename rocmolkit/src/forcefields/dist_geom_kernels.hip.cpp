@@ -17,8 +17,8 @@
 #include <hipcub/hipcub.hpp>
 
 #include "dist_geom_kernels.h"
-#include "dist_geom_kernels_device.cuh"
-#include "kernel_utils.cuh"
+#include "dist_geom_kernels_device.hip.h"
+#include "kernel_utils.hip.h"
 
 using namespace nvMolKit::FFKernelUtils;
 

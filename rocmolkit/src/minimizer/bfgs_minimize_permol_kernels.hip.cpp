@@ -17,11 +17,11 @@
 #include <hipcub/hipcub.hpp>
 
 #include "bfgs_minimize_permol_kernels.h"
-#include "cub_helpers.cuh"
+#include "cub_helpers.hip.h"
 #include "device_vector.h"
-#include "dist_geom_kernels_device.cuh"
+#include "dist_geom_kernels_device.hip.h"
 #include "mmff_kernels.h"
-#include "mmff_kernels_device.cuh"
+#include "mmff_kernels_device.hip.h"
 #include "versions.h"
 
 namespace nvMolKit {

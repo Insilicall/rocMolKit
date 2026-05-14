@@ -24,9 +24,9 @@
 #include "atom_data_packed.h"
 #include "cuda_error_check.h"
 #include "device.h"
-#include "graph_labeler.cuh"
+#include "graph_labeler.hip.h"
 #include "molecules.h"
-#include "molecules_device.cuh"
+#include "molecules_device.hip.h"
 #include "testutils/substruct_validation.h"
 
 using nvMolKit::addQueryToBatch;

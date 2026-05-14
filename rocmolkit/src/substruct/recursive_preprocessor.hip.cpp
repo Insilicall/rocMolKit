@@ -19,7 +19,7 @@
 #include <string>
 #include <utility>
 
-#include "molecules_device.cuh"
+#include "molecules_device.hip.h"
 #include "recursive_preprocessor.h"
 #include "substruct_debug.h"
 #include "substruct_kernels.h"

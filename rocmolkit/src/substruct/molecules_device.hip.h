@@ -17,7 +17,7 @@
 #define NVMOLKIT_MOLECULES_DEVICE_CUH
 
 #include "atom_data_packed.h"
-#include "boolean_tree.cuh"
+#include "boolean_tree.hip.h"
 #include "molecules.h"
 #include "packed_bonds.h"
 

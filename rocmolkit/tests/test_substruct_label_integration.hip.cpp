@@ -31,10 +31,10 @@
 #include "cuda_error_check.h"
 #include "device.h"
 #include "flat_bit_vect.h"
-#include "graph_labeler.cuh"
+#include "graph_labeler.hip.h"
 #include "mol_data.h"
 #include "molecules.h"
-#include "molecules_device.cuh"
+#include "molecules_device.hip.h"
 #include "substruct_search.h"
 #include "test_utils.h"
 

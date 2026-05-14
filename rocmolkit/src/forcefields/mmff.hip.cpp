@@ -17,7 +17,7 @@
 #include <cassert>
 #include <vector>
 
-#include "kernel_utils.cuh"
+#include "kernel_utils.hip.h"
 #include "mmff.h"
 #include "mmff_kernels.h"
 

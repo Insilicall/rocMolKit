@@ -20,10 +20,10 @@
 #include <hip/hip_cooperative_groups.h>
 
 #include "atom_data_packed.h"
-#include "boolean_tree.cuh"
+#include "boolean_tree.hip.h"
 #include "flat_bit_vect.h"
 #include "molecules.h"
-#include "molecules_device.cuh"
+#include "molecules_device.hip.h"
 #include "substruct_debug.h"
 
 namespace nvMolKit {

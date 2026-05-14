@@ -21,10 +21,10 @@
 
 #include <cstdint>
 
-#include "device_timings.cuh"
+#include "device_timings.hip.h"
 #include "flat_bit_vect.h"
-#include "molecules_device.cuh"
-#include "packed_bonds_device.cuh"
+#include "molecules_device.hip.h"
+#include "packed_bonds_device.hip.h"
 #include "substruct_debug.h"
 #include "substruct_types.h"
 

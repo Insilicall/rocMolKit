@@ -16,9 +16,9 @@
 
 #include <hipcub/hipcub.hpp>
 
-#include "kernel_utils.cuh"
+#include "kernel_utils.hip.h"
 #include "mmff_kernels.h"
-#include "mmff_kernels_device.cuh"
+#include "mmff_kernels_device.hip.h"
 
 using namespace nvMolKit::FFKernelUtils;
 

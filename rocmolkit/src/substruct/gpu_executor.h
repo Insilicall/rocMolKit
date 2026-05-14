@@ -23,7 +23,7 @@
 #include "device.h"
 #include "device_vector.h"
 #include "minibatch_planner.h"
-#include "molecules_device.cuh"
+#include "molecules_device.hip.h"
 #include "pinned_buffer_pool.h"
 #include "recursive_preprocessor.h"
 #include "substruct_search_internal.h"

@@ -25,11 +25,11 @@
 #include "device.h"
 #include "device_vector.h"
 #include "flat_bit_vect.h"
-#include "graph_labeler.cuh"
+#include "graph_labeler.hip.h"
 #include "molecules.h"
-#include "molecules_device.cuh"
+#include "molecules_device.hip.h"
 #include "packed_bonds.h"
-#include "substruct_algos.cuh"
+#include "substruct_algos.hip.h"
 #include "substruct_types.h"
 
 using nvMolKit::AsyncDeviceVector;

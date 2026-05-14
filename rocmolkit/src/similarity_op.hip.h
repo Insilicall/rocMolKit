@@ -20,7 +20,7 @@
 #include <cstdint>
 #include <vector>
 
-#include "macros_ptx.cuh"
+#include "macros_ptx.hip.h"
 
 namespace nvMolKit {
 

@@ -15,10 +15,10 @@
 // limitations under the License.
 
 #include "flat_bit_vect.h"
-#include "graph_labeler.cuh"
-#include "molecules_device.cuh"
-#include "sm_shared_mem_config.cuh"
-#include "substruct_algos.cuh"
+#include "graph_labeler.hip.h"
+#include "molecules_device.hip.h"
+#include "sm_shared_mem_config.hip.h"
+#include "substruct_algos.hip.h"
 #include "substruct_debug.h"
 #include "substruct_kernels.h"
 #include "substruct_launch_config.h"

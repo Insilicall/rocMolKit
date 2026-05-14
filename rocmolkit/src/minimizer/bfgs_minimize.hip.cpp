@@ -21,7 +21,7 @@
 #include "bfgs_hessian.h"
 #include "bfgs_minimize.h"
 #include "bfgs_minimize_permol_kernels.h"
-#include "cub_helpers.cuh"
+#include "cub_helpers.hip.h"
 #include "device_vector.h"
 #include "dist_geom.h"
 #include "dist_geom_kernels.h"

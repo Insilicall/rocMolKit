@@ -18,7 +18,7 @@
 
 #include <vector>
 
-#include "boolean_tree.cuh"
+#include "boolean_tree.hip.h"
 #include "cuda_error_check.h"
 #include "device.h"
 #include "device_vector.h"

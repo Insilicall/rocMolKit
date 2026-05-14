@@ -28,7 +28,7 @@
 #include "device.h"
 #include "device_vector.h"
 #include "molecules.h"
-#include "molecules_device.cuh"
+#include "molecules_device.hip.h"
 #include "recursive_preprocessor.h"
 #include "substruct_search_internal.h"
 #include "substruct_types.h"

@@ -23,8 +23,8 @@
 
 #include "cuda_error_check.h"
 #include "device_vector.h"
-#include "graph_labeler.cuh"
-#include "molecules_device.cuh"
+#include "graph_labeler.hip.h"
+#include "molecules_device.hip.h"
 #include "substruct_search_internal.h"
 #include "substruct_validation.h"
 

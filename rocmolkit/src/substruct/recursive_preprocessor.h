@@ -29,7 +29,7 @@
 #include "device.h"
 #include "device_vector.h"
 #include "molecules.h"
-#include "molecules_device.cuh"
+#include "molecules_device.hip.h"
 #include "nvtx.h"
 #include "pinned_host_allocator.h"
 #include "substruct_types.h"
