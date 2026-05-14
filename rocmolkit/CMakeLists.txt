@@ -220,6 +220,23 @@ else()
     install(TARGETS rocmolkit_core EXPORT rocmolkit-targets)
 endif()
 
+# Python install destination. Defined BEFORE add_subdirectory(nvmolkit) so
+# nvmolkit/CMakeLists.txt's install rule sees a non-empty value (its
+# install(TARGETS ... LIBRARY DESTINATION ${ROCMOLKIT_PYTHON_INSTALL_DIR})
+# call would otherwise CMake-error with "no LIBRARY DESTINATION").
+#
+# ROCMOLKIT_PYTHON_INSTALL_DIR overrides the destination. Default is the
+# build-time Python's site-packages — works for in-place installs (devel
+# image, local cmake --install). For multi-stage Docker builds where the
+# install tree is COPY'd into a different runtime image, pass an explicit
+# path under CMAKE_INSTALL_PREFIX so the artefacts actually end up in the
+# install tree (Python_SITELIB is absolute and ignores CMAKE_INSTALL_PREFIX).
+find_package(Python COMPONENTS Interpreter REQUIRED)
+if(NOT DEFINED ROCMOLKIT_PYTHON_INSTALL_DIR)
+    set(ROCMOLKIT_PYTHON_INSTALL_DIR "${Python_SITELIB}/rocmolkit"
+        CACHE PATH "Where to install the rocmolkit Python package and its compiled .so bindings.")
+endif()
+
 # ─── Python bindings (boost-python) ─────────────────────────
 # Phase 2 - opt-in via -DROCMOLKIT_BUILD_PYTHON_BINDINGS=ON
 # (default OFF to keep the green core build stable while bindings iterate).
@@ -233,18 +250,6 @@ install(DIRECTORY ${ROCMOLKIT_INCLUDE_DIR}/
 # `import rocmolkit` works after `cmake --install`. The compiled bindings
 # (_embedMolecules.so etc.) install themselves via nvmolkit/CMakeLists.txt
 # into the same destination.
-#
-# ROCMOLKIT_PYTHON_INSTALL_DIR overrides the destination. Default is the
-# build-time Python's site-packages — works for in-place installs (devel
-# image, local cmake --install). For multi-stage Docker builds where the
-# install tree is COPY'd into a different runtime image, pass an explicit
-# path under CMAKE_INSTALL_PREFIX so the artefacts actually end up in the
-# install tree (Python_SITELIB is absolute and ignores CMAKE_INSTALL_PREFIX).
-find_package(Python COMPONENTS Interpreter REQUIRED)
-if(NOT DEFINED ROCMOLKIT_PYTHON_INSTALL_DIR)
-    set(ROCMOLKIT_PYTHON_INSTALL_DIR "${Python_SITELIB}/rocmolkit"
-        CACHE PATH "Where to install the rocmolkit Python package and its compiled .so bindings.")
-endif()
 install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/"
         DESTINATION "${ROCMOLKIT_PYTHON_INSTALL_DIR}"
         FILES_MATCHING
