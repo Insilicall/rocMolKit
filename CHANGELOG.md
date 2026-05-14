@@ -2,7 +2,18 @@
 
 All notable changes to rocMolKit will be documented here.
 
-## [v0.3.1-alpha] — 2026-05-14
+## [v0.3.2-alpha] — 2026-05-14
+
+### Fixed
+- **v0.3.1-alpha CMake regression**: `ROCMOLKIT_PYTHON_INSTALL_DIR`
+  was defined AFTER `add_subdirectory(nvmolkit)`, so nvmolkit's
+  `install(TARGETS ...)` rule saw an empty destination and CI
+  build-cpu-smoke errored with "install TARGETS given no LIBRARY
+  DESTINATION for module target _embedMolecules". Move the variable
+  definition before the subdirectory include. Verified `cmake
+  configure` clean both with and without `ROCMOLKIT_BUILD_PYTHON_BINDINGS=ON`.
+
+## [v0.3.1-alpha] — 2026-05-14 (broken — superseded by v0.3.2-alpha)
 
 ### Fixed
 - **Slim image was unusable on v0.3.0-alpha**: `import rocmolkit`
