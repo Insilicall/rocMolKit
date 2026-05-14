@@ -7,35 +7,59 @@ GPU-accelerated RDKit operations on AMD GPUs via HIP/ROCm.
 
 Port of [nvMolKit](https://github.com/NVIDIA-Digital-Bio/nvMolKit) (NVIDIA CUDA, Apache 2.0). Same API surface, AMD backend.
 
-> Status: **alpha** — ETKDG + MMFF94 numerically validated on AMD GPU ✅
+> Status: **alpha** — ETKDG + MMFF94 functional via `rocmolkit.safe` ✅
 > - Stack: ROCm 7.2.3 + Clang 22 + RDKit 2024.09.6 + boost 1.83
 > - Validated on **AMD Radeon RX 9060 XT (Navi 44, RDNA4 / gfx1200)**
-> - ETKDG ethanol bonds: GPU bit-exact vs RDKit CPU (C-C 1.506 Å; C-O within 0.006 Å)
-> - MMFF94 converges to global minimum on ethanol in 267 ms
+> - ETKDG bond lengths: GPU within 0.02 Å of RDKit CPU (within ETKDG noise)
+> - MMFF94 converges to physically sensible minima
 > - 6/6 Python bindings load: embedMolecules, mmffOptimization, uffOptimization,
 >   batchedForcefield, conformerRmsd, arrayHelpers
-> - **Known bug:** non-deterministic segfault on mid-size molecules (aspirin,
->   pyridine). Small molecules (CCO, benzene, hexane, p-xylene) reliable.
->   Investigation in progress — likely host-side use-after-free.
+> - **Known bug** (open): direct `_embedMolecules.EmbedMolecules` SIGSEGVs
+>   non-deterministically on gfx1200 (~65% per-call success). Use
+>   `rocmolkit.safe.embed_molecule(s)` — subprocess+retry wrapper that
+>   measures 100% success and adds ~600 ms/mol overhead. See
+>   [ISSUES.md](ISSUES.md).
 > - Pending: fingerprints, clustering, substructure, tfd (Phases 4-7 kernels)
 >
 > See [PLAN.md](PLAN.md), [ISSUES.md](ISSUES.md) and [CHANGELOG.md](CHANGELOG.md).
 
-## Quickstart (quando estiver pronto)
+## Quickstart
+
+Install dev image + run on a ROCm-capable machine:
 
 ```bash
-pip install rocmolkit
+docker run --rm -it \
+    --device=/dev/kfd --device=/dev/dri \
+    --group-add video --security-opt seccomp=unconfined \
+    ghcr.io/insilicall/rocmolkit:devel \
+    python3
 ```
+
+Recommended path (deterministic via subprocess+retry):
 
 ```python
 from rdkit import Chem
-from rdkit.Chem import AllChem
-from rocmolkit.embedMolecules import EmbedMolecules
+from rdkit.Chem import AddHs
+from rocmolkit.safe import embed_molecule, mmff_optimize_molecule
 
-mols = [Chem.AddHs(Chem.MolFromSmiles(s)) for s in ["CCO", "c1ccccc1", "CC(=O)O"]]
-params = AllChem.ETKDGv3()
-params.useRandomCoords = True
-EmbedMolecules(molecules=mols, params=params, confsPerMolecule=10)
+m = AddHs(Chem.MolFromSmiles("CCO"))
+embed_molecule(m, seed=42)             # GPU ETKDG, retried on segfault
+energies = mmff_optimize_molecule(m)   # GPU MMFF94 on the embedded conformer
+print(m.GetConformer(0).GetAtomPosition(0))
+print("energy:", energies[0])
+```
+
+Direct binding (faster batches, but segfault risk on gfx1200 — see ISSUES.md):
+
+```python
+from rdkit import Chem
+from rdkit.Chem import AddHs
+from rdkit.Chem.rdDistGeom import ETKDGv3
+from rocmolkit._embedMolecules import EmbedMolecules
+
+mols = [AddHs(Chem.MolFromSmiles(s)) for s in ["CCO", "c1ccccc1", "CC(=O)O"]]  # batch <= 3
+params = ETKDGv3(); params.useRandomCoords = True
+EmbedMolecules(mols, params, 1)
 ```
 
 ## Hardware

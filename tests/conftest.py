@@ -3,6 +3,13 @@
 import pytest
 
 
+def pytest_configure(config: pytest.Config) -> None:
+    config.addinivalue_line(
+        "markers",
+        "gpu: requires an AMD GPU + ROCm runtime (run with --rocm or set ROCMOLKIT_HAS_GPU=1)",
+    )
+
+
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
     skip_gpu = pytest.mark.skip(reason="ROCm GPU not available (run with --rocm or set ROCMOLKIT_HAS_GPU=1)")
     has_gpu = config.getoption("--rocm") or _env_truthy("ROCMOLKIT_HAS_GPU")

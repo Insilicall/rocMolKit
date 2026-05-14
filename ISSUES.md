@@ -263,6 +263,22 @@ The bug threshold is **N=4 mols in one batch** and **~4 sequential
 single-mol calls**. Below those thresholds the library is correct
 (numerical parity already verified bit-exact within ETKDG noise).
 
+### Bug surface: ETKDG vs MMFF
+
+The state-leak hits ETKDG much harder than MMFF94. Empirically on
+gfx1200 + ROCm 7.2.3:
+
+| Operation | Single call | Batch (one call, N mols) | Sequential (N back-to-back calls) |
+|---|---|---|---|
+| `EmbedMolecules` (ETKDG) | ~65% per-call | crashes at **N≥4** | crashes after ~4 calls |
+| `MMFFOptimizeMoleculesConfs` | reliable | OK at **N=30** (tested) | crashes after ~30 calls |
+
+So for MMFF, the direct binding is fine for typical batch workloads
+(`MMFFOptimizeMoleculesConfs(big_list, ...)` in one call). The
+`rocmolkit.safe.mmff_optimize_molecule(s)` wrapper exists for the
+sequential-call pattern (e.g. iterating mols one by one in a loop)
+where the same state-leak does eventually fire.
+
 ### **Workaround: `rocmolkit.safe`** (validated, 100% reliable)
 
 Per-call success rate of `EmbedMolecules` is ~65% on gfx1200; even

@@ -10,5 +10,5 @@ subprocess + retry, use ``rocmolkit.safe.embed_molecule(s)``.
 
 from . import safe
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 __all__ = ["safe"]

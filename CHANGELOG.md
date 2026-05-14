@@ -2,6 +2,40 @@
 
 All notable changes to rocMolKit will be documented here.
 
+## [v0.3.0-alpha] — 2026-05-14
+
+### Added
+- `rocmolkit.safe.embed_molecule(s)` and `mmff_optimize_molecule(s)` —
+  subprocess+retry wrappers that work around the open
+  ROCm 7.2.3 + gfx1200 state-leak SIGSEGV. Validated 100% reliability
+  across 45 ETKDG embeds and 15 follow-up MMFF optimisations of a
+  diverse molecular set; numerical parity vs RDKit ≤ 0.02 Å on bond
+  lengths, MMFF energies match qualitatively.
+- `tests/test_safe.py` — pytest regression suite gated on the `gpu`
+  marker (skipped without `--rocm` or `ROCMOLKIT_HAS_GPU=1`).
+- `tests/repro/README.md` — context for the two C++ bisect repros that
+  localised the bug to inside `nvMolKit::embedMolecules`.
+
+### Changed
+- `rocmolkit.__version__` → `0.3.0`.
+- `README.md` quickstart now leads with `rocmolkit.safe`; the direct
+  binding is documented as a power-user path with the segfault caveat.
+- `ISSUES.md` updated with measured per-call success rates and a
+  surface table comparing ETKDG vs MMFF94 thresholds.
+
+### Investigation
+- Five additional fixes attempted and reverted this session (sync
+  `hipMalloc`, stream sync at end of OpenMP region, `hipDeviceReset()`
+  per call, etc.). Each made the bug **worse**, confirming the
+  pattern: more aggressive cleanup ↔ earlier crash. Documented so the
+  next investigator does not repeat them.
+- Bisect refinement: bug threshold is N=4 mols/batch for ETKDG and
+  ~30 sequential calls for MMFF94. Pure-C++ `AsyncDeviceVector`
+  stress runs clean (the allocator pattern is fine in isolation), so
+  the failure is somewhere else in `nvMolKit::embedMolecules`.
+- C++ root cause remains blocked on `rocgdb` 7.2.3 not yet supporting
+  gfx1200 (`AMDGCN architecture 0x45 is not supported`).
+
 ## [Unreleased]
 
 ### MMFF94 + ETKDG numerically validated end-to-end on AMD GPU (2026-05-14)

@@ -96,6 +96,10 @@ def embed_molecule(
                 capture_output=True,
                 text=True,
                 timeout=timeout,
+                # Run from a neutral cwd so an in-source ``rocmolkit/``
+                # directory next to a checkout does not shadow the
+                # installed package (which carries the compiled .so).
+                cwd="/",
             )
         except subprocess.TimeoutExpired:
             last_reason = f"timeout after {timeout}s"
@@ -212,6 +216,7 @@ def mmff_optimize_molecule(
                 capture_output=True,
                 text=True,
                 timeout=timeout,
+                cwd="/",
             )
         except subprocess.TimeoutExpired:
             last_reason = f"timeout after {timeout}s"
