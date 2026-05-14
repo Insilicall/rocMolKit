@@ -110,7 +110,7 @@ Excluded from Phase 1 build but kept in tree (will be ported in their phase):
 
 | Category | Before | After | Saving |
 |---|---|---|---|
-| `rocm/dev-ubuntu` base | 13 GB | — | replaced by ubuntu:22.04 + apt selectivo |
+| `rocm/dev-ubuntu` base | 13 GB | — | replaced by ubuntu:22.04 + selective apt |
 | `rocm-hip-runtime` meta-package | full | minimal trio (hip-runtime-amd + hsa-rocr + comgr) | several hundred MB |
 | `rocsolver` (transitive dep) | 1.7 GB | 0 | 1.7 GB |
 | `rocsparse` (transitive dep) | 1.4 GB | 0 | 1.4 GB |

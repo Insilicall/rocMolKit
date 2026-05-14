@@ -1,216 +1,227 @@
-# rocMolKit — Plano de Port (nvMolKit → ROCm/HIP)
+# rocMolKit — Port Plan (nvMolKit → ROCm/HIP)
 
-> Port do [NVIDIA-Digital-Bio/nvMolKit](https://github.com/NVIDIA-Digital-Bio/nvMolKit) (Apache 2.0) para AMD GPUs via HIP/ROCm.
-> Inspirado na abordagem do [mlxmolkit](https://github.com/guillaume-osmo/mlxmolkit) (Apple Silicon), mas usando **conversão CUDA→HIP automatizada** ao invés de reimplementação.
-
----
-
-## 1. Princípios
-
-1. **Imagem Docker mínima** (requisito explícito). Multi-stage build, runtime final sem SDK, sem headers, sem doc.
-2. **Reaproveitar o máximo do código nvMolKit** via `hipify-perl`. Reescrita só onde for inevitável.
-3. **Paridade numérica** com RDKit como gate de aceitação (mesmas tolerâncias usadas pelo nvMolKit nos testes upstream).
-4. **ETKDG + MMFF94 primeiro**. Resto entra em fases isoladas.
-5. **Apache 2.0** preservada, NOTICE com atribuição clara ao upstream.
+> Port of [NVIDIA-Digital-Bio/nvMolKit](https://github.com/NVIDIA-Digital-Bio/nvMolKit) (Apache 2.0) to AMD GPUs via HIP/ROCm.
+> Inspired by the [mlxmolkit](https://github.com/guillaume-osmo/mlxmolkit) approach (Apple Silicon), but using **automated CUDA→HIP conversion** instead of a from-scratch reimplementation.
 
 ---
 
-## 2. Imagem Docker — estratégia "fica leve"
+## 1. Principles
 
-### Problema com a imagem do nvMolKit
-A oficial usa `rocm/dev-ubuntu-22.04` (~10–15 GB) como runtime. Isso é desnecessário em produção: traz compilador HIP, headers, doc, profilers, debug symbols.
+1. **Minimal Docker image** (explicit requirement). Multi-stage build, runtime stage without SDK, headers, or docs.
+2. **Reuse as much nvMolKit code as possible** through `hipify-perl`. Manual rewrite only when unavoidable.
+3. **Numerical parity** with RDKit as acceptance gate (same tolerances nvMolKit uses upstream).
+4. **ETKDG + MMFF94 first**. The rest lands in isolated phases.
+5. **Apache 2.0** preserved; NOTICE clearly attributes the upstream project.
 
-### Solução: multi-stage com runtime slim
+---
+
+## 2. Docker image — "stay lean" strategy
+
+### Problem with the nvMolKit image
+The official one uses `rocm/dev-ubuntu-22.04` (~10–15 GB) as runtime. That is overkill in production: it pulls the HIP compiler, headers, docs, profilers, debug symbols.
+
+### Solution: multi-stage with slim runtime
 
 ```
 ┌─────────────────────────────────────────────────┐
 │ STAGE 1: builder                                 │
-│   FROM rocm/dev-ubuntu-22.04:6.2                 │
-│   - hipcc, cmake, RDKit headers, boost-python    │
-│   - compila libs e wheel Python                  │
-│   - strip --strip-unneeded em todas as .so       │
+│   FROM ubuntu:22.04 + apt rocm-* selective       │
+│   - clang++, cmake, RDKit headers, boost-all     │
+│   - builds RDKit from source (~10 min, cached)   │
+│   - compiles librocmolkit_core.so + bindings     │
+│   - strip --strip-unneeded on every .so          │
 └─────────────────────────────────────────────────┘
-                        ↓ COPY artefatos
+                        ↓ COPY artifacts
 ┌─────────────────────────────────────────────────┐
 │ STAGE 2: runtime                                 │
 │   FROM ubuntu:22.04                              │
-│   - apt: libpython3.10, libstdc++6, libgomp1     │
-│   - copia SELETIVO de /opt/rocm:                 │
-│       libamdhip64.so.6                           │
-│       libhsa-runtime64.so.1                      │
-│       librocblas.so.4                            │
-│       librocrand.so.1                            │
-│       librocsolver.so.0  (se usado)              │
-│       libhipblas.so.2                            │
-│   - copia rocMolKit .so + wheel rdkit-pypi       │
-│   - SEM /opt/rocm/bin, SEM /opt/rocm/include     │
-│   - SEM /opt/rocm/share (doc, samples)           │
+│   - apt: libpython3.11, libstdc++6, libgomp1     │
+│   - apt: hip-runtime-amd, hsa-rocr, comgr,       │
+│         rocblas, rocrand, hiprand                │
+│   - rocsolver/rocsparse purged (transitive deps) │
+│   - Tensile kernels filtered to GPU_TARGETS only │
+│   - rocmolkit .so + rdkit-pypi via uv            │
+│   - NO /opt/rocm/bin, NO /opt/rocm/include       │
+│   - NO /opt/rocm/share, NO /opt/rocm/llvm        │
 └─────────────────────────────────────────────────┘
 ```
 
-**Alvo de tamanho:** imagem final **< 2 GB** (vs ~12 GB se fosse single-stage). Comparar com:
+**Achieved size:** **2.04 GB** (single gfx target, gfx1100). Compare:
 - `rocm/dev-ubuntu-22.04` ≈ 13 GB
 - `rocm/rocm-terminal` ≈ 9 GB
-- nosso runtime alvo ≈ 1.5–2 GB
+- `rocmolkit:slim` ≈ **2 GB** ✅
 
-### Variantes
-- `rocmolkit:slim` — runtime mínimo (acima)
-- `rocmolkit:devel` — para devs, com hipcc + headers
-- `rocmolkit:cuda-compat` — opcional, build HIP rodando em NVIDIA (HIP é portátil)
+### Variants
+- `rocmolkit:slim` — minimal runtime (above), published at `ghcr.io/insilicall/rocmolkit:slim`.
+- `rocmolkit:devel` — for developers, with hipcc + headers + RDKit dev kit. Published at `ghcr.io/insilicall/rocmolkit:devel`.
+- `rocmolkit:cuda-compat` — optional, future, HIP code running on NVIDIA (HIP is portable).
 
-### Trick adicional para encolher
-- `--squash` no build final
-- `dpkg --purge` agressivo de pacotes apt do estágio runtime
-- não instalar `rdkit` via conda (puxa miniforge inteiro); usar `rdkit-pypi` wheel
+### Additional shrink tricks
+- `--squash` on final build.
+- Aggressive apt purge in the runtime stage.
+- `rdkit-pypi` wheel via `uv` instead of conda (which would pull miniforge).
 
 ---
 
-## 3. Estratégia técnica de conversão
+## 3. Conversion strategy
 
-### O que é automático (HIPIFY)
-| nvMolKit usa | rocMolKit usa | ferramenta |
+### What is automatic (hipify-perl)
+| nvMolKit uses | rocMolKit uses | tool |
 |---|---|---|
 | `cudaMalloc/cudaMemcpy/cudaStream_t` | `hipMalloc/hipMemcpy/hipStream_t` | `hipify-perl` |
-| `__global__`, `__device__`, `__shared__` | idem (HIP herda sintaxe) | trivial |
-| `cuBLAS` | `hipBLAS` (wrapper) ou `rocBLAS` | `hipify-perl` |
-| `cuRAND` | `hipRAND` ou `rocRAND` | `hipify-perl` |
-| `Thrust` | `rocThrust` (API ~idêntica) | recompile |
+| `__global__`, `__device__`, `__shared__` | same (HIP inherits the syntax) | trivial |
+| `cuBLAS` | `hipBLAS` (wrapper) or `rocBLAS` | `hipify-perl` |
+| `cuRAND` | `hipRAND` or `rocRAND` | `hipify-perl` |
+| `Thrust` | `rocThrust` (~identical API) | recompile |
 | `CUB` | `hipCUB` / `rocPRIM` | `hipify-perl` |
 
-### O que dá trabalho manual
+### What requires manual work
 1. **Wavefront 64 vs warp 32**
-   - Kernels com `__shfl_*` assumindo 32 threads precisam parametrização.
-   - Adicionar `#define WARP_SIZE warpSize` (intrínseco HIP).
-   - Reduções intra-warp viram intra-wavefront → menos blocks por SM.
+   - Kernels using `__shfl_*` assuming 32 threads need parameterisation.
+   - Use `warpSize` (HIP intrinsic) instead of hardcoded 32.
+   - Intra-warp reductions become intra-wavefront → fewer blocks per CU on CDNA.
 
-2. **cooperative_groups** (nvMolKit usa em ETKDG batch optimizer)
-   - HIP suporta `hip/hip_cooperative_groups.h` mas com subset menor.
-   - Pode exigir reestruturar grid-sync.
+2. **cooperative_groups** (nvMolKit uses these in the ETKDG batch optimiser)
+   - HIP supports `hip/hip_cooperative_groups.h` but with a smaller subset.
+   - Some grid-sync patterns need rework.
 
-3. **Atomics em float64**
-   - AMD CDNA (MI100+) suporta. RDNA (gaming) **não**. Detectar em runtime.
+3. **Double-precision atomics**
+   - AMD CDNA (MI100+) supports them; RDNA (gaming) does not. Detect at runtime.
 
 4. **CMake**
-   - `enable_language(CUDA)` → `find_package(hip REQUIRED)` + `set_source_files_properties(... LANGUAGE HIP)`
-   - `CMAKE_CUDA_ARCHITECTURES` → `GPU_TARGETS` (ex: `gfx90a;gfx942;gfx1100`)
+   - `enable_language(CUDA)` → `find_package(hip REQUIRED)` + `set_source_files_properties(... LANGUAGE HIP)`.
+   - `CMAKE_CUDA_ARCHITECTURES` → `GPU_TARGETS` (e.g. `gfx90a;gfx942;gfx1100`).
+   - **Important:** ROCm Clang directly (not `hipcc`) — CMake 3.22 rejects the wrapper.
 
 5. **boost-python bindings**
-   - Funcionam, basta `CXX=hipcc` no build do módulo.
-   - ABI de RDKit precisa bater (mesma stdlib).
+   - Work fine; just need `CXX=clang++` (ROCm) when building the modules.
+   - RDKit ABI must match (same stdlib).
 
 ---
 
-## 4. Fases
+## 4. Phases
 
-| # | Fase | Entregável | Critério de aceitação | Estimativa |
+| # | Phase | Deliverable | Acceptance criterion | Estimate |
 |---|---|---|---|---|
-| 0 | **Scaffold** | repo + LICENSE/NOTICE + CI esqueleto + Dockerfile multi-stage | `docker build` passa, imagem < orçamento | 1–2 dias **(✅ feito; imagem 2.04 GB)** |
-| 1 | **Hipify mecânico + build core** | todos `.cu` → `.hip.cpp`, CMake compila a lib HIP | `cmake --build rocmolkit_core` sem erros | 3–7 dias **(✅ DONE — 45/45 obj compilados, 8 arquivos excluídos para Phase 4-7 reescrita)** |
-| 2 | **ETKDG funcional** | `EmbedMolecules` retorna conformers válidos | paridade com RDKit em SPICE-100 (RMSD < 0.1 Å vs nvMolKit) | 2–3 sem |
-| 3 | **MMFF94 funcional** | `MMFFOptimizeMoleculesConfs` converge | energia final dentro de 1e-3 kcal/mol vs RDKit | 2–3 sem |
-| 4 | **Tuning AMD** | benchmark vs RDKit CPU em RX 7900 XTX e/ou MI210 | ≥ 5× speedup em batch ≥ 100 mols | contínuo |
-| 5 | **Fingerprints + Similaridade** | Morgan + Tanimoto GPU | match exato com RDKit (bits idênticos) | 2 sem |
-| 6 | **Butina clustering** | divide-and-conquer em > 100k mols | resultados idênticos ao nvMolKit | 1–2 sem |
-| 7 | **UFF, conformerRMSD, TFD** | resto da API | paridade RDKit | 2 sem cada |
+| 0 | **Scaffold** | repo + LICENSE/NOTICE + CI skeleton + multi-stage Dockerfile | `docker build` passes, image under budget | 1–2 days **(✅ done; image 2.04 GB)** |
+| 1 | **Mechanical hipify + core build** | all `.cu` → `.hip.cpp`, CMake builds the HIP lib | `cmake --build rocmolkit_core` with no errors | 3–7 days **(✅ DONE — 45/45 obj compiled, 8 files excluded for Phase 4-7 rewrite)** |
+| 2 | **First Python binding** | `_embedMolecules.so` links | binding loads in `import rocmolkit.embedMolecules` | done **(✅ Phase 2 first binding green at v0.1.0-alpha)** |
+| 3 | **Functional ETKDG** | `EmbedMolecules` returns valid conformers | parity with RDKit on SPICE-100 (RMSD < 0.1 Å vs nvMolKit) | 2–3 weeks (needs AMD GPU runner) |
+| 4 | **Functional MMFF94** | `MMFFOptimizeMoleculesConfs` converges | final energy within 1e-3 kcal/mol vs RDKit | 2–3 weeks |
+| 5 | **AMD tuning** | benchmark vs RDKit CPU on RX 7900 XTX and/or MI210 | ≥ 5× speedup on batches ≥ 100 mols | continuous |
+| 6 | **Fingerprints + Similarity** | Morgan + Tanimoto on GPU | exact match with RDKit (identical bits) | 2 weeks |
+| 7 | **Butina clustering** | divide-and-conquer over > 100k mols | results identical to nvMolKit | 1–2 weeks |
+| 8 | **UFF, conformerRMSD, TFD** | rest of the API | RDKit parity | 2 weeks each |
 
 ---
 
-## 5. Estrutura de diretórios proposta
+## 5. Directory layout (current)
 
 ```
 rocMolKit/
-├── LICENSE                    # Apache 2.0 (herdada)
-├── NOTICE                     # atribuição nvMolKit + autores rocMolKit
+├── LICENSE                    # Apache 2.0 (inherited)
+├── NOTICE                     # nvMolKit attribution + rocMolKit authors
 ├── README.md
-├── PLAN.md                    # este arquivo
+├── PLAN.md                    # this file
+├── ISSUES.md                  # known gaps + manual fixes
+├── CHANGELOG.md               # release notes per phase
 ├── pyproject.toml             # build via scikit-build-core
-├── CMakeLists.txt             # raiz
+├── CMakeLists.txt             # root
 ├── cmake/
-│   ├── FindHIP.cmake
-│   └── ROCmTargets.cmake      # mapping gfx targets
+│   └── ROCmTargets.cmake      # gfx target mapping
 ├── docker/
-│   ├── Dockerfile.slim        # runtime mínimo
-│   ├── Dockerfile.devel       # com SDK
-│   └── runtime-libs.txt       # lista das .so a copiar
+│   ├── Dockerfile.slim        # minimal runtime (~2 GB)
+│   ├── Dockerfile.devel       # with SDK
+│   ├── runtime-libs.txt       # legacy reference, no longer used
+│   └── .dockerignore
 ├── tools/
-│   ├── hipify_all.sh          # roda hipify-perl recursivo
-│   ├── numerical_diff.py      # compara saída vs RDKit/nvMolKit
-│   └── strip_release.sh       # strip + dpkg cleanup
-├── rocmolkit/                 # mirror do dir nvmolkit/
-│   ├── embedMolecules.{cpp,hip,py}
-│   ├── mmffOptimization.{cpp,hip,py}
-│   ├── fingerprints.{cpp,hip,py}
-│   ├── similarity.{cpp,hip,py}
-│   ├── clustering.{cpp,hip,py}
-│   ├── conformerRmsd.{cpp,hip,py}
-│   └── ...
+│   ├── build_rdkit.sh         # source build of RDKit Release_2024_09_6
+│   ├── hipify_all.sh          # recursive hipify-perl wrapper
+│   ├── numerical_diff.py      # parity gate vs RDKit
+│   ├── strip_release.sh       # strip + dpkg cleanup
+│   └── bin/
+│       └── hipify-perl        # standalone vendored copy of the script
+├── rocmolkit/                 # mirrors upstream layout
+│   ├── include/rocmolkit/
+│   │   ├── hip_compat.h       # force-included; warp/macro shims
+│   │   └── cuda_std_compat.h  # cuda::std::* → std::* aliases
+│   ├── src/                   # HIP kernels + host code (hipified)
+│   ├── rdkit_extensions/      # pure C++ RDKit extensions
+│   ├── nvmolkit/              # boost-python bindings (Phase 2 active)
+│   └── __init__.py
 ├── tests/
-│   ├── test_etkdg_parity.py   # vs RDKit
-│   ├── test_mmff_parity.py
-│   └── data/spice_100.smi
+│   ├── test_smoke.py          # CPU-only import + version check
+│   ├── conftest.py            # `gpu` marker, --rocm flag
+│   └── data/spice_100.smi     # 10 SMILES seed for parity
 ├── benchmarks/
-│   └── bench_etkdg_mmff.py    # mesmos 1000 SMILES do mlxmolkit
 └── .github/workflows/
-    ├── ci.yml                 # build + tests em runner ROCm
-    └── docker.yml             # publica imagens slim/devel
+    ├── ci.yml                 # build + Docker slim/devel + bindings probe
+    └── docker.yml             # publish images to ghcr.io on tag v*
 ```
 
 ---
 
-## 6. Validação numérica (gate de qualidade)
+## 6. Numerical validation (quality gate)
 
-Sem isso, port "compila mas é lixo". Plano:
+Without this, the port "compiles but is junk". Plan:
 
-1. **Dataset:** mesmos 1000 SMILES do SPICE-2.0.1 que o mlxmolkit usa (`bench_conformers.py` deles).
-2. **Métrica ETKDG:** RMSD entre conformers gerados por rocMolKit vs nvMolKit (referência GPU) e vs RDKit (referência CPU). Critério: 95% das moléculas com RMSD < 0.5 Å após alinhamento.
-3. **Métrica MMFF:** energia final |E_roc - E_rdkit| / |E_rdkit| < 1e-4.
-4. **CI gate:** falha se métrica regredir.
+1. **Dataset:** same 1000 SMILES from SPICE-2.0.1 that mlxmolkit benchmarks (`bench_conformers.py`).
+2. **ETKDG metric:** RMSD between conformers generated by rocMolKit, nvMolKit (GPU reference) and RDKit (CPU reference). Target: 95% of molecules with RMSD < 0.5 Å after alignment.
+3. **MMFF metric:** final energy `|E_roc - E_rdkit| / |E_rdkit| < 1e-4`.
+4. **CI gate:** fail on regression. Implemented in `tools/numerical_diff.py`; activates when `rocm-runner` job is enabled.
 
 ---
 
-## 7. Hardware alvo — definir com o usuário
+## 7. Target hardware
 
-| GPU | Arch | Status ROCm | Comentário |
+| GPU | Arch | ROCm status | Notes |
 |---|---|---|---|
-| MI300X / MI300A | gfx942 | oficial | ideal, mas caro |
-| MI250 / MI210 | gfx90a | oficial | sweet spot datacenter |
-| RX 7900 XTX/XT | gfx1100 | oficial (desde 6.0) | melhor consumer |
-| RX 6900 XT | gfx1030 | não-oficial | funciona com `HSA_OVERRIDE_GFX_VERSION=10.3.0` |
-| Radeon VII | gfx906 | EOL no ROCm 6 | evitar |
+| MI300X / MI300A | gfx942 | official | ideal but expensive |
+| MI250 / MI210 | gfx90a | official | datacenter sweet spot |
+| RX 7900 XTX/XT | gfx1100 | official (since 6.0) | best consumer; build defaults here |
+| RX 6900 XT | gfx1030 | unofficial | works with `HSA_OVERRIDE_GFX_VERSION=10.3.0` |
+| Radeon VII | gfx906 | EOL in ROCm 6 | not targeted |
 
-**Decisão pendente do usuário:** qual GPU AMD você tem/vai usar? Define os `GPU_TARGETS` default do build e o runner do CI.
+**Default `GPU_TARGETS`:** `gfx1100;gfx90a;gfx942` (RDNA3 + CDNA2 + CDNA3). Override with `-DGPU_TARGETS=...`.
 
 ---
 
-## 8. Riscos
+## 8. Risks
 
-| Risco | Probabilidade | Mitigação |
+| Risk | Probability | Mitigation |
 |---|---|---|
-| **CUDA Graphs Conditional em `butina.cu`** (CONFIRMADO Fase 1) | 100% | Adiar Butina para Fase 6; reescrever loop conditional como dispatch CPU-side |
-| `cudaCheckError` macro custom não-padrão (CONFIRMADO Fase 1) | 100% | Header `hip_compat.h` com macro equivalente — feito |
-| nvMolKit usa CUTLASS / kernels CUDA-only avançados | média | rocPRIM como substituto; reescrever onde necessário |
-| ETKDG cooperative-groups não traduz limpo | baixa | hipify converteu OK em `dist_geom_kernels_device` e `bfgs_hessian` (verificado) |
-| Float atomics quebram em RDNA | alta | path alternativo com lock-based reduction |
-| RDKit ABI incompatível entre conda e pip | média | pinar uma das duas, documentar |
-| CI sem GPU AMD disponível | alta | runner self-hosted obrigatório, ou usar HIP-on-CUDA p/ smoke test |
+| **CUDA Graphs Conditional in `butina.cu`** (CONFIRMED Phase 1) | 100% | Defer Butina to Phase 7; rewrite the conditional loop as CPU-side dispatch |
+| Custom non-standard `cudaCheckError` macro (CONFIRMED Phase 1) | 100% | Upstream `cuda_error_check.h` is HIP-clean after hipify; no shim needed |
+| nvMolKit uses CUTLASS / advanced CUDA-only kernels | medium | rocPRIM as substitute; rewrite where needed |
+| ETKDG cooperative-groups don't translate cleanly | low | hipify converted them OK in `dist_geom_kernels_device` and `bfgs_hessian` (verified) |
+| Float atomics break on RDNA | high | alternative path with lock-based reduction |
+| RDKit ABI incompatible between conda and pip | medium | pin one of them, document |
+| CI without an AMD GPU | high | self-hosted runner mandatory, or use HIP-on-CUDA for smoke testing |
 
 ---
 
-## 9. Próximas ações (ordem)
+## 9. Done so far (v0.1.0-alpha, 2026-05-14)
 
-1. ✅ Decidir nome — **rocMolKit** (confirmado)
-2. ⏳ Usuário define GPU alvo (item 7)
-3. Criar scaffold (Fase 0)
-4. Validar build do Dockerfile slim
-5. Hipify mecânico (Fase 1)
-6. ETKDG (Fase 2)
-7. MMFF94 (Fase 3)
+1. ✅ Repo name decided — **rocMolKit**
+2. ✅ Default GPU targets set — `gfx1100;gfx90a;gfx942`
+3. ✅ Scaffold (Phase 0): repo, LICENSE/NOTICE, multi-stage Dockerfiles, CI skeleton
+4. ✅ Hipify mechanical pass (Phase 1): 161 files converted, 45/45 obj compile
+5. ✅ First Python binding (Phase 2): `_embedMolecules.so` links cleanly
+6. ✅ Docker images published to ghcr.io
+7. ✅ GitHub Release v0.1.0-alpha
+
+## 10. Next steps
+
+1. ⏳ Set up self-hosted ROCm runner with an actual AMD GPU and flip `rocm-runner` job from `if: false`.
+2. ⏳ Phase 3: validate ETKDG numerical parity vs RDKit on SPICE-100.
+3. ⏳ Phase 4: validate MMFF94 numerical parity.
+4. ⏳ Phases 5–8: tune for AMD architectures, port the 8 excluded modules (see [ISSUES.md](ISSUES.md)), enable remaining bindings.
 
 ---
 
-## 10. O que NÃO vai entrar (escopo declarado)
+## 11. Out of scope (declared)
 
-- Suporte simultâneo NVIDIA via HIP-on-CUDA (possível, mas vai dispersar foco). Decidir depois da Fase 4.
-- GUI ou notebook integrado.
-- Reescrita em Python puro com PyTorch/ROCm (caminho que o mlxmolkit pegou). É mais lento e perde paridade com nvMolKit.
-- Empacotamento conda. Só PyPI wheel inicialmente.
+- Simultaneous NVIDIA support via HIP-on-CUDA (possible, but disperses focus). Revisit after Phase 5.
+- GUI or integrated notebook.
+- Pure-Python rewrite with PyTorch/ROCm (the mlxmolkit path). Slower and loses parity with nvMolKit.
+- conda packaging. PyPI wheel only initially.
