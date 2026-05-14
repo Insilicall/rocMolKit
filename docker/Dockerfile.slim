@@ -38,9 +38,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && printf 'Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600\n' \
         > /etc/apt/preferences.d/rocm-pin-600 \
     && apt-get update && apt-get install -y --no-install-recommends \
+        software-properties-common ca-certificates \
+    # boost 1.83 from PPA (Ubuntu jammy ships 1.74 which breaks Clang 22 + C++20)
+    && add-apt-repository -y ppa:mhier/libboost-latest \
+    && apt-get update && apt-get install -y --no-install-recommends \
         build-essential ninja-build git \
         python${PYTHON_VERSION} python${PYTHON_VERSION}-dev python3-pip \
-        libboost-all-dev libeigen3-dev zlib1g-dev libbz2-dev \
+        libboost1.83-dev libeigen3-dev zlib1g-dev libbz2-dev \
         libfreetype6-dev \
         hipcc hip-dev hip-runtime-amd \
         rocm-device-libs rocm-llvm \

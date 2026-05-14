@@ -24,8 +24,13 @@ jobs:
         run: |
           apt-get update
           apt-get install -y --no-install-recommends \
+            software-properties-common ca-certificates
+          # boost 1.83 from PPA (jammy 1.74 breaks Clang 22 + C++20)
+          add-apt-repository -y ppa:mhier/libboost-latest
+          apt-get update
+          apt-get install -y --no-install-recommends \
             cmake ninja-build python3-dev python3-pip curl git \
-            libboost-all-dev libeigen3-dev zlib1g-dev libbz2-dev \
+            libboost1.83-dev libeigen3-dev zlib1g-dev libbz2-dev \
             libfreetype6-dev \
             rocm-device-libs rocm-llvm \
             hipblas-dev hiprand-dev rocblas-dev rocrand-dev \
