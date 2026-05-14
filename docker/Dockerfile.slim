@@ -124,4 +124,16 @@ RUN python${PYTHON_VERSION} -m pip install --no-cache-dir numpy rdkit-pypi \
 
 COPY --from=builder /install /usr/local
 
+# Diagnóstico de tamanho — aparece no log do build para guiar próximos cortes.
+RUN echo "=== runtime image breakdown ===" \
+    && du -sh /opt/rocm/* 2>/dev/null | sort -h | tail -15 \
+    && echo "--- /opt/rocm/lib top ---" \
+    && du -sh /opt/rocm/lib/* 2>/dev/null | sort -h | tail -15 \
+    && echo "--- /usr/lib/python3 ---" \
+    && du -sh /usr/lib/python3* 2>/dev/null | sort -h | tail -10 \
+    && echo "--- /usr/local ---" \
+    && du -sh /usr/local 2>/dev/null \
+    && echo "--- TOTAL ---" \
+    && du -sh / 2>/dev/null | tail -1
+
 ENTRYPOINT ["python3"]
