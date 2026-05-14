@@ -126,20 +126,32 @@ pyridine) crash more reliably. **Heisenbug — disappears under `gdb`**.
 - `rocgdb` does not work for gfx1200 yet ("AMDGCN architecture 0x45
   is not supported"). Plain `gdb` makes the bug disappear (Heisenbug).
 
-### **KEY FINDING — `tests/repro/asyncvec_stress.cpp`**
+### **KEY FINDING — bisect localized the bug**
 
-Pure C++ stress test with no RDKit / boost-python / Python ran
-**20 iterations × 1000 alloc/free cycles of AsyncDeviceVector-like
-patterns with ZERO crashes**. The bug is **not** in our HIP allocation
-lifecycle.
+Two repro programs in `tests/repro/`:
 
-The crash is caused by **interaction between RDKit Python wrappers,
-boost-python, and our bindings**. Possible mechanisms:
+1. `asyncvec_stress.cpp` — raw `hipMallocAsync` / `hipFreeAsync` patterns
+   mirroring `AsyncDeviceVector`. **No nvMolKit, no RDKit, no Python.**
+   → **20 / 20 iterations × 1000 alloc-free cycles, ZERO crashes.**
 
-- Python GC reclaiming an `RDKit::ROMol` while a kernel still holds a
-  device pointer derived from it
-- Boost.Python converter passing a stale `RDKit::ROMol&` reference
-- RDKit Python wrapper mutating the molecule between our C++ callbacks
+2. `embed_pure_cpp.cpp` — pure C++ that builds an RDKit `ROMol` via the
+   C++ API and calls `nvMolKit::embedMolecules` directly. **No
+   boost-python, no Python.**
+   → **Segfaults on every invocation, even on `CCO`.**
+
+The bug is **inside `nvMolKit::embedMolecules` or one of the HIP kernels
+it dispatches**. It is not in our HIP allocation lifecycle, and it is not
+in boost-python / Python GC. The intermittent appearance in Python is
+just the Python loop / interpreter occasionally finishing the work
+before the racing free fires.
+
+Suspect call sites (need bisect down further):
+- `etkdg_impl.cpp` — top-level orchestration
+- `etkdg_stage_distgeom_minimize.hip.cpp` — BFGS DG minimize
+- `etkdg_stage_etk_minimization.hip.cpp` — ETK MMFF-like minimize
+- `bfgs_minimize.hip.cpp` (newly re-enabled) or `bfgs_hessian.hip.cpp`
+  (newly re-enabled) — these were excluded under ROCm 6.2 and are the
+  most recent additions. Strong candidates.
 
 ### Hypothesis
 
