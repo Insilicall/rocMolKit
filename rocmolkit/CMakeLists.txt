@@ -58,7 +58,8 @@ list(REMOVE_ITEM ROCMOLKIT_CPP_SOURCES ${ROCMOLKIT_HIP_SOURCES})
 #   symmetric_eigensolver:      cuda::std::abs em contexto onde shim não resolve (Phase 4 reescrita)
 list(FILTER ROCMOLKIT_HIP_SOURCES EXCLUDE REGEX "/(butina|tfd)\\.hip\\.cpp$")
 list(FILTER ROCMOLKIT_HIP_SOURCES EXCLUDE REGEX "/(tfd|substruct)/")
-list(FILTER ROCMOLKIT_HIP_SOURCES EXCLUDE REGEX "/bfgs_hessian\\.hip\\.cpp$")
+# bfgs_hessian re-included after providing rocmolkit/cg_reduce_shim.h.
+# list(FILTER ROCMOLKIT_HIP_SOURCES EXCLUDE REGEX "/bfgs_hessian\\.hip\\.cpp$")
 # ROCm 7.x hipcub gained DeviceReduce::TransformReduce - re-include bfgs_minimize.
 # list(FILTER ROCMOLKIT_HIP_SOURCES EXCLUDE REGEX "/bfgs_minimize\\.hip\\.cpp$")
 list(FILTER ROCMOLKIT_HIP_SOURCES EXCLUDE REGEX "/morgan_fingerprint_kernels\\.hip\\.cpp$")
