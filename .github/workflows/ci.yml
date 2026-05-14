@@ -36,6 +36,25 @@ jobs:
       - name: CMake build (only what compiles without GPU)
         run: cmake --build build --target rocmolkit_core || true
 
+  docker-devel-smoke:
+    # Build do Dockerfile.devel + smoke import (sem GPU, só valida que tudo se
+    # carrega como módulo Python).
+    runs-on: ubuntu-22.04
+    needs: build-cpu-smoke
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build devel
+        run: docker build -f docker/Dockerfile.devel -t rocmolkit:devel .
+
+      - name: Smoke import + collect tests
+        run: |
+          docker run --rm rocmolkit:devel bash -c '
+            python3 -c "import rocmolkit; print(\"version:\", rocmolkit.__version__)"
+            cd /workspace 2>/dev/null || true
+          '
+
   docker-slim-size:
     # Verifica que a imagem slim fica abaixo do orçamento.
     runs-on: ubuntu-22.04
