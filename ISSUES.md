@@ -15,13 +15,17 @@ of features in nvMolKit that have no direct HIP/ROCm equivalent.
 
 | Symbol / Header | File(s) | Status | Resolution |
 |---|---|---|---|
+| `#include "*.cuh"` (file renamed but includes not rewritten) | 40 files | ✅ | sed `.cuh"` → `.hip.h"` across src/, tests/, benchmarks/ |
 | `#include "nvtx.h"` (NVIDIA Tools Extension) | ~25 files | 🔧 | `rocmolkit/src/utils/nvtx.h` rewritten as no-op shim |
 | `nvtxNameCudaStreamA` | `utils/device.cpp:65,89` | 🔧 | inline no-op in nvtx.h shim |
+| `<cuda/std/span>`, `<cuda/std/tuple>`, `<cuda/std/cstddef>` (NVIDIA libcudacxx) | 5+ files | 🔧 | `rocmolkit/include/rocmolkit/cuda_std_compat.h` aliases `cuda::std::*` → `std::*` (C++20 required) |
 | `<cub/device/device_reduce.cuh>` | `etkdg_kernels.hip.cpp:17` | ✅ | replaced with `<hipcub/device/device_reduce.hpp>` |
+| `NVMOLKIT_CUDA_CC_80..120` macros (NVIDIA SM version guards) | `similarity_kernels.hip.cpp` | 🔧 | `hip_compat.h` defines all = 0; AMD takes generic fallback path |
 | `cudaSharedmemCarveoutMaxShared` | `substruct/substruct_kernels.hip.cpp:145` | 🔧 | `hip_compat.h` macro alias to `hipSharedMemCarveoutMaxShared` |
-| `cudaCheckError(...)` | many `.hip.cpp` | 🔧 | `hip_compat.h` macro using `hipGetErrorString` |
+| `cudaCheckError(...)` | many `.hip.cpp` | ✅ | upstream `cuda_error_check.h` already HIP-clean after hipify; no shim needed |
 | `cudaGraphConditionalHandle` / `cudaGraphSetConditional` | `butina.hip.cpp:654-836` | ⏸ | Excluded from Phase 1; Phase 6 will rewrite as CPU-side dispatch loop |
 | `cudaGraphCondTypeWhile` | `butina.hip.cpp:754,836` | ⏸ | Same as above |
+| `hipMemcpyDefault` (was `cudaMemcpyDefault`) | `butina.hip.cpp:971,1011` | ⏸ | Excluded with rest of butina; HIP supports `hipMemcpyDefault` though |
 
 ---
 
@@ -96,9 +100,21 @@ Excluded from Phase 1 build but kept in tree (will be ported in their phase):
 
 ## Open questions
 
-1. **rocBLAS Tensile kernel filter** in `Dockerfile.slim` only saved ~900 MB
-   instead of the expected 2-3 GB. Need to check if the regex really matched
-   the file naming convention used by ROCm 6.2.4.
-2. **comgr** (~1.5 GB) is required at runtime for HIP JIT but maybe parts of
+1. ~~**rocBLAS Tensile kernel filter** in `Dockerfile.slim` only saved ~900 MB~~
+   ✅ **Resolved**: filter rewrite cut `/opt/rocm/lib/rocblas/` from **3.1 GB → 293 MB**.
+2. **comgr** (~141 MB) is required at runtime for HIP JIT but maybe parts of
    it (LLVM bitcode libs for archs we don't target) can be removed.
-3. **Wavefront 64 atomics on `pre-gfx9 RDNA`** if we ever target gfx1030.
+3. **Wavefront 64 atomics on pre-gfx9 RDNA** if we ever target gfx1030.
+
+## Phase 1 fat removed from runtime image (cumulative)
+
+| Category | Before | After | Saving |
+|---|---|---|---|
+| `rocm/dev-ubuntu` base | 13 GB | — | replaced by ubuntu:22.04 + apt selectivo |
+| `rocm-hip-runtime` meta-package | full | minimal trio (hip-runtime-amd + hsa-rocr + comgr) | several hundred MB |
+| `rocsolver` (transitive dep) | 1.7 GB | 0 | 1.7 GB |
+| `rocsparse` (transitive dep) | 1.4 GB | 0 | 1.4 GB |
+| `/opt/rocm/lib/rocblas/` Tensile kernels | 3.1 GB | 293 MB | 2.8 GB |
+| `/opt/rocm/llvm/{bin,libexec,share,include}` | ~500 MB | 0 | ~500 MB |
+| `/opt/rocm/share`, `/opt/rocm/include` | ~200 MB | 0 | ~200 MB |
+| **Total runtime image** | **~12-13 GB** (oficial) | **~2-3 GB** target | ~10 GB |
