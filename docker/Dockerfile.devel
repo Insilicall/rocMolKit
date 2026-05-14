@@ -51,7 +51,8 @@ ENV PATH=/root/.local/bin:$PATH
 # Python rdkit + our boost-python bindings share the same boost ABI.
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
     && uv pip install --system --break-system-packages --no-cache-dir \
-        cmake scikit-build-core nanobind numpy \
+        cmake scikit-build-core nanobind \
+        'numpy<2' \
         pytest pytest-benchmark
 
 COPY tools/build_rdkit.sh /tmp/build_rdkit.sh
