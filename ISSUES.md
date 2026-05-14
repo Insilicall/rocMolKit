@@ -106,6 +106,63 @@ Excluded from Phase 1 build but kept in tree (will be ported in their phase):
    it (LLVM bitcode libs for archs we don't target) can be removed.
 3. **Wavefront 64 atomics on pre-gfx9 RDNA** if we ever target gfx1030.
 
+## ROOT CAUSE FOUND (May 14, late) — iGPU dispatch on multi-GPU hosts
+
+**The "non-deterministic segfault" was actually a deterministic crash from
+nvMolKit dispatching work to an iGPU that had no compatible code object.**
+
+`AMD_LOG_LEVEL=3` capture, last line before SIGSEGV (with N=4 batch
+that previously "always crashed"):
+
+```
+:1:hip_fatbin.cpp:687: No compatible code objects found for: gfx1036,
+                       value of HIP_FORCE_SPIRV_CODEOBJECT: 0
+```
+
+`gfx1036` is the iGPU baked into the host CPU (Ryzen 5 7600 here);
+`gfx1200` is the discrete RX 9060 XT we built for. By default
+`nvMolKit::embedMolecules` uses every device returned by
+`hipGetDeviceCount()` and parallelises across them
+(`numThreadsGpuBatching = batchesPerGpu * len(gpuIds)`). On any host
+where the iGPU is enumerated and the binary has no kernel for it,
+roughly half of the OpenMP threads land on the iGPU and the kernel
+launch faults — silently in some paths, SIGSEGV in others.
+
+### Workaround (immediate)
+
+Pass `BatchHardwareOptions.gpuIds = [0]` (or whichever index points to
+the discrete GPU; usually 0 on Ryzen + dGPU systems). With that:
+
+| Test | Before (`gpuIds=[]`) | After (`gpuIds=[0]`) |
+|---|---|---|
+| N=4 batch  | crash (seg=11)        | OK in 3.5 s, 4/4 confs   |
+| N=8 batch  | crash                 | OK in 3.5 s, 8/8 confs   |
+| N=50 batch | crash / 0 confs       | OK in 6.7 s, 50/50 confs |
+| N=100      | crash                 | OK, 100/100              |
+| N=200      | crash                 | OK, 200/200              |
+
+A separate threshold issue remains for very large molecules
+(`octenidine`-like fragments with 50+ atoms after AddHs); those still
+abort the batch silently. Likely a per-mol size limit in nvMolKit's
+internal buffers — needs a follow-up.
+
+### Proper fix (TODO)
+
+`nvMolKit::embedMolecules` should call `hipModuleGetFunction` (or
+walk the GCO blob via `hipGetDeviceProperties + hipFatBinaryUnload`)
+before scheduling on a device, and skip devices whose `gcnArchName`
+isn't in the binary's compiled set. The user-visible API stays the
+same; bugs vanish.
+
+### What this invalidates from earlier in this file
+
+Every "state-leak between calls" finding above this section was wrong
+in cause but right in symptom: state leaked because the failed iGPU
+dispatch put the runtime into a bad state that affected later calls.
+The five "fixes attempted and reverted" did not help because they
+didn't address dispatch routing. They are still listed below for
+future reference.
+
 ## Known bug — non-deterministic segfault (v0.2.0-alpha)
 
 `EmbedMolecules` and `MMFFOptimizeMoleculesConfs` work correctly on small
