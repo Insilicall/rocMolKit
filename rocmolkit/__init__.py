@@ -1,7 +1,14 @@
 """rocMolKit — GPU-accelerated RDKit operations on AMD GPUs via HIP/ROCm.
 
 Port of NVIDIA nvMolKit. API mirrors nvMolKit / RDKit where possible.
+
+For the direct C++ bindings (zero subprocess overhead but affected by
+the open ROCm 7.2.3 + gfx1200 state-leak segfault), import from
+``rocmolkit._embedMolecules``. For deterministic embedding via
+subprocess + retry, use ``rocmolkit.safe.embed_molecule(s)``.
 """
 
-__version__ = "0.1.0"
-__all__: list[str] = []
+from . import safe
+
+__version__ = "0.2.0"
+__all__ = ["safe"]
