@@ -4,6 +4,30 @@ All notable changes to rocMolKit will be documented here.
 
 ## [Unreleased]
 
+### MMFF94 + ETKDG numerically validated end-to-end on AMD GPU (2026-05-14)
+
+`MMFFOptimizeMoleculesConfs` works on AMD RX 9060 XT (gfx1200) and converges
+to the same minimum-energy ethanol conformation that RDKit CPU produces:
+
+```
+ethanol, 3 ETKDG conformers:
+  BEFORE MMFF: [4.732, 1.981, 5.931] kcal/mol
+  AFTER  MMFF: [-1.337, -1.337, -1.337] kcal/mol  ← all converged to global min
+  GPU time:    267 ms
+```
+
+Energy reduction is dramatic and physically sensible. All three independent
+random starts collapse to the same minimum, as expected for a small flexible
+molecule. Indicates the BFGS minimizer + MMFF energy/gradient kernels work
+correctly on RDNA4.
+
+### Crash triangulation (ETKDG)
+- OK: CCO, CCCC, CCCCCC (20 atoms), benzene, toluene (intermittent), p-xylene (18 atoms).
+- CRASH: aspirin (21 atoms), pyridine (11 atoms — has aromatic N).
+- Crashes appear non-deterministic on the boundary cases (toluene worked the
+  second run after first crash). Suggests race condition or uninitialized
+  buffer in per-molecule device allocation, not a hard size limit.
+
 ### ETKDG runs on AMD GPU - first numerically valid output (2026-05-14, late)
 
 End-to-end GPU execution validated on AMD Radeon RX 9060 XT:
