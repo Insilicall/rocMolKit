@@ -17,15 +17,21 @@ file(GLOB_RECURSE ROCMOLKIT_CPP_SOURCES CONFIGURE_DEPENDS
 list(REMOVE_ITEM ROCMOLKIT_CPP_SOURCES ${ROCMOLKIT_HIP_SOURCES})
 
 # Excluir módulos que usam features sem equivalente direto em ROCm:
-#   butina:                    CUDA Graphs Conditional (sem hipGraph equivalente)
-#   tfd:                       depende de butina
-#   substruct:                 cudaSharedmemCarveoutMaxShared não-traduzido
-#   bfgs_hessian:              cooperative_groups/reduce.h (NVIDIA libcudacxx)
+#   butina:                     CUDA Graphs Conditional (sem hipGraph equivalente)
+#   tfd:                        depende de butina
+#   substruct:                  cudaSharedmemCarveoutMaxShared não-traduzido
+#   bfgs_hessian:               cooperative_groups/reduce.h (NVIDIA libcudacxx)
+#   bfgs_minimize:              hipcub::DeviceReduce::TransformReduce (não em hipcub 6.2)
 #   morgan_fingerprint_kernels: cooperative_groups::block_tile_memory (NVIDIA only)
+#   similarity_kernels:         PTX inline asm (BMMA, async copy) em macros_ptx.hip.h
+#   symmetric_eigensolver:      cuda::std::abs em contexto onde shim não resolve (Phase 4 reescrita)
 list(FILTER ROCMOLKIT_HIP_SOURCES EXCLUDE REGEX "/(butina|tfd)\\.hip\\.cpp$")
 list(FILTER ROCMOLKIT_HIP_SOURCES EXCLUDE REGEX "/(tfd|substruct)/")
 list(FILTER ROCMOLKIT_HIP_SOURCES EXCLUDE REGEX "/bfgs_hessian\\.hip\\.cpp$")
+list(FILTER ROCMOLKIT_HIP_SOURCES EXCLUDE REGEX "/bfgs_minimize\\.hip\\.cpp$")
 list(FILTER ROCMOLKIT_HIP_SOURCES EXCLUDE REGEX "/morgan_fingerprint_kernels\\.hip\\.cpp$")
+list(FILTER ROCMOLKIT_HIP_SOURCES EXCLUDE REGEX "/similarity_kernels\\.hip\\.cpp$")
+list(FILTER ROCMOLKIT_HIP_SOURCES EXCLUDE REGEX "/symmetric_eigensolver\\.hip\\.cpp$")
 list(FILTER ROCMOLKIT_CPP_SOURCES EXCLUDE REGEX "/(tfd|substruct)/")
 list(FILTER ROCMOLKIT_CPP_SOURCES EXCLUDE REGEX "/(butina|tfd)\\.cpp$")
 

@@ -8,11 +8,14 @@
 #include <span>
 #include <tuple>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <type_traits>
 #include <utility>
 #include <optional>
 #include <variant>
+#include <numeric>
+#include <algorithm>
 
 // Make code that writes `cuda::std::span<T>` resolve to `std::span<T>`.
 namespace cuda {
@@ -50,6 +53,15 @@ namespace std {
 
     using ::std::move;
     using ::std::forward;
+
+    // Math
+    using ::std::abs;
+    using ::std::min;
+    using ::std::max;
+    using ::std::clamp;
+    using ::std::sqrt;
+    using ::std::pow;
+    using ::std::numeric_limits;
 
     inline constexpr auto dynamic_extent = ::std::dynamic_extent;
 }  // namespace std
