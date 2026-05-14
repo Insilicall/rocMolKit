@@ -1,10 +1,19 @@
 name: ci
 
+# Only run CI on:
+# - pull requests targeting main (gates merges)
+# - manual dispatch (when you want to validate something off main)
+# - tag pushes (release validation)
+#
+# We do NOT run on every push to main. Iteration on the alpha branch
+# generates many WIP commits and each CI run is 5-12 min + cost.
+# Tagged releases still trigger docker-publish via .github/workflows/docker.yml.
 on:
-  push:
-    branches: [main]
   pull_request:
     branches: [main]
+  push:
+    tags: ['v*']
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
