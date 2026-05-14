@@ -330,11 +330,16 @@ std::optional<DeviceCoordResult> embedMolecules(const std::vector<RDKit::ROMol*>
           batchEargs.push_back(eargs[molId]);
         }
 
+        if (_dbg && omp_get_thread_num() == 0) std::fprintf(stderr, "[setup] make_unique<ETKDGContext>\n");
         auto context = std::make_unique<detail::ETKDGContext>(streamPtr);
+        if (_dbg && omp_get_thread_num() == 0) std::fprintf(stderr, "[setup] setStreams\n");
         detail::setStreams(*context, streamPtr);
+        if (_dbg && omp_get_thread_num() == 0) std::fprintf(stderr, "[setup] initETKDGContext (%zu mols)\n", batchMolsWithConfs.size());
         // Treat each conformer attempt as an individual molecule (confsPerMolecule = 1)
         detail::initETKDGContext(batchMolsWithConfs, *context, 1);
+        if (_dbg && omp_get_thread_num() == 0) std::fprintf(stderr, "[setup] initETKDGContext OK\n");
 
+        if (_dbg && omp_get_thread_num() == 0) std::fprintf(stderr, "[setup] creating stages\n");
         ScopedNvtxRange                                  stageSetupRange("Setup ETKDG Stages");
         // Create stages in order
         std::vector<std::unique_ptr<detail::ETKDGStage>> stages;
