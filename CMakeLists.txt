@@ -52,25 +52,44 @@ else()
                     "Install ROCm SDK (hipcc) to build GPU code.")
 endif()
 
-# RDKit: prefer the upstream CMake config, fall back to Debian/Ubuntu layout
-# (librdkit-dev installs headers in /usr/include/rdkit and libs as /usr/lib/x86_64-linux-gnu/libRDKit*.so).
+# RDKit: install via conda-forge (micromamba) so we always get a recent
+# release (>=2024.09). Pass -DRDKit_ROOT=/opt/rdkit (or set CMAKE_PREFIX_PATH).
+# Avoid Ubuntu's librdkit-dev — it ships ancient 2021.09 and lacks DistGeom
+# helpers used by ETKDG.
+if(DEFINED RDKit_ROOT)
+    list(APPEND CMAKE_PREFIX_PATH "${RDKit_ROOT}")
+endif()
 find_package(RDKit QUIET CONFIG)
 if(NOT RDKit_FOUND)
+    set(_RDKIT_HINTS
+        ${RDKit_ROOT}
+        $ENV{RDKIT_ROOT}
+        $ENV{CONDA_PREFIX}
+        /opt/rdkit
+        /opt/conda
+        /usr/local
+    )
     find_path(RDKIT_INCLUDE_DIR
-        NAMES GraphMol/RDKitBase.h
-        PATHS /usr/include/rdkit /usr/local/include/rdkit
+        NAMES rdkit/GraphMol/RDKitBase.h GraphMol/RDKitBase.h
+        HINTS ${_RDKIT_HINTS}
+        PATH_SUFFIXES include include/rdkit
     )
     file(GLOB _RDKIT_LIBS
-        "/usr/lib/x86_64-linux-gnu/libRDKit*.so"
-        "/usr/local/lib/libRDKit*.so"
+        "${RDKit_ROOT}/lib/libRDKit*.so"
+        "$ENV{CONDA_PREFIX}/lib/libRDKit*.so"
+        "/opt/rdkit/lib/libRDKit*.so"
     )
     if(RDKIT_INCLUDE_DIR AND _RDKIT_LIBS)
-        message(STATUS "rocMolKit: RDKit at ${RDKIT_INCLUDE_DIR} ($,${_RDKIT_LIBS} libs)")
+        message(STATUS "rocMolKit: RDKit at ${RDKIT_INCLUDE_DIR} (manual probe)")
         set(RDKit_FOUND TRUE)
-        set(RDKit_INCLUDE_DIRS ${RDKIT_INCLUDE_DIR})
+        # Export both `<root>/include` and `<root>/include/rdkit` so that
+        # both `#include <GraphMol/...>` and `#include <rdkit/GraphMol/...>` work.
+        set(RDKit_INCLUDE_DIRS ${RDKIT_INCLUDE_DIR} ${RDKIT_INCLUDE_DIR}/rdkit)
         set(RDKit_LIBRARIES ${_RDKIT_LIBS})
     else()
-        message(WARNING "rocMolKit: RDKit headers not found. apt-get install librdkit-dev.")
+        message(WARNING "rocMolKit: RDKit not found. Install via "
+                        "'micromamba install -c conda-forge rdkit librdkit-dev' "
+                        "and pass -DRDKit_ROOT=<prefix>.")
     endif()
 endif()
 

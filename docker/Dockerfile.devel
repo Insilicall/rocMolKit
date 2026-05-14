@@ -25,10 +25,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && printf 'Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600\n' \
         > /etc/apt/preferences.d/rocm-pin-600 \
     && apt-get update && apt-get install -y --no-install-recommends \
-        build-essential ninja-build git gdb \
+        build-essential ninja-build git gdb xz-utils \
         python3 python3-dev python3-pip \
         libboost-python-dev libeigen3-dev \
-        librdkit-dev rdkit-data \
         clang-tidy clang-format \
         hipcc hip-dev hip-runtime-amd hipify-clang \
         rocblas-dev hipblas-dev \
@@ -37,10 +36,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         hipcub-dev rocprim-dev rocthrust-dev \
     && rm -rf /var/lib/apt/lists/*
 
-RUN pip install --no-cache-dir \
-        cmake \
-        scikit-build-core nanobind numpy rdkit-pypi \
-        pytest pytest-benchmark
+ENV PATH=/root/.pixi/bin:/root/.local/bin:$PATH
+
+# uv: fast Python package installer. pixi: conda-forge for the C++ side
+# (RDKit dev kit, modern boost). Neither is in apt jammy in usable versions.
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
+    && uv pip install --system --break-system-packages --no-cache-dir \
+        cmake scikit-build-core nanobind numpy rdkit-pypi \
+        pytest pytest-benchmark \
+    && curl -fsSL https://pixi.sh/install.sh | bash \
+    && pixi global install --channel conda-forge \
+        'rdkit>=2024.09' 'librdkit-devel>=2024.09' 'boost-cpp>=1.84'
+
+ENV RDKIT_ROOT=/root/.pixi/envs/rdkit
 
 WORKDIR /workspace
 CMD ["bash"]

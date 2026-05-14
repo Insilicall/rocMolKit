@@ -20,31 +20,46 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install build deps
+      - name: Install build deps (apt)
         run: |
           apt-get update
           apt-get install -y --no-install-recommends \
-            cmake ninja-build python3-dev python3-pip \
+            cmake ninja-build python3-dev python3-pip curl xz-utils \
             libboost-python-dev libeigen3-dev \
-            librdkit-dev rdkit-data \
             hipblas-dev hiprand-dev rocblas-dev rocrand-dev \
             hipcub-dev rocprim-dev rocthrust-dev || true
-          pip install scikit-build-core nanobind numpy
 
-      - name: Probe RDKit layout
+      - name: Install Python build tools via uv (fast)
         run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          ~/.local/bin/uv pip install --system --break-system-packages \
+            scikit-build-core nanobind numpy
+
+      - name: Install RDKit (conda-forge, latest) via pixi
+        run: |
+          curl -fsSL https://pixi.sh/install.sh | bash
+          export PATH="$HOME/.pixi/bin:$PATH"
+          pixi global install --channel conda-forge \
+            'rdkit>=2024.09' 'librdkit-devel>=2024.09' 'boost-cpp>=1.84'
+          # Probe install root (pixi global puts envs under ~/.pixi/envs/)
+          RDKIT_ROOT="$(find $HOME/.pixi/envs -maxdepth 2 -name 'rdkit' -type d | head -1 | xargs dirname)"
+          if [ -z "$RDKIT_ROOT" ] || [ ! -d "$RDKIT_ROOT/include" ]; then
+              # Fall back to combined env path
+              RDKIT_ROOT="$(ls -d $HOME/.pixi/envs/* 2>/dev/null | head -1)"
+          fi
+          echo "RDKIT_ROOT=$RDKIT_ROOT" >> $GITHUB_ENV
+          echo "$RDKIT_ROOT/lib" >> /etc/ld.so.conf.d/rdkit.conf && ldconfig
           echo "=== headers ==="
-          dpkg -L librdkit-dev 2>/dev/null | grep -E '\.h$' | head -10
-          echo "=== include root candidates ==="
-          dpkg -L librdkit-dev 2>/dev/null | grep -E 'BoundsMatrix|RDKitBase' | head -5
-          echo "=== libs ==="
-          dpkg -L librdkit-dev librdkit1 2>/dev/null | grep -E '\.so' | head -10
+          find "$RDKIT_ROOT/include" -name 'BoundsMatrix.h' -o -name 'RDKitBase.h' | head -5
 
       - name: CMake configure
+        env:
+          CMAKE_PREFIX_PATH: /opt/rdkit
         run: |
           cmake -S . -B build -GNinja \
             -DCMAKE_BUILD_TYPE=Release \
             -DGPU_TARGETS="gfx1100" \
+            -DRDKit_ROOT=/opt/rdkit \
             -DROCMOLKIT_BUILD_TESTS=OFF
 
       - name: CMake build rocmolkit_core

@@ -36,10 +36,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && printf 'Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600\n' \
         > /etc/apt/preferences.d/rocm-pin-600 \
     && apt-get update && apt-get install -y --no-install-recommends \
-        build-essential ninja-build git \
+        build-essential ninja-build git xz-utils \
         python${PYTHON_VERSION} python${PYTHON_VERSION}-dev python3-pip \
         libboost-python-dev libeigen3-dev \
-        librdkit-dev rdkit-data \
         hipcc hip-dev hip-runtime-amd \
         rocblas-dev hipblas-dev \
         rocrand-dev hiprand-dev \
@@ -47,12 +46,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         hipcub-dev rocprim-dev rocthrust-dev \
     && rm -rf /var/lib/apt/lists/*
 
-ENV PATH=/opt/rocm/bin:$PATH \
+ENV PATH=/root/.pixi/bin:/root/.local/bin:/opt/rocm/bin:$PATH \
     ROCM_PATH=/opt/rocm
 
-RUN python${PYTHON_VERSION} -m pip install --no-cache-dir \
-        cmake \
-        scikit-build-core nanobind numpy rdkit-pypi
+# Python build tools via uv (instant); RDKit headers via pixi (conda-forge,
+# real C++ devel kit — Ubuntu's librdkit-dev is RDKit 2021.09 and lacks
+# DistGeom helpers required by ETKDG).
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
+    && uv pip install --system --break-system-packages --no-cache-dir \
+        cmake scikit-build-core nanobind numpy rdkit-pypi \
+    && curl -fsSL https://pixi.sh/install.sh | bash \
+    && pixi global install --channel conda-forge \
+        'rdkit>=2024.09' 'librdkit-devel>=2024.09' 'boost-cpp>=1.84'
+
+# Resolve pixi env path so CMake find_package picks RDKit up.
+ENV RDKIT_ROOT=/root/.pixi/envs/rdkit
 
 WORKDIR /src
 COPY . /src
@@ -64,6 +72,7 @@ RUN mkdir -p /install \
         -DCMAKE_HIP_COMPILER=/opt/rocm/bin/hipcc \
         -DCMAKE_HIP_PLATFORM=amd \
         -DGPU_TARGETS="${GPU_TARGETS}" \
+        -DRDKit_ROOT=${RDKIT_ROOT} \
         -DROCMOLKIT_BUILD_TESTS=OFF \
     && cmake --build /build --parallel \
     && cmake --install /build \
