@@ -123,6 +123,23 @@ pyridine) crash more reliably. **Heisenbug — disappears under `gdb`**.
   that previously worked. Reverted.
 - `HIP_LAUNCH_BLOCKING=1` does not stop the crash (so it is not pure
   kernel async; some host-side issue is involved).
+- `rocgdb` does not work for gfx1200 yet ("AMDGCN architecture 0x45
+  is not supported"). Plain `gdb` makes the bug disappear (Heisenbug).
+
+### **KEY FINDING — `tests/repro/asyncvec_stress.cpp`**
+
+Pure C++ stress test with no RDKit / boost-python / Python ran
+**20 iterations × 1000 alloc/free cycles of AsyncDeviceVector-like
+patterns with ZERO crashes**. The bug is **not** in our HIP allocation
+lifecycle.
+
+The crash is caused by **interaction between RDKit Python wrappers,
+boost-python, and our bindings**. Possible mechanisms:
+
+- Python GC reclaiming an `RDKit::ROMol` while a kernel still holds a
+  device pointer derived from it
+- Boost.Python converter passing a stale `RDKit::ROMol&` reference
+- RDKit Python wrapper mutating the molecule between our C++ callbacks
 
 ### Hypothesis
 
@@ -135,12 +152,17 @@ write that only manifests when the heap layout is unfortunate.
 
 ### Next investigation needs
 
-- `rocgdb` / `rocprofiler` tooling — install in the devel image.
-- Hack: try `HSA_TOOLS_LIB=libhsa-amd-aqlprofile.so` for trace.
-- Try compiling with `-fsanitize=address` on the host C++ paths only
-  (HIP kernel TUs cannot use ASan but the host code can).
-- Reproduce in isolation: minimal C++ test that allocates / frees an
-  `AsyncDeviceVector` 1000× and watches for heap corruption.
+- Write a C++-only `EmbedMolecules` driver (no boost-python) that calls
+  the same upstream APIs the binding does, with an `RDKit::ROMol`
+  built directly via the RDKit C++ API. If it crashes → bug is in
+  nvMolKit's expectation of how Python passes ROMol. If it doesn't →
+  bug is in the boost-python conversion layer.
+- Inspect `nvmolkit/embedMolecules.cpp` — how does it convert
+  `boost::python::list` into `std::vector<RDKit::ROMol*>`? Look for
+  GIL release / borrowed reference handling.
+- Try `HSA_TOOLS_LIB=libhsa-amd-aqlprofile.so` for runtime trace.
+- Compile host code paths with `-fsanitize=address` (HIP kernel TUs
+  cannot use ASan but boost-python wrappers can).
 
 ## Phase 1 fat removed from runtime image (cumulative)
 
