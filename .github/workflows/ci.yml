@@ -31,6 +31,15 @@ jobs:
             hipcub-dev rocprim-dev rocthrust-dev || true
           pip install scikit-build-core nanobind numpy
 
+      - name: Probe RDKit layout
+        run: |
+          echo "=== headers ==="
+          dpkg -L librdkit-dev 2>/dev/null | grep -E '\.h$' | head -10
+          echo "=== include root candidates ==="
+          dpkg -L librdkit-dev 2>/dev/null | grep -E 'BoundsMatrix|RDKitBase' | head -5
+          echo "=== libs ==="
+          dpkg -L librdkit-dev librdkit1 2>/dev/null | grep -E '\.so' | head -10
+
       - name: CMake configure
         run: |
           cmake -S . -B build -GNinja \
