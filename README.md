@@ -1,10 +1,14 @@
 # rocMolKit
 
+[![ci](https://github.com/Insilicall/rocMolKit/actions/workflows/ci.yml/badge.svg)](https://github.com/Insilicall/rocMolKit/actions/workflows/ci.yml)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+
 GPU-accelerated RDKit operations on AMD GPUs via HIP/ROCm.
 
 Port of [nvMolKit](https://github.com/NVIDIA-Digital-Bio/nvMolKit) (NVIDIA CUDA, Apache 2.0). Same API surface, AMD backend.
 
-> Status: **pre-alpha**, scaffold only. See [PLAN.md](PLAN.md).
+> Status: **pre-alpha**, Phase 1 scaffold + mechanical hipify done.
+> See [PLAN.md](PLAN.md) and [ISSUES.md](ISSUES.md) for roadmap and gotchas.
 
 ## Quickstart (quando estiver pronto)
 
