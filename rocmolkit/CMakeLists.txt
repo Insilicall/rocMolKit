@@ -150,13 +150,20 @@ endif()
 file(GLOB ROCMOLKIT_RDKIT_EXT
     "${CMAKE_CURRENT_SOURCE_DIR}/rdkit_extensions/*.cpp"
 )
-if(ROCMOLKIT_RDKIT_EXT)
+if(ROCMOLKIT_RDKIT_EXT AND RDKit_FOUND)
     add_library(rocmolkit_rdkit_ext STATIC ${ROCMOLKIT_RDKIT_EXT})
     target_include_directories(rocmolkit_rdkit_ext PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/rdkit_extensions
+        ${RDKit_INCLUDE_DIRS}
+    )
+    target_link_libraries(rocmolkit_rdkit_ext PUBLIC ${RDKit_LIBRARIES})
+    target_compile_options(rocmolkit_rdkit_ext PRIVATE
+        -Wno-enum-constexpr-conversion
+        -Wno-deprecated-declarations
     )
     set_target_properties(rocmolkit_rdkit_ext PROPERTIES
         POSITION_INDEPENDENT_CODE ON
+        CXX_STANDARD 20
     )
 endif()
 
