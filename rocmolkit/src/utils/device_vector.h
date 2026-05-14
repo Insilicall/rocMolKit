@@ -65,7 +65,15 @@ template <typename T> class AsyncDeviceVector {
     return *this;
   }
 
-  ~AsyncDeviceVector() { hipFreeAsync(data_, stream_); }
+  ~AsyncDeviceVector() {
+    // Guard against double-free / null-deref. hipFreeAsync(nullptr, stream)
+    // is documented as a no-op but the AMD driver under load occasionally
+    // segfaults on null + freed-stream combinations.
+    if (data_ != nullptr) {
+      hipFreeAsync(data_, stream_);
+      data_ = nullptr;
+    }
+  }
   T*     data() const noexcept { return data_; }
   size_t size() const noexcept { return size_; }
 
@@ -91,15 +99,17 @@ template <typename T> class AsyncDeviceVector {
       return;
     }
     if (newSize == 0) {
-      hipFreeAsync(data_, stream_);
-      data_ = nullptr;
+      if (data_ != nullptr) {
+        hipFreeAsync(data_, stream_);
+        data_ = nullptr;
+      }
       size_ = 0;
       return;
     }
 
     T* newData;
     cudaCheckError(hipMallocAsync(&newData, newSize * sizeof(T), stream_));
-    if (size_ > 0) {
+    if (size_ > 0 && data_ != nullptr) {
       cudaCheckError(
         hipMemcpyAsync(newData, data_, std::min(size_, newSize) * sizeof(T), hipMemcpyDeviceToDevice, stream_));
       hipFreeAsync(data_, stream_);
@@ -224,7 +234,12 @@ template <typename T> class AsyncDevicePtr {
     cudaCheckError(hipMallocAsync(&data_, sizeof(T), stream_));
     cudaCheckError(hipMemcpyAsync(data_, &data, sizeof(T), hipMemcpyHostToDevice, stream_));
   }
-  ~AsyncDevicePtr() noexcept { hipFreeAsync(data_, stream_); }
+  ~AsyncDevicePtr() noexcept {
+    if (data_ != nullptr) {
+      hipFreeAsync(data_, stream_);
+      data_ = nullptr;
+    }
+  }
   AsyncDevicePtr(const AsyncDevicePtr&)            = delete;
   AsyncDevicePtr& operator=(const AsyncDevicePtr&) = delete;
   AsyncDevicePtr(AsyncDevicePtr&& other) noexcept : data_(other.data_), stream_(other.stream_) {
@@ -235,7 +250,9 @@ template <typename T> class AsyncDevicePtr {
     if (this == &other) {
       return *this;
     }
-    hipFreeAsync(data_, stream_);
+    if (data_ != nullptr) {
+      hipFreeAsync(data_, stream_);
+    }
     data_         = other.data_;
     stream_       = other.stream_;
     other.data_   = nullptr;
