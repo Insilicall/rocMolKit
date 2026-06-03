@@ -3,30 +3,37 @@
 [![ci](https://github.com/Insilicall/rocMolKit/actions/workflows/ci.yml/badge.svg)](https://github.com/Insilicall/rocMolKit/actions/workflows/ci.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
-GPU-accelerated RDKit operations on AMD GPUs via HIP/ROCm.
+**GPU-accelerated conformer generation and force-field optimization for RDKit, on AMD GPUs** — via HIP/ROCm.
 
-Port of [nvMolKit](https://github.com/NVIDIA-Digital-Bio/nvMolKit) (NVIDIA CUDA, Apache 2.0). Same API surface, AMD backend.
+HIP/ROCm port of [nvMolKit](https://github.com/NVIDIA-Digital-Bio/nvMolKit) (NVIDIA CUDA, Apache 2.0) — same API surface, AMD backend. On a **consumer** Radeon RX 9060 XT it runs ETKDG conformer generation and MMFF94 optimization **faster than the published Apple-Silicon sibling port ([mlxmolkit](https://github.com/guillaume-osmo/mlxmolkit))** and an order of magnitude faster than multi-threaded RDKit on CPU.
 
-> Status: **alpha** — ETKDG + MMFF94 functional ✅
-> - Stack: ROCm 7.2.3 + Clang 22 + RDKit 2024.09.6 + boost 1.83
-> - Validated on **AMD Radeon RX 9060 XT (Navi 44, RDNA4 / gfx1200)**
-> - ETKDG bond lengths: GPU within 0.02 Å of RDKit CPU (within ETKDG noise)
-> - MMFF94 converges to physically sensible minima
-> - 6/6 Python bindings load: embedMolecules, mmffOptimization, uffOptimization,
->   batchedForcefield, conformerRmsd, arrayHelpers
-> - **Resolved**: the "non-deterministic SIGSEGV" was deterministic
->   dispatch to the iGPU (gfx1036) on Ryzen hosts that enumerate both an
->   integrated and a discrete GPU. Pin to the discrete GPU with
->   `BatchHardwareOptions(gpuIds=[0])`. The `rocmolkit.safe` subprocess
->   wrapper is still available as a defensive fallback but is no longer
->   the recommended path. See [ISSUES.md](ISSUES.md) "ROOT CAUSE FOUND".
-> - Pending: fingerprints, clustering, substructure, tfd (Phases 4-7 kernels)
->
-> See [PLAN.md](PLAN.md), [ISSUES.md](ISSUES.md) and [CHANGELOG.md](CHANGELOG.md).
+> **Status: alpha** — ETKDG + MMFF94 functional and validated on AMD RDNA4 (gfx1200).
+> Pending: fingerprints, clustering, substructure, TFD. See [PLAN.md](PLAN.md), [ISSUES.md](ISSUES.md), [CHANGELOG.md](CHANGELOG.md).
+
+## Performance
+
+Conformers per second (higher is better), measured on an **AMD Radeon RX 9060 XT** (Navi 44, gfx1200, RDNA4, 32 CUs) + Ryzen 5 7600, ROCm 7.2.3, dataset `tests/data/druglike_100.smi`.
+
+| Workload | **rocMolKit**<br>(RX 9060 XT) | RDKit CPU<br>(12 threads, same host) | mlxmolkit<br>(Apple Metal, published) |
+|---|---|---|---|
+| **ETKDG generation** (DG + ETK) | **~6,200** | ~870 | ~2,000–2,600 |
+| **MMFF94 optimization** | **~29,000–43,000** | ~1,200 | ~8,700–12,000 |
+
+- **~7× faster than 12-thread RDKit** on ETKDG generation, **~25–35×** on MMFF94 optimization.
+- **~2.5–3× faster than mlxmolkit** on both workloads, including the high-conformers-per-molecule regime.
+
+> Hardware differs across ports — mlxmolkit numbers are from its published README on Apple Silicon (~14 TFLOPS FP32) vs the RX 9060 XT (~25.6 TFLOPS FP32). Read it as "each port on the accelerator it targets," not a same-machine shoot-out. Full methodology, caveats, and the root-cause write-up are in [docs/PERFORMANCE_HIP.md](docs/PERFORMANCE_HIP.md).
+
+Reproduce:
+
+```bash
+python3 tools/etkdg_bench.py 1000 4     # ETKDG generation, N=1000 molecules × k=4 conformers
+python3 tools/mmff_fresh.py  1000 4     # MMFF94 optimization, fresh conformers
+```
 
 ## Quickstart
 
-Install dev image + run on a ROCm-capable machine:
+Run on a ROCm-capable machine with the prebuilt dev image:
 
 ```bash
 docker run --rm -it \
@@ -35,8 +42,6 @@ docker run --rm -it \
     ghcr.io/insilicall/rocmolkit:devel \
     python3
 ```
-
-Recommended path (direct call, GPU pinned to the discrete device):
 
 ```python
 from rdkit import Chem
@@ -51,105 +56,58 @@ params = ETKDGv3()
 params.useRandomCoords = True
 
 opts = BatchHardwareOptions()
-opts.gpuIds = [0]                 # pin to the discrete GPU (see ISSUES.md)
+opts.gpuIds = [0]                 # pin to the discrete GPU — see note below
 
-EmbedMolecules(mols, params, 50, -1, opts)        # 50 conformers per mol
-MMFFOptimizeMoleculesConfs(mols, maxIters=200)
+EmbedMolecules(mols, params, 50, -1, opts)        # 50 conformers per molecule
+MMFFOptimizeMoleculesConfs(mols, 200, [], opts)   # MMFF94, maxIters=200
 ```
 
-Defensive fallback (`rocmolkit.safe`) — same call wrapped in a fresh
-subprocess with retries. Adds ~600 ms/mol of fork+import overhead, so use
-it only when you cannot tolerate the (now rare) failures from upstream
-ROCm bugs:
-
-```python
-from rdkit import Chem
-from rdkit.Chem import AddHs
-from rocmolkit.safe import embed_molecule, mmff_optimize_molecule
-
-m = AddHs(Chem.MolFromSmiles("CCO"))
-embed_molecule(m, seed=42, gpu_id=0)
-energies = mmff_optimize_molecule(m)
-```
-
-## Performance
-
-Measured on AMD Ryzen 5 7600 (12 threads) + AMD Radeon RX 9060 XT
-(gfx1200, 32 CUs, RDNA4) with ROCm 7.2.3 against
-`tests/data/druglike_100.smi`. The benchmark sweeps N (molecule count)
-× k (conformers per molecule) so the GPU's two parallelism axes both
-get exercised.
-
-Reproduce on a clean GPU:
-
-```bash
-bash tools/validate_gpu.sh
-```
-
-The script aborts if it detects the leaked-VRAM state (HIP runtime
-holds memory after a Ctrl+C; recover with `sudo modprobe -r amdgpu &&
-sudo modprobe amdgpu` or a reboot — see [ISSUES.md](ISSUES.md)).
-
-### Methodology
-
-- All paths use the same ETKDGv3 parameters and the same SMILES set.
-- RDKit CPU baseline uses `EmbedMultipleConfs(numThreads=0)` — RDKit's
-  multi-threaded conformer generator. This is the honest CPU baseline
-  on a 12-thread host. A `numThreads=1` row is reported alongside for
-  the apples-to-apples per-call comparison.
-- GPU calls go through the direct binding with
-  `BatchHardwareOptions(gpuIds=[0])` — no subprocess overhead.
-- Throughput is reported as conformers per second so single-conformer
-  and multi-conformer runs compare on the same axis.
-
-Expected shape (filled in by `tools/validate_gpu.sh` on a clean GPU):
-
-| Pipeline | Shape | Wall time | Per-conformer | Success |
-|---|---|---|---|---|
-| RDKit CPU (1 thread) | N=500, k=50 | _to be filled_ | _to be filled_ | _to be filled_ |
-| RDKit CPU (12 threads) | N=500, k=50 | _to be filled_ | _to be filled_ | _to be filled_ |
-| rocMolKit GPU (RX 9060 XT) | N=500, k=50 | _to be filled_ | _to be filled_ | _to be filled_ |
-
-### Why k matters
-
-ETKDG's per-molecule work is small for drug-like molecules (~4 ms on
-RDKit CPU) so a single-conformer run on a small batch leaves most of
-the GPU idle. The GPU advantage scales with k because every conformer
-of every molecule becomes an independent unit of parallel work — the
-upstream nvMolKit benchmark on H100 shows the gap widening from
-roughly even at k=1 to >10× by k=50 on the same drug-like sets. RDNA4
-has lower peak FLOPs than H100 so the crossover sits at higher k or N
-on this hardware; the sweep above pins down where exactly.
+> **Pin `gpuIds=[0]`** on Ryzen hosts. Such systems enumerate both an integrated
+> GPU (gfx1036) and the discrete GPU; dispatching to the iGPU crashes. Pinning to
+> the discrete device avoids it. (The earlier "non-deterministic SIGSEGV" was this
+> deterministic iGPU dispatch — see [ISSUES.md](ISSUES.md) "ROOT CAUSE FOUND".)
 
 ## Hardware
 
-ROCm 6.2+ em uma das GPUs:
+ROCm 6.2+ on one of:
 
 | GPU | gfx | Status |
 |---|---|---|
-| RX 7900 XTX/XT | gfx1100 | oficial |
-| MI210/MI250 | gfx90a | oficial |
-| MI300 | gfx942 | oficial |
+| RX 9060 XT / RDNA4 | gfx1200 | primary (validated) |
+| RX 7900 XTX/XT | gfx1100 | supported |
+| MI210 / MI250 | gfx90a | supported |
+| MI300 | gfx942 | supported |
 | RX 6000 series | gfx1030 | use `HSA_OVERRIDE_GFX_VERSION=10.3.0` |
 
 ## Build
 
 ```bash
-# Imagem mínima de produção (< 2 GB)
+# Minimal production image (< 2 GB)
 docker build -f docker/Dockerfile.slim -t rocmolkit:slim .
 
-# Imagem dev com SDK
+# Dev image with the ROCm SDK (hipcc, gdb, hipify)
 docker build -f docker/Dockerfile.devel -t rocmolkit:devel .
 
-# Build local
-cmake -S . -B build -GNinja -DGPU_TARGETS=gfx1100
+# Local build
+cmake -S . -B build -GNinja -DGPU_TARGETS=gfx1200
 cmake --build build
 ```
 
+## How it works
+
+rocMolKit runs the full ETKDG pipeline (DistGeom 4D → ETK 3D → chirality/stereo
+checks) and MMFF94 optimization on the GPU, with an in-kernel batched BFGS
+minimizer (one warp per conformer, inverse Hessian in global memory). Conformers
+are the unit of parallel work, so throughput scales with both the molecule count
+(N) and conformers per molecule (k). See [docs/PERFORMANCE_HIP.md](docs/PERFORMANCE_HIP.md)
+for the architecture and the optimization history.
+
 ## Roadmap
 
-Ver [PLAN.md](PLAN.md). Ordem: ETKDG → MMFF94 → fingerprints → similaridade → Butina → resto.
+ETKDG → MMFF94 → fingerprints → similarity → Butina clustering → the rest.
+See [PLAN.md](PLAN.md).
 
-## Licença
+## License
 
-Apache 2.0. Veja [LICENSE](LICENSE) e [NOTICE](NOTICE) para atribuição ao nvMolKit upstream.
+Apache 2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE) for attribution to the
+upstream nvMolKit.
