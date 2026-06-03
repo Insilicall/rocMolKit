@@ -122,6 +122,16 @@ if(ROCMOLKIT_HIP_SOURCES AND CMAKE_HIP_COMPILER AND hip_FOUND)
         $<$<COMPILE_LANGUAGE:CXX,HIP>:-include${ROCMOLKIT_INCLUDE_DIR}/rocmolkit/hip_compat.h>
         $<$<COMPILE_LANGUAGE:CXX,HIP>:-Wno-enum-constexpr-conversion>
         $<$<COMPILE_LANGUAGE:CXX,HIP>:-Wno-deprecated-declarations>
+        # Parity with nvMolKit's CUDA build, which compiles device code with
+        # nvcc --use_fast_math in Release/RelWithDebInfo (see
+        # upstream/cmake/device_compiler_flags.cmake). The clang/hipcc spelling
+        # is -ffast-math, but plain -ffast-math also turns on -ffinite-math-only,
+        # which makes isnan()/isinf() fold to false and would silently break the
+        # convergence-failure checks in the BFGS / dist-geom kernels. We keep the
+        # FP speedups (fused multiply-add, approximate reciprocal/sqrt, no errno)
+        # but re-enable NaN/Inf handling so those checks keep working.
+        $<$<AND:$<COMPILE_LANGUAGE:HIP>,$<CONFIG:Release>>:-ffast-math;-fno-finite-math-only>
+        $<$<AND:$<COMPILE_LANGUAGE:HIP>,$<CONFIG:RelWithDebInfo>>:-ffast-math;-fno-finite-math-only>
     )
 
     target_link_libraries(rocmolkit_core PUBLIC hip::host hip::device)

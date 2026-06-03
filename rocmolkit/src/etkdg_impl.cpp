@@ -124,26 +124,25 @@ void ETKDGDriver::iterate() {
     }
     const ScopedNvtxRange runRange("ETKDG stage " + std::to_string(i) + ": " + stages_[i]->name());
     context_->failedThisStage.zero();
-    if (debugMode_) {
-      // Record start time
-      auto startTime = std::chrono::high_resolution_clock::now();
-
-      // Execute the stage
-      stages_[i]->execute(*context_);
-
-      // Record end time and calculate duration
-      auto endTime  = std::chrono::high_resolution_clock::now();
-      auto duration = std::chrono::duration<double, std::milli>(endTime - startTime).count();
-
-      // Record timing for this stage using its name
-      recordStageTiming(stages_[i]->name(), duration);
-    } else {
-      stages_[i]->execute(*context_);
-    }
 
     // ROCMOLKIT_DEBUG_STAGES: sync + check after each stage to localise crashes.
     // Set ROCMOLKIT_DEBUG_STAGES=1 in the environment to enable.
     static const bool debugStages = std::getenv("ROCMOLKIT_DEBUG_STAGES") != nullptr;
+
+    // Time the stage when either path is requested. We must capture the start
+    // before execute() and (when debugStages) stop AFTER the stream sync below,
+    // because the HIP kernels launched inside execute() are asynchronous: a
+    // chrono span around execute() alone only measures host-side enqueue, not
+    // GPU execution. debugStages adds the per-stage sync, so its timing is the
+    // real on-device cost — use it to find the pipeline bottleneck.
+    const bool                                     timeIt = debugMode_ || debugStages;
+    std::chrono::high_resolution_clock::time_point startTime;
+    if (timeIt) {
+      startTime = std::chrono::high_resolution_clock::now();
+    }
+
+    stages_[i]->execute(*context_);
+
     if (debugStages) {
       std::fprintf(stderr, "[rocmolkit] iter=%d stage[%zu/%zu]=%s ... ",
                    iteration_, i, numStages, stages_[i]->name().c_str());
@@ -156,6 +155,12 @@ void ETKDGDriver::iterate() {
       } else {
         std::fprintf(stderr, "OK\n");
       }
+    }
+
+    if (timeIt) {
+      const auto endTime  = std::chrono::high_resolution_clock::now();
+      const auto duration = std::chrono::duration<double, std::milli>(endTime - startTime).count();
+      recordStageTiming(stages_[i]->name(), duration);
     }
 
     launchCollectAndFilterFailuresKernel(*context_, static_cast<int>(i), stream_);
@@ -171,7 +176,8 @@ void ETKDGDriver::run(int maxIterations) {
     iterate();
   }
 
-  if (debugMode_) {
+  static const bool debugStages = std::getenv("ROCMOLKIT_DEBUG_STAGES") != nullptr;
+  if (debugMode_ || debugStages) {
     printTimingStatistics();
   }
 }
