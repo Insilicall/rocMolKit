@@ -97,6 +97,26 @@ launch/sync overhead of the normal async path. Re-profile WITHOUT the debug sync
 coordgen onto the GPU, collapse the 12 stages, cut host round-trips), not the
 incremental FP64→FP32 tweak tested below.
 
+### Measured: the GPU is idle 56% of the time
+
+Sampling `gpu_busy_percent` during an N=2000 run (216 samples): **median 2%
+busy**, mean 45%, **56% of samples below 10% busy**, 44% above 50%. The
+distribution is bimodal — 100% (computing a batch) or 2% (idle, waiting on the
+CPU). So the 20x gap decomposes as roughly:
+
+- **~2x — host idle gaps** (per-batch setup of 12 stages, chirality/stereo checks
+  that round-trip D2H, launch latency between many small kernels). Keeping the
+  GPU busy ~doubles throughput.
+- **~10x — inefficient compute when it does run**: FP64 (2-4x on RDNA4) +
+  occupancy (our 128 threads/molecule vs mlxmolkit's 32 → 4x fewer concurrent
+  conformers per CU) + kernel design.
+
+Priority order to close it: (1) cut host round-trips / keep the GPU fed
+(GPU coordgen, fewer stages, pipeline batches); (2) drop minimization
+threadgroup to ~32 threads/conformer; (3) FP32 across the minimization path.
+This corrects the earlier "98% minimization" reading, which was taken with the
+debug per-stage sync and hid the idle gaps.
+
 ## FP32 experiment result (measured) — Hessian alone is not the silver bullet
 
 We tested the highest-value FP32 step in isolation: converting the **inverse
