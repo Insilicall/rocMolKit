@@ -79,7 +79,7 @@ namespace detail {
 
 DistGeomMinimizeStage::DistGeomMinimizeStage(
   const std::vector<const RDKit::ROMol*>&                                               mols,
-  const std::vector<EmbedArgs>&                                                         eargs,
+  const std::vector<const EmbedArgs*>&                                                  eargs,
   const RDKit::DGeomHelpers::EmbedParameters&                                           embedParam,
   ETKDGContext&                                                                         ctx,
   BfgsBatchMinimizer&                                                                   minimizer,
@@ -113,7 +113,7 @@ DistGeomMinimizeStage::DistGeomMinimizeStage(
   // Process each molecule
   for (size_t i = 0; i < mols.size(); ++i) {
     const auto& mol      = mols[i];
-    const auto& embedArg = eargs[i];
+    const auto& embedArg = *eargs[i];
     const auto& numAtoms = mol->getNumAtoms();
 
     // Get or construct force field parameters

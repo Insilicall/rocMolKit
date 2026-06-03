@@ -104,7 +104,7 @@ void runPlanarToleranceCheck(const AsyncDeviceVector<double>& planarEnergies,
 
 ETKMinimizationStage::ETKMinimizationStage(
   const std::vector<const RDKit::ROMol*>&                                                 mols,
-  const std::vector<EmbedArgs>&                                                           eargs,
+  const std::vector<const EmbedArgs*>&                                                    eargs,
   const RDKit::DGeomHelpers::EmbedParameters&                                             embedParam,
   const ETKDGContext&                                                                     ctx,
   BfgsBatchMinimizer&                                                                     minimizer,
@@ -125,8 +125,8 @@ ETKMinimizationStage::ETKMinimizationStage(
   std::unordered_map<const RDKit::ROMol*, int> conformerCounts;
   for (size_t i = 0; i < mols.size(); ++i) {
     const auto& mol          = mols[i];
-    const auto& etkdgDetails = eargs[i].etkdgDetails;
-    const auto& mmat         = eargs[i].mmat;
+    const auto& etkdgDetails = eargs[i]->etkdgDetails;
+    const auto& mmat         = eargs[i]->mmat;
 
     // Get or construct force field parameters
     const nvMolKit::DistGeom::Energy3DForceContribsHost* ffParams = nullptr;

@@ -444,7 +444,7 @@ __global__ void doubleBondGeometryKernel(const int      numTerms,
 }  // namespace
 
 void ETKDGChiralCheckBase::loadChiralDataset(const ETKDGContext&           ctx,
-                                             const std::vector<EmbedArgs>& eargs,
+                                             const std::vector<const EmbedArgs*>& eargs,
                                              ChiralCheckType               checkType) {
   std::vector<int>           idx0Host;
   std::vector<int>           idx1Host;
@@ -457,7 +457,7 @@ void ETKDGChiralCheckBase::loadChiralDataset(const ETKDGContext&           ctx,
   std::vector<int>           sysIdxHost;
 
   for (int i = 0; i < ctx.nTotalSystems; ++i) {
-    const auto& embedArg        = eargs[i];
+    const auto& embedArg        = *eargs[i];
     const int   atomIndexOffset = ctx.systemHost.atomStarts[i];
     const auto& checklist =
       (checkType == ChiralCheckType::Tetrahedral) ? embedArg.tetrahedralCarbons : embedArg.chiralCenters;
@@ -511,7 +511,7 @@ void ETKDGChiralCheckBase::setStreams(const hipStream_t stream) {
 }
 
 ETKDGTetrahedralCheckStage::ETKDGTetrahedralCheckStage(const ETKDGContext&           ctx,
-                                                       const std::vector<EmbedArgs>& eargs,
+                                                       const std::vector<const EmbedArgs*>& eargs,
                                                        const int                     dim,
                                                        hipStream_t                  stream)
     : dim_(dim),
@@ -545,7 +545,7 @@ void ETKDGTetrahedralCheckStage::execute(ETKDGContext& ctx) {
 }
 
 ETKDGFirstChiralCenterCheckStage::ETKDGFirstChiralCenterCheckStage(const ETKDGContext&           ctx,
-                                                                   const std::vector<EmbedArgs>& eargs,
+                                                                   const std::vector<const EmbedArgs*>& eargs,
                                                                    const int                     dim,
                                                                    hipStream_t                  stream)
     : dim_(dim),
@@ -578,7 +578,7 @@ void ETKDGFirstChiralCenterCheckStage::execute(ETKDGContext& ctx) {
 }
 
 ETKDGChiralCenterVolumeCheckStage::ETKDGChiralCenterVolumeCheckStage(const ETKDGContext&           ctx,
-                                                                     const std::vector<EmbedArgs>& eargs,
+                                                                     const std::vector<const EmbedArgs*>& eargs,
                                                                      const int                     dim,
                                                                      hipStream_t                  stream)
     : dim_(dim),
@@ -613,7 +613,7 @@ void ETKDGChiralCenterVolumeCheckStage::execute(ETKDGContext& ctx) {
   cudaCheckError(hipGetLastError());
 }
 
-void ETKDGChiralDistMatrixCheckStage::loadDataset(const ETKDGContext& ctx, const std::vector<EmbedArgs>& eargs) {
+void ETKDGChiralDistMatrixCheckStage::loadDataset(const ETKDGContext& ctx, const std::vector<const EmbedArgs*>& eargs) {
   std::vector<int>    idx0Host;
   std::vector<int>    idx1Host;
   std::vector<double> lowerBound;
@@ -621,9 +621,9 @@ void ETKDGChiralDistMatrixCheckStage::loadDataset(const ETKDGContext& ctx, const
   std::vector<int>    sysIdxHost;
 
   for (int i = 0; i < ctx.nTotalSystems; ++i) {
-    const auto&   mmat            = *eargs[i].mmat;
+    const auto&   mmat            = *eargs[i]->mmat;
     const int     atomIndexOffset = ctx.systemHost.atomStarts[i];
-    const auto&   checklist       = eargs[i].chiralCenters;
+    const auto&   checklist       = eargs[i]->chiralCenters;
     std::set<int> chiralIdxs;
 
     for (const auto& check : checklist) {
@@ -665,7 +665,7 @@ void ETKDGChiralDistMatrixCheckStage::loadDataset(const ETKDGContext& ctx, const
 }
 
 ETKDGChiralDistMatrixCheckStage::ETKDGChiralDistMatrixCheckStage(const ETKDGContext&           ctx,
-                                                                 const std::vector<EmbedArgs>& eargs,
+                                                                 const std::vector<const EmbedArgs*>& eargs,
                                                                  const int                     dim,
                                                                  hipStream_t                  stream)
     : dim_(dim),
@@ -700,7 +700,7 @@ void ETKDGChiralDistMatrixCheckStage::execute(ETKDGContext& ctx) {
 }
 
 ETKDGDoubleBondStereoCheckStage::ETKDGDoubleBondStereoCheckStage(const ETKDGContext&           ctx,
-                                                                 const std::vector<EmbedArgs>& eargs,
+                                                                 const std::vector<const EmbedArgs*>& eargs,
                                                                  int                           dim,
                                                                  hipStream_t                  stream)
     : dim_(dim),
@@ -737,7 +737,7 @@ void ETKDGDoubleBondStereoCheckStage::execute(ETKDGContext& ctx) {
   cudaCheckError(hipGetLastError());
 }
 
-void ETKDGDoubleBondStereoCheckStage::loadDataset(const ETKDGContext& ctx, const std::vector<EmbedArgs>& eargs) {
+void ETKDGDoubleBondStereoCheckStage::loadDataset(const ETKDGContext& ctx, const std::vector<const EmbedArgs*>& eargs) {
   std::vector<int> idx0Host;
   std::vector<int> idx1Host;
   std::vector<int> idx2Host;
@@ -746,7 +746,7 @@ void ETKDGDoubleBondStereoCheckStage::loadDataset(const ETKDGContext& ctx, const
   std::vector<int> sysIdxHost;
 
   for (size_t i = 0; i < eargs.size(); i++) {
-    for (const auto& [indices, sign] : eargs[i].stereoDoubleBonds) {
+    for (const auto& [indices, sign] : eargs[i]->stereoDoubleBonds) {
       if (indices.size() != 4) {
         throw std::runtime_error("Double bond stereo check requires 4 indices, got" + std::to_string(indices.size()));
       }
@@ -769,7 +769,7 @@ void ETKDGDoubleBondStereoCheckStage::loadDataset(const ETKDGContext& ctx, const
 }
 
 ETKDGDoubleBondGeometryCheckStage::ETKDGDoubleBondGeometryCheckStage(const ETKDGContext&           ctx,
-                                                                     const std::vector<EmbedArgs>& eargs,
+                                                                     const std::vector<const EmbedArgs*>& eargs,
                                                                      int                           dim,
                                                                      hipStream_t                  stream)
     : dim_(dim),
@@ -800,14 +800,14 @@ void ETKDGDoubleBondGeometryCheckStage::execute(ETKDGContext& ctx) {
                                                                  ctx.failedThisStage.data());
   cudaCheckError(hipGetLastError());
 }
-void ETKDGDoubleBondGeometryCheckStage::loadDataset(const ETKDGContext& ctx, const std::vector<EmbedArgs>& eargs) {
+void ETKDGDoubleBondGeometryCheckStage::loadDataset(const ETKDGContext& ctx, const std::vector<const EmbedArgs*>& eargs) {
   std::vector<int> idx0Host;
   std::vector<int> idx1Host;
   std::vector<int> idx2Host;
   std::vector<int> sysIdxHost;
 
   for (size_t i = 0; i < eargs.size(); i++) {
-    for (const auto& [idx0, idx1, idx2] : eargs[i].doubleBondEnds) {
+    for (const auto& [idx0, idx1, idx2] : eargs[i]->doubleBondEnds) {
       idx0Host.push_back(idx0 + ctx.systemHost.atomStarts[i]);
       idx1Host.push_back(idx1 + ctx.systemHost.atomStarts[i]);
       idx2Host.push_back(idx2 + ctx.systemHost.atomStarts[i]);

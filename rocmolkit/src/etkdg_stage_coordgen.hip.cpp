@@ -70,7 +70,7 @@ void ETKDGCoordGenStage::execute(ETKDGContext& ctx) {
 
 ETKDGCoordGenRDKitStage::ETKDGCoordGenRDKitStage(const RDKit::DGeomHelpers::EmbedParameters& params,
                                                  const std::vector<const RDKit::ROMol*>&     mols,
-                                                 const std::vector<EmbedArgs>&               eargs,
+                                                 const std::vector<const EmbedArgs*>&        eargs,
                                                  PinnedHostVector<double>&                   positionsScratch,
                                                  PinnedHostVector<uint8_t>&                  activeScratch,
                                                  hipStream_t                                stream)
@@ -87,7 +87,7 @@ void ETKDGCoordGenRDKitStage::execute(ETKDGContext& ctx) {
     return;
   }
   const size_t requiredActiveSize    = ctx.activeThisStage.size();
-  const size_t requiredPositionsSize = ctx.systemHost.atomStarts.back() * eargs_[0].dim;
+  const size_t requiredPositionsSize = ctx.systemHost.atomStarts.back() * eargs_[0]->dim;
 
   if (activeScratch_.size() < requiredActiveSize) {
     activeScratch_.resize(requiredActiveSize);
@@ -113,10 +113,10 @@ void ETKDGCoordGenRDKitStage::execute(ETKDGContext& ctx) {
       continue;
     }
     for (size_t atomIdx = 0; atomIdx < mols_[molIdx]->getNumAtoms(); ++atomIdx) {
-      for (int dim = 0; dim < eargs_[molIdx].dim; ++dim) {
+      for (int dim = 0; dim < eargs_[molIdx]->dim; ++dim) {
         // Generate random position
         double    pos          = (rng() - 0.5) * boxSize;
-        const int idx          = (ctx.systemHost.atomStarts[molIdx] + atomIdx) * eargs_[molIdx].dim + dim;
+        const int idx          = (ctx.systemHost.atomStarts[molIdx] + atomIdx) * eargs_[molIdx]->dim + dim;
         positionsScratch_[idx] = pos;
       }
     }

@@ -35,7 +35,7 @@ class ETKDGChiralCheckBase : public ETKDGStage {
   void setStreams(hipStream_t stream);
 
   //! Read in chiral/tetrahedral data from EmbedArgs to device vectors.
-  void loadChiralDataset(const ETKDGContext& ctx, const std::vector<EmbedArgs>& eargs, ChiralCheckType checkType);
+  void loadChiralDataset(const ETKDGContext& ctx, const std::vector<const EmbedArgs*>& eargs, ChiralCheckType checkType);
 
   AsyncDeviceVector<int>           idx0;
   AsyncDeviceVector<int>           idx1;
@@ -55,7 +55,7 @@ class ETKDGChiralCheckBase : public ETKDGStage {
 class ETKDGTetrahedralCheckStage final : public ETKDGChiralCheckBase {
  public:
   ETKDGTetrahedralCheckStage(const ETKDGContext&           ctx,
-                             const std::vector<EmbedArgs>& eargs,
+                             const std::vector<const EmbedArgs*>& eargs,
                              int                           dim    = 4,
                              hipStream_t                  stream = nullptr);
 
@@ -73,7 +73,7 @@ class ETKDGTetrahedralCheckStage final : public ETKDGChiralCheckBase {
 class ETKDGFirstChiralCenterCheckStage final : public ETKDGChiralCheckBase {
  public:
   ETKDGFirstChiralCenterCheckStage(const ETKDGContext&           ctx,
-                                   const std::vector<EmbedArgs>& eargs,
+                                   const std::vector<const EmbedArgs*>& eargs,
                                    int                           dim    = 4,
                                    hipStream_t                  stream = nullptr);
 
@@ -108,7 +108,7 @@ class ETKDGFinalChiralCenterCheckStage final : public ETKDGStage {
 class ETKDGChiralCenterVolumeCheckStage final : public ETKDGChiralCheckBase {
  public:
   ETKDGChiralCenterVolumeCheckStage(const ETKDGContext&           ctx,
-                                    const std::vector<EmbedArgs>& eargs,
+                                    const std::vector<const EmbedArgs*>& eargs,
                                     int                           dim    = 4,
                                     hipStream_t                  stream = nullptr);
 
@@ -127,7 +127,7 @@ class ETKDGChiralCenterVolumeCheckStage final : public ETKDGChiralCheckBase {
 class ETKDGChiralDistMatrixCheckStage final : public ETKDGStage {
  public:
   ETKDGChiralDistMatrixCheckStage(const ETKDGContext&           ctx,
-                                  const std::vector<EmbedArgs>& eargs,
+                                  const std::vector<const EmbedArgs*>& eargs,
                                   int                           dim    = 4,
                                   hipStream_t                  stream = nullptr);
 
@@ -136,7 +136,7 @@ class ETKDGChiralDistMatrixCheckStage final : public ETKDGStage {
   std::string name() const override { return "Chirality Distance Matrix Check"; }
 
  private:
-  void                   loadDataset(const ETKDGContext& ctx, const std::vector<EmbedArgs>& eargs);
+  void                   loadDataset(const ETKDGContext& ctx, const std::vector<const EmbedArgs*>& eargs);
   AsyncDeviceVector<int> idx0;
   AsyncDeviceVector<int> idx1;
   AsyncDeviceVector<int> sysIdx;
@@ -152,7 +152,7 @@ class ETKDGChiralDistMatrixCheckStage final : public ETKDGStage {
 class ETKDGDoubleBondStereoCheckStage final : public ETKDGStage {
  public:
   ETKDGDoubleBondStereoCheckStage(const ETKDGContext&           ctx,
-                                  const std::vector<EmbedArgs>& eargs,
+                                  const std::vector<const EmbedArgs*>& eargs,
                                   int                           dim    = 4,
                                   hipStream_t                  stream = nullptr);
 
@@ -161,7 +161,7 @@ class ETKDGDoubleBondStereoCheckStage final : public ETKDGStage {
   std::string name() const override { return "Double bond stereo check"; }
 
  private:
-  void                   loadDataset(const ETKDGContext& ctx, const std::vector<EmbedArgs>& eargs);
+  void                   loadDataset(const ETKDGContext& ctx, const std::vector<const EmbedArgs*>& eargs);
   AsyncDeviceVector<int> idx0;
   AsyncDeviceVector<int> idx1;
   AsyncDeviceVector<int> idx2;
@@ -178,7 +178,7 @@ class ETKDGDoubleBondStereoCheckStage final : public ETKDGStage {
 class ETKDGDoubleBondGeometryCheckStage final : public ETKDGStage {
  public:
   ETKDGDoubleBondGeometryCheckStage(const ETKDGContext&           ctx,
-                                    const std::vector<EmbedArgs>& eargs,
+                                    const std::vector<const EmbedArgs*>& eargs,
                                     int                           dim    = 4,
                                     hipStream_t                  stream = nullptr);
 
@@ -187,7 +187,7 @@ class ETKDGDoubleBondGeometryCheckStage final : public ETKDGStage {
   std::string name() const override { return "Double bond geometry check"; }
 
  private:
-  void                   loadDataset(const ETKDGContext& ctx, const std::vector<EmbedArgs>& eargs);
+  void                   loadDataset(const ETKDGContext& ctx, const std::vector<const EmbedArgs*>& eargs);
   AsyncDeviceVector<int> idx0;
   AsyncDeviceVector<int> idx1;
   AsyncDeviceVector<int> idx2;

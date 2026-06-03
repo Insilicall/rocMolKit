@@ -422,19 +422,25 @@ class ETKDGUnifiedCheckTest : public ::testing::TestWithParam<std::tuple<int, ET
 
   // Helper method to create appropriate stage based on check type
   std::unique_ptr<ETKDGStage> createStage(const ETKDGCheckType checkType, int dim) {
+    // conf_to_mol indirection: stages take pointers into the shared per-molecule EmbedArgs.
+    std::vector<const EmbedArgs*> eargPtrs;
+    eargPtrs.reserve(eargs_.size());
+    for (const auto& earg : eargs_) {
+      eargPtrs.push_back(&earg);
+    }
     switch (checkType) {
       case ETKDGCheckType::Tetrahedral:
-        return std::make_unique<nvMolKit::detail::ETKDGTetrahedralCheckStage>(context_, eargs_, dim);
+        return std::make_unique<nvMolKit::detail::ETKDGTetrahedralCheckStage>(context_, eargPtrs, dim);
       case ETKDGCheckType::Chirality:
-        return std::make_unique<nvMolKit::detail::ETKDGFirstChiralCenterCheckStage>(context_, eargs_, dim);
+        return std::make_unique<nvMolKit::detail::ETKDGFirstChiralCenterCheckStage>(context_, eargPtrs, dim);
       case ETKDGCheckType::ChiralVolumeCenter:
-        return std::make_unique<nvMolKit::detail::ETKDGChiralCenterVolumeCheckStage>(context_, eargs_, dim);
+        return std::make_unique<nvMolKit::detail::ETKDGChiralCenterVolumeCheckStage>(context_, eargPtrs, dim);
       case ETKDGCheckType::ChiralDistMat:
-        return std::make_unique<nvMolKit::detail::ETKDGChiralDistMatrixCheckStage>(context_, eargs_, dim);
+        return std::make_unique<nvMolKit::detail::ETKDGChiralDistMatrixCheckStage>(context_, eargPtrs, dim);
       case ETKDGCheckType::DoubleBondStereo:
-        return std::make_unique<nvMolKit::detail::ETKDGDoubleBondStereoCheckStage>(context_, eargs_, dim);
+        return std::make_unique<nvMolKit::detail::ETKDGDoubleBondStereoCheckStage>(context_, eargPtrs, dim);
       case ETKDGCheckType::DoubleBondGeometry:
-        return std::make_unique<nvMolKit::detail::ETKDGDoubleBondGeometryCheckStage>(context_, eargs_, dim);
+        return std::make_unique<nvMolKit::detail::ETKDGDoubleBondGeometryCheckStage>(context_, eargPtrs, dim);
       default:
         throw std::invalid_argument("Unknown check type");
     }

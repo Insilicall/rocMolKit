@@ -325,9 +325,14 @@ std::optional<DeviceCoordResult> embedMolecules(const std::vector<RDKit::ROMol*>
           break;
         }
 
-        // Create batch of molecules and eargs for the dispatched work
-        std::vector<RDKit::ROMol*>     batchMolsWithConfs;
-        std::vector<detail::EmbedArgs> batchEargs;
+        // Create batch of molecules and eargs for the dispatched work.
+        // conf_to_mol indirection: the k conformer attempts of one molecule share a single
+        // per-molecule EmbedArgs (bounds matrix, chiral centers, ETKDG torsion details). We
+        // store POINTERS into the shared `eargs` (computed once per unique molecule above)
+        // instead of deep-copying EmbedArgs per conformer. This removes O(batchSize) deep
+        // copies of bounds matrices / torsion tables per batch.
+        std::vector<RDKit::ROMol*>            batchMolsWithConfs;
+        std::vector<const detail::EmbedArgs*> batchEargs;
 
         batchMolsWithConfs.reserve(molIds.size());
         batchEargs.reserve(molIds.size());
@@ -335,7 +340,7 @@ std::optional<DeviceCoordResult> embedMolecules(const std::vector<RDKit::ROMol*>
         for (const int molId : molIds) {
           // Use the original unique molecules and their prepared eargs
           batchMolsWithConfs.push_back(sortedMols[molId]);
-          batchEargs.push_back(eargs[molId]);
+          batchEargs.push_back(&eargs[molId]);
         }
 
         if (_dbg && omp_get_thread_num() == 0) std::fprintf(stderr, "[setup] make_unique<ETKDGContext>\n");
