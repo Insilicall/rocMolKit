@@ -22,6 +22,52 @@ non-deterministic, so conformer convergence varies run to run; ~1 in 7 runs gets
 extra failures (3500/4000 vs 4000/4000) and the ETKDG retries cost ~2x wall time
 (9.6 s vs 4.6 s). Reported single-shot numbers like "373" were slow outliers.
 
+## MMFF94 optimize-only — already ahead of mlxmolkit
+
+The numbers above are the **full ETKDG embed** pipeline. The standalone
+**MMFF94 optimization** path (`MMFFOptimizeMoleculesConfs`, conformers already
+generated) is a different, much faster workload — and the apples-to-apples
+comparison against mlxmolkit's MMFF benchmark:
+
+| config (N=1000 k=4, MMFF optimize only) | conf/s |
+|-----------------------------------------|--------|
+| cold run (first call, includes blit-kernel JIT) | ~14,000 |
+| warm, fresh process per run (median) | ~32,000 |
+| **warm, in-process median (`tools/mmff_bench.py`)** | **~52,000** |
+| mlxmolkit (Apple Metal), reported peak | ~12,000 |
+
+So on this workload rocMolKit is **~3–4x faster than mlxmolkit's peak**, not
+behind it. The warm number depends on warmup: a fresh Python process per run
+settles around ~32k conf/s, while a long-running process (the realistic service
+case) reaches ~52k once the mempool and kernel modules are hot. Optimized
+geometries verified correct (MMFF94 energy recomputed via RDKit matches:
+26.41 kcal/mol median, stable across runs). At smaller N=250 k=4 throughput is
+~10,000 conf/s (host/launch overhead is a larger fraction). Reproduce with
+`tools/mmff_bench.py` (writable `/tmp` required — see hazards below).
+
+### Two measurement hazards that produced false numbers
+
+1. **Writable `/tmp` is mandatory.** The HIP runtime JIT-compiles its internal
+   blit (copy) kernels via comgr, which writes scratch to `$TMPDIR` (default
+   `/tmp`). If the container's `/tmp` is mounted **read-only**, the compile fails
+   with `Couldn't create blit kernels! / Could not create BlitManager!` and the
+   process **segfaults** — looking exactly like a GPU/driver crash. Mount bench
+   scripts elsewhere (`-v ...:/scripts:ro`) and leave `/tmp` writable. A
+   standalone AOT-compiled HIP binary can mask this (small copies may use SDMA
+   instead of a JIT blit kernel), so it only bites the Python/runtime path.
+2. **Pin `gpuIds=[0]`.** This box has both a dGPU (gfx1200) and the Ryzen iGPU
+   (gfx1036). gfx1036 is outside `gfx12-generic` and has no code object;
+   enumerating it crashes. Pass `BatchHardwareOptions().gpuIds = [0]`.
+
+The earlier "MMFF cache +80% (1259→2263)" claim (commit 7acf15d) did **not**
+reproduce under correct measurement: with a writable `/tmp` and warm cache,
+baseline and the per-thread-cache build are statistically identical (~32k conf/s
+at N=1000 k=4). The persistent per-thread FF-contribs cache is correct and
+harmless but neutral for single-call workloads — each `ROMol*` is processed once,
+so there is no cross-batch cache reuse to exploit. The original +80% was an
+artifact of a read-only `/tmp` (intermittent blit-JIT stalls) plus cold-cache
+first runs.
+
 ### Rejected in this pass (measured, did not help / broke correctness)
 - Fuse check stages; bulk-insert of index arrays — within measurement noise.
 - Reuse molecular-system across conformers — impossible: kernels index the
