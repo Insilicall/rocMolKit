@@ -27,7 +27,7 @@
 namespace nvMolKit {
 
 namespace {
-constexpr int16_t BLOCK_SIZE           = 128;
+constexpr int16_t BLOCK_SIZE           = 32;
 constexpr int16_t MAX_LINESEARCH_ITERS = 1000;
 constexpr double  FUNCTOL              = 1e-4;
 constexpr double  MOVETOL              = 1e-7;
