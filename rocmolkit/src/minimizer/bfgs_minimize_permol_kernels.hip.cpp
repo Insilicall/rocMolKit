@@ -658,9 +658,18 @@ __launch_bounds__(BLOCK_SIZE) __global__ void bfgsMinimizeKernel(const int      
       }
       __syncthreads();
 
-      // Check convergence and update lambda
-      lineSearchConverged =
+      // Check convergence and update lambda. lineSearchPostEnergy computes the
+      // converged flag only on thread 0; assigning its return to the shared
+      // lineSearchConverged from every thread raced thread 0's `true` away with
+      // the other lanes' `false`, so the flag never latched and the search ran
+      // the full MAX_LINESEARCH_ITERS (1000) every BFGS step (~100x wasted work,
+      // worst at high conformers/molecule and in ETK generation). Latch it from
+      // thread 0 only.
+      const bool lsConverged =
         lineSearchPostEnergy(lineSearchIter == 0, prevE, currE, slope, lambda, lambdaMin, lambda2, eScratch, lambda);
+      if (tid == 0) {
+        lineSearchConverged = lsConverged;
+      }
       __syncthreads();
 
       if (tid == 0) {
