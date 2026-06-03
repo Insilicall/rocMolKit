@@ -41,8 +41,24 @@ radius or noise). Do it as a dedicated effort, and **first get real kernel
 profiling working** — `rocprof`/`rocprofv2` fail on this image (missing
 `libhsa-amd-aqlprofile64.so.1`); install `rocprofiler-sdk` / `rocprofv3` (ROCm
 7.x) so the compute can be targeted with VALU/occupancy/memory counters instead
-of trial-and-error. Until then, the `gpu_busy_percent` sampling + the
-`ROCMOLKIT_DEBUG_STAGES` per-stage timer are the available signals.
+of trial-and-error. (`Dockerfile.devel` now installs `rocprofiler-sdk` +
+`hsa-amd-aqlprofile` + `rocprofiler-register`; `rocprofv3 --kernel-trace` works.)
+
+**First kernel trace (rocprofv3, N=200 k=4) — the target is unambiguous:**
+
+| % GPU time | kernel | launches |
+|-----------|--------|----------|
+| **86.4%** | **`bfgsMinimizeKernel`** | 6 |
+| 6.7% | `fillBufferAligned` (memsets) | 31,416 |
+| 3.2% | `copyBuffer` (memcpies) | 22,772 |
+| ~2% | DistViolation grad/energy | ~2,200 |
+
+So **86% of GPU compute is the single per-conformer BFGS kernel** — that is the
+one to optimize (occupancy, shared-mem pressure, the in-kernel line search /
+Hessian update). Next: profile `bfgsMinimizeKernel` with rocprofv3 counters
+(VALU utilization, occupancy, LDS) to know whether it is ALU-bound,
+occupancy-limited, or memory-bound, then redesign accordingly. The ~10% of tiny
+memsets/copies (54k launches) is the secondary target.
 
 ### Also worth fixing (consistency, not raw speed)
 The FP32 non-determinism causes the slow-retry outlier (~1 in 7). Making the
