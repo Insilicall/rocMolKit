@@ -1,10 +1,69 @@
-# Why rocMolKit is slow on consumer RDNA — and what makes HIP fast
+# rocMolKit performance on consumer RDNA4
 
 Measured on an **AMD Radeon RX 9060 XT** (Navi 44, gfx1200, RDNA4, 32 CUs),
-ROCm 7.2.3, dataset `tests/data/druglike_100.smi`. TL;DR: **HIP is not the
-problem — FP64 on a consumer GPU is.**
+ROCm 7.2.3, dataset `tests/data/druglike_100.smi`.
 
-## Result of the optimization pass — parity with the CPU
+**TL;DR (current):** rocMolKit now **beats the sibling GPU ports on both
+workloads**. The long-standing slowness was never FP64 or pipeline overhead —
+it was a one-line correctness bug in the in-kernel line search (it ran 1000
+inner iterations per BFGS step instead of ~2-3; see *Root cause* below). Fixing
+it lifted ETKDG generation ~27x and high-conformer MMFF ~100x.
+
+## Cross-port comparison
+
+Throughput in **conformers/second** (higher is better). rocMolKit numbers are
+measured here; mlxmolkit numbers are from its published README. **Hardware
+differs** — this is not a same-machine benchmark, so read it as "each port on
+the accelerator it targets", not a hardware shoot-out.
+
+| Workload | **rocMolKit** (AMD RX 9060 XT) | mlxmolkit (Apple Metal) | RDKit CPU (12 threads, same host) |
+|---|---|---|---|
+| **ETKDG generation** (DG + ETK) | **~6,200** (N=1000–3000, k=4) | ~2,000–2,600 (N=1000–10000, k=10) | ~870 |
+| **MMFF94 optimize** (fresh conformers) | **~29,000–43,000** (k=4–10) | ~8,700–12,000 (1k–10k confs) | ~1,200 |
+
+- rocMolKit is **~2.5–3x** faster than mlxmolkit on ETKDG generation and
+  **~2.4–3.6x** faster on MMFF optimization, including the high-conformers-per-
+  molecule regime mlxmolkit benchmarks.
+- nvMolKit (the original CUDA library) publishes no comparable throughput
+  table; it targets datacenter GPUs (H100/A100), so it is omitted rather than
+  compared across very different hardware.
+
+**Caveats (read these):**
+- mlxmolkit ran on Apple Silicon (~14 TFLOPS FP32) vs the RX 9060 XT
+  (~25.6 TFLOPS FP32) — different hardware. The comparison is port-vs-port on
+  each one's target accelerator.
+- Measure MMFF on **fresh** conformers optimized **once** (`tools/mmff_fresh.py`),
+  not the `tools/mmff_bench.py` "warm median", which re-optimizes already-
+  converged geometries — an unrealistic workload whose timings are misleading
+  at high k.
+- rocMolKit ETKDG reports ~88–96% generation success vs mlxmolkit's ~99.7%
+  reported convergence; these metrics are defined differently and are not a
+  like-for-like quality comparison.
+
+## Root cause of the historical slowness — the line-search bug
+
+The per-molecule BFGS kernel (`bfgs_minimize_permol_kernels.hip.cpp`, shared by
+the MMFF, ETK and DG force fields) ran its inner line search to the full
+`MAX_LINESEARCH_ITERS` (1000) on **every** BFGS step. `lineSearchPostEnergy`
+computes the converged flag only on thread 0, but the caller assigned its return
+value to the shared `lineSearchConverged` from all 32 lanes, so the other lanes'
+`false` raced thread 0's `true` away and the flag never latched. Latching it from
+thread 0 only (commit on this branch) dropped the line search to ~2-3 iterations
+per step:
+
+| Workload | before fix | after fix |
+|---|---|---|
+| ETKDG generation, N=1000 k=4 | ~228 conf/s (≈865 historically) | **~6,200 conf/s** |
+| MMFF optimize, k=8 fresh (high conformers/mol) | ~300 conf/s | **~29,000 conf/s** |
+
+Success rate and MMFF94 energies are unchanged — this is a pure efficiency fix.
+The separate `hipFreeAsync` stream-sync fix (a HIP-7.0 use-after-free) removed an
+intermittent GPU memory fault at N≥~900; the two fixes are independent.
+
+## (Historical) Result of an earlier optimization pass — parity with the CPU
+
+> Superseded by the line-search fix above. Kept for the record; the numbers
+> below predate it and are no longer current.
 
 This branch (BLOCK_SIZE=32 + FP32 minimization + conf_to_mol) takes the port
 from ~20x behind mlxmolkit to **parity with the 12-thread CPU**:
