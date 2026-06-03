@@ -1,16 +1,19 @@
 name: ci
 
 # Only run CI on:
-# - pull requests targeting main (gates merges)
+# - a PR being opened / reopened / marked ready-for-review (gates merges)
 # - manual dispatch (when you want to validate something off main)
 # - tag pushes (release validation)
 #
-# We do NOT run on every push to main. Iteration on the alpha branch
-# generates many WIP commits and each CI run is 5-12 min + cost.
+# We deliberately do NOT include the `synchronize` PR event, so pushing new
+# WIP commits to an open PR does NOT re-run CI — iteration generates many
+# commits and each run is 5-12 min + cost. Re-run on demand via the Actions
+# "Run workflow" button (workflow_dispatch) or by re-marking the PR ready.
 # Tagged releases still trigger docker-publish via .github/workflows/docker.yml.
 on:
   pull_request:
     branches: [main]
+    types: [opened, reopened, ready_for_review]
   push:
     tags: ['v*']
   workflow_dispatch:
