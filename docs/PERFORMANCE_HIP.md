@@ -4,6 +4,51 @@ Measured on an **AMD Radeon RX 9060 XT** (Navi 44, gfx1200, RDNA4, 32 CUs),
 ROCm 7.2.3, dataset `tests/data/druglike_100.smi`. TL;DR: **HIP is not the
 problem — FP64 on a consumer GPU is.**
 
+## Result of the optimization pass — parity with the CPU
+
+This branch (BLOCK_SIZE=32 + FP32 minimization + conf_to_mol) takes the port
+from ~20x behind mlxmolkit to **parity with the 12-thread CPU**:
+
+| config | conf/s (median of 6 runs, N=1000 k=4) |
+|--------|---------------------------------------|
+| original port | ~110 |
+| **this branch** | **~865 (~7.9x)** |
+| RDKit CPU, 12 threads | ~870 |
+| mlxmolkit (Apple Metal) | ~2,300 |
+
+**Measure with ≥6 runs and take the median** — single-shot is misleading here.
+The throughput distribution is **bimodal**: FP32 makes the parallel reductions
+non-deterministic, so conformer convergence varies run to run; ~1 in 7 runs gets
+extra failures (3500/4000 vs 4000/4000) and the ETKDG retries cost ~2x wall time
+(9.6 s vs 4.6 s). Reported single-shot numbers like "373" were slow outliers.
+
+### Rejected in this pass (measured, did not help / broke correctness)
+- Fuse check stages; bulk-insert of index arrays — within measurement noise.
+- Reuse molecular-system across conformers — impossible: kernels index the
+  global position buffer by per-conformer atom offset, so term indices differ.
+- Carry per-molecule convergence across relaunches — **broke correctness**
+  (75% → 50% success; the energy gate caught it). Reverted.
+
+## Next project: single-kernel rewrite (the path beyond CPU parity → mlxmolkit)
+
+Incremental tweaks are exhausted at CPU parity. Going from ~865 to ~2,300
+needs the mlxmolkit architecture — a **fused per-conformer kernel** (DistGeom +
+ETK + checks) with **device-side conf_to_mol** (share constraint topology across
+a molecule's conformers on-device) and zero host round-trips. This is an
+architectural rewrite of the minimization/stage path, not an incremental change
+(5 agent attempts confirmed reuse/fusion of the existing stages is high-blast-
+radius or noise). Do it as a dedicated effort, and **first get real kernel
+profiling working** — `rocprof`/`rocprofv2` fail on this image (missing
+`libhsa-amd-aqlprofile64.so.1`); install `rocprofiler-sdk` / `rocprofv3` (ROCm
+7.x) so the compute can be targeted with VALU/occupancy/memory counters instead
+of trial-and-error. Until then, the `gpu_busy_percent` sampling + the
+`ROCMOLKIT_DEBUG_STAGES` per-stage timer are the available signals.
+
+### Also worth fixing (consistency, not raw speed)
+The FP32 non-determinism causes the slow-retry outlier (~1 in 7). Making the
+parallel reductions deterministic (or stabilizing convergence) would remove the
+tail and make throughput consistently ~865 rather than averaging ~790.
+
 ## What the nvMolKit benchmarks actually report
 
 From `upstream/CHANGELOG.md`:
