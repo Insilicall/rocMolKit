@@ -35,39 +35,39 @@ namespace DistGeom {
 // DG terms
 // --------------
 
-template <int dimension>
-static __device__ __forceinline__ double distViolationEnergy(const double* pos,
+template <int dimension, typename CoordT = double>
+static __device__ __forceinline__ float distViolationEnergy(const CoordT* pos,
                                                              const int     idx1,
                                                              const int     idx2,
-                                                             const double  lb2,
-                                                             const double  ub2,
-                                                             const double  weight) {
-  const int    posIdx1   = idx1 * dimension;
-  const int    posIdx2   = idx2 * dimension;
-  const double distance2 = distanceSquaredPosIdx<dimension>(pos, posIdx1, posIdx2);
-  double       val       = 0.0;
-  if (distance2 > ub2) {
-    val = (distance2 / ub2) - 1.0;
-  } else if (distance2 < lb2) {
-    val = ((2 * lb2) / (lb2 + distance2)) - 1.0;
-  }
-  if (val > 0.0) {
-    return weight * val * val;
-  }
-  return 0.0;
-}
-
-template <int dimension>
-static __device__ __forceinline__ void distViolationGrad(const double* pos,
-                                                         const int     idx1,
-                                                         const int     idx2,
-                                                         const double  lb2,
-                                                         const double  ub2,
-                                                         const double  weight,
-                                                         double*       grad) {
+                                                             const float   lb2,
+                                                             const float   ub2,
+                                                             const float   weight) {
   const int   posIdx1   = idx1 * dimension;
   const int   posIdx2   = idx2 * dimension;
-  const float distance2 = distanceSquaredPosIdx<dimension>(pos, posIdx1, posIdx2);
+  const float distance2 = distanceSquaredPosIdx<dimension, float>(pos, posIdx1, posIdx2);
+  float       val       = 0.0f;
+  if (distance2 > ub2) {
+    val = (distance2 / ub2) - 1.0f;
+  } else if (distance2 < lb2) {
+    val = ((2.0f * lb2) / (lb2 + distance2)) - 1.0f;
+  }
+  if (val > 0.0f) {
+    return weight * val * val;
+  }
+  return 0.0f;
+}
+
+template <int dimension, typename CoordT = double, typename GradT = double>
+static __device__ __forceinline__ void distViolationGrad(const CoordT* pos,
+                                                         const int     idx1,
+                                                         const int     idx2,
+                                                         const float   lb2,
+                                                         const float   ub2,
+                                                         const float   weight,
+                                                         GradT*        grad) {
+  const int   posIdx1   = idx1 * dimension;
+  const int   posIdx2   = idx2 * dimension;
+  const float distance2 = distanceSquaredPosIdx<dimension, float>(pos, posIdx1, posIdx2);
   float       preFactor = 0.0;
   if (distance2 > ub2) {
     preFactor = 4.f * ((distance2 / ub2) - 1.0f) / ub2;
@@ -95,12 +95,12 @@ static __device__ __forceinline__ void distViolationGrad(const double* pos,
   }
 }
 
-template <typename T>
+template <typename T, typename CoordT = double>
 static __device__ __forceinline__ T calcChiralVolume(const int&    posIdx1,
                                                      const int&    posIdx2,
                                                      const int&    posIdx3,
                                                      const int&    posIdx4,
-                                                     const double* pos,
+                                                     const CoordT* pos,
                                                      T&            v1x,
                                                      T&            v1y,
                                                      T&            v1z,
@@ -128,8 +128,8 @@ static __device__ __forceinline__ T calcChiralVolume(const int&    posIdx1,
   return vol;
 }
 
-template <int dimension>
-static __device__ __forceinline__ double chiralViolationEnergy(const double* pos,
+template <int dimension, typename CoordT = double>
+static __device__ __forceinline__ double chiralViolationEnergy(const CoordT* pos,
                                                                const int     idx1,
                                                                const int     idx2,
                                                                const int     idx3,
@@ -155,8 +155,8 @@ static __device__ __forceinline__ double chiralViolationEnergy(const double* pos
   return 0.0;
 }
 
-template <int dimension>
-static __device__ __forceinline__ void chiralViolationGrad(const double* pos,
+template <int dimension, typename CoordT = double, typename GradT = double>
+static __device__ __forceinline__ void chiralViolationGrad(const CoordT* pos,
                                                            const int     idx1,
                                                            const int     idx2,
                                                            const int     idx3,
@@ -164,7 +164,7 @@ static __device__ __forceinline__ void chiralViolationGrad(const double* pos,
                                                            const double  lb,
                                                            const double  ub,
                                                            const double  weight,
-                                                           double*       grad) {
+                                                           GradT*        grad) {
   const int posIdx1 = idx1 * dimension;
   const int posIdx2 = idx2 * dimension;
   const int posIdx3 = idx3 * dimension;
@@ -208,26 +208,26 @@ static __device__ __forceinline__ void chiralViolationGrad(const double* pos,
   }
 }
 
-template <int dimension>
-static __device__ __forceinline__ double fourthDimEnergy(const double* pos, const int idx, const double weight) {
+template <int dimension, typename CoordT = double>
+static __device__ __forceinline__ float fourthDimEnergy(const CoordT* pos, const int idx, const float weight) {
   if constexpr (dimension != 4) {
-    return 0.0;
+    return 0.0f;
   }
-  const int    posIdx    = idx * dimension;
-  const double fourthVal = pos[posIdx + 3];
+  const int   posIdx    = idx * dimension;
+  const float fourthVal = pos[posIdx + 3];
   return weight * fourthVal * fourthVal;
 }
 
-template <int dimension>
-static __device__ __forceinline__ void fourthDimGrad(const double* pos,
+template <int dimension, typename CoordT = double, typename GradT = double>
+static __device__ __forceinline__ void fourthDimGrad(const CoordT* pos,
                                                      const int     idx,
-                                                     const double  weight,
-                                                     double*       grad) {
+                                                     const float   weight,
+                                                     GradT*        grad) {
   if constexpr (dimension != 4) {
     return;
   }
-  const int    posIdx    = idx * dimension;
-  const double fourthVal = pos[posIdx + 3];
+  const int   posIdx    = idx * dimension;
+  const float fourthVal = pos[posIdx + 3];
   atomicAdd(&grad[posIdx + 3], weight * fourthVal);
 }
 
@@ -255,7 +255,8 @@ static __device__ __forceinline__ float calcTorsionEnergyM6(const double* forceC
           forceConstants[4] * (1.0f + signs[4] * cos5Phi) + forceConstants[5] * (1.0f + signs[5] * cos6Phi));
 }
 
-static __device__ __forceinline__ double calcTorsionCosPhi(const double* pos,
+template <typename CoordT = double>
+static __device__ __forceinline__ double calcTorsionCosPhi(const CoordT* pos,
                                                            const int     posIdx1,
                                                            const int     posIdx2,
                                                            const int     posIdx3,
@@ -295,7 +296,8 @@ static __device__ __forceinline__ double calcTorsionCosPhi(const double* pos,
   return cosPhi;
 }
 
-static __device__ __forceinline__ double torsionAngleEnergy(const double* pos,
+template <typename CoordT = double>
+static __device__ __forceinline__ double torsionAngleEnergy(const CoordT* pos,
                                                             const int     idx1,
                                                             const int     idx2,
                                                             const int     idx3,
@@ -311,7 +313,8 @@ static __device__ __forceinline__ double torsionAngleEnergy(const double* pos,
   return calcTorsionEnergyM6(forceConstants, signs, cosPhi);
 }
 
-static __device__ __forceinline__ float calcInversionCosY(const double* pos,
+template <typename CoordT = double>
+static __device__ __forceinline__ float calcInversionCosY(const CoordT* pos,
                                                           const int     posIdx1,
                                                           const int     posIdx2,
                                                           const int     posIdx3,
@@ -354,7 +357,8 @@ static __device__ __forceinline__ float calcInversionCosY(const double* pos,
   return dotProduct(nx, ny, nz, rJLx, rJLy, rJLz) * rsqrtf(l2JL) * rsqrtf(l2n);
 }
 
-static __device__ __forceinline__ double inversionEnergy(const double* pos,
+template <typename CoordT = double>
+static __device__ __forceinline__ double inversionEnergy(const CoordT* pos,
                                                          const int     idx1,
                                                          const int     idx2,
                                                          const int     idx3,
@@ -377,7 +381,8 @@ static __device__ __forceinline__ double inversionEnergy(const double* pos,
   return forceConstant * (C0 + C1 * sinY + C2 * cos2W);
 }
 
-static __device__ __forceinline__ double distanceConstraintEnergy(const double* pos,
+template <typename CoordT = double>
+static __device__ __forceinline__ double distanceConstraintEnergy(const CoordT* pos,
                                                                   const int     idx1,
                                                                   const int     idx2,
                                                                   const double  minLen,
@@ -414,7 +419,8 @@ static __device__ __forceinline__ double computeAngleTerm(const double angle,
   return angleTerm;
 }
 
-static __device__ __forceinline__ double angleConstraintEnergy(const double* pos,
+template <typename CoordT = double>
+static __device__ __forceinline__ double angleConstraintEnergy(const CoordT* pos,
                                                                const int     idx1,
                                                                const int     idx2,
                                                                const int     idx3,
@@ -449,14 +455,15 @@ static __device__ __forceinline__ double angleConstraintEnergy(const double* pos
   return forceConstant * angleTerm * angleTerm;
 }
 
-static __device__ __forceinline__ void torsionAngleGrad(const double* pos,
+template <typename CoordT = double, typename GradT = double>
+static __device__ __forceinline__ void torsionAngleGrad(const CoordT* pos,
                                                         const int     idx1,
                                                         const int     idx2,
                                                         const int     idx3,
                                                         const int     idx4,
                                                         const double* forceConstants,  // 6 components
                                                         const int*    signs,           // 6 components
-                                                        double*       grad) {
+                                                        GradT*        grad) {
   const int posIdx1 = idx1 * 4;
   const int posIdx2 = idx2 * 4;
   const int posIdx3 = idx3 * 4;
@@ -575,7 +582,8 @@ static __device__ __forceinline__ void torsionAngleGrad(const double* pos,
   atomicAdd(&grad[posIdx4 + 2], g4z);
 }
 
-static __device__ __forceinline__ void inversionGrad(const double* pos,
+template <typename CoordT = double, typename GradT = double>
+static __device__ __forceinline__ void inversionGrad(const CoordT* pos,
                                                      const int     idx1,
                                                      const int     idx2,
                                                      const int     idx3,
@@ -584,7 +592,7 @@ static __device__ __forceinline__ void inversionGrad(const double* pos,
                                                      const double  C1,
                                                      const double  C2,
                                                      const double  forceConstant,
-                                                     double*       grad) {
+                                                     GradT*        grad) {
   // Get positions for all four atoms
   const int posIdx1 = idx1 * 4;
   const int posIdx2 = idx2 * 4;
@@ -704,13 +712,14 @@ static __device__ __forceinline__ void inversionGrad(const double* pos,
   atomicAdd(&grad[posIdx4 + 2], dE_dW * tg4z);
 }
 
-static __device__ __forceinline__ void distanceConstraintGrad(const double* pos,
+template <typename CoordT = double, typename GradT = double>
+static __device__ __forceinline__ void distanceConstraintGrad(const CoordT* pos,
                                                               const int     idx1,
                                                               const int     idx2,
                                                               const double  minLen,
                                                               const double  maxLen,
                                                               const double  forceConstant,
-                                                              double*       grad) {
+                                                              GradT*        grad) {
   const double minLen2 = minLen * minLen;
   const double maxLen2 = maxLen * maxLen;
   const int    posIdx1 = idx1 * 4;
@@ -740,14 +749,15 @@ static __device__ __forceinline__ void distanceConstraintGrad(const double* pos,
 }
 
 // Angle constraint gradient
-static __device__ __forceinline__ void angleConstraintGrad(const double* pos,
+template <typename CoordT = double, typename GradT = double>
+static __device__ __forceinline__ void angleConstraintGrad(const CoordT* pos,
                                                            const int     idx1,
                                                            const int     idx2,
                                                            const int     idx3,
                                                            const double  minAngle,
                                                            const double  maxAngle,
                                                            const double  forceConstant,
-                                                           double*       grad) {
+                                                           GradT*        grad) {
   // Get positions for all three atoms
   const int posIdx1 = idx1 * 4;
   const int posIdx2 = idx2 * 4;
@@ -830,10 +840,10 @@ static __device__ __forceinline__ void angleConstraintGrad(const double* pos,
   atomicAdd(&grad[posIdx3 + 2], dedp3z);
 }
 
-template <int dimension>
+template <int dimension, typename CoordT = double>
 static __device__ __inline__ double molEnergyDG(const EnergyForceContribsDevicePtr& terms,
                                                 const BatchedIndicesDevicePtr&      systemIndices,
-                                                const double*                       molCoords,
+                                                const CoordT*                       molCoords,
                                                 const int                           molIdx,
                                                 const double                        chiralWeight,
                                                 const double                        fourthDimWeight,
@@ -924,11 +934,11 @@ static __device__ __inline__ double molEnergyDG(const EnergyForceContribsDeviceP
 }
 
 // Consolidated per-molecule gradient calculation
-template <int dimension>
+template <int dimension, typename CoordT = double, typename GradT = double>
 static __device__ __inline__ void molGradDG(const EnergyForceContribsDevicePtr& terms,
                                             const BatchedIndicesDevicePtr&      systemIndices,
-                                            const double*                       molCoords,
-                                            double*                             molGrad,
+                                            const CoordT*                       molCoords,
+                                            GradT*                              molGrad,
                                             const int                           molIdx,
                                             const double                        chiralWeight,
                                             const double                        fourthDimWeight,
@@ -1016,9 +1026,10 @@ static __device__ __inline__ void molGradDG(const EnergyForceContribsDevicePtr& 
   }
 }
 
+template <typename CoordT = double>
 static __device__ __inline__ double molEnergyETK(const Energy3DForceContribsDevicePtr& terms,
                                                  const BatchedIndices3DDevicePtr&      systemIndices,
-                                                 const double*                         molCoords,
+                                                 const CoordT*                         molCoords,
                                                  const int                             molIdx,
                                                  const int                             tid) {
   const int atomStart = systemIndices.atomStarts[molIdx];
@@ -1184,10 +1195,11 @@ static __device__ __inline__ double molEnergyETK(const Energy3DForceContribsDevi
   return energy;
 }
 
+template <typename CoordT = double, typename GradT = double>
 static __device__ __inline__ void molGradETK(const Energy3DForceContribsDevicePtr& terms,
                                              const BatchedIndices3DDevicePtr&      systemIndices,
-                                             const double*                         molCoords,
-                                             double*                               grad,
+                                             const CoordT*                         molCoords,
+                                             GradT*                                grad,
                                              const int                             molIdx,
                                              const int                             tid) {
   const int atomStart = systemIndices.atomStarts[molIdx];

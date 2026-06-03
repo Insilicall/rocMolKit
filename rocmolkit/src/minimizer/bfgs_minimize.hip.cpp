@@ -420,10 +420,21 @@ BfgsBatchMinimizer::BfgsBatchMinimizer(const int    dataDim,
     hessDGrad_.setStream(stream_);
     scratchBuffersDevice_.setStream(stream_);
     activeMolIdsDevice_.setStream(stream_);
+
+    inverseHessianF_.setStream(stream_);
+    permolPositionsF_.setStream(stream_);
+    permolGradF_.setStream(stream_);
+    permolDirF_.setStream(stream_);
+    permolScratchPosF_.setStream(stream_);
+    permolDGradF_.setStream(stream_);
+    permolOldPosF_.setStream(stream_);
+    scratchBuffersDeviceF_.setStream(stream_);
   }
   // Allocate device array for per-molecule backend (also needed for HYBRID which might use it)
   if (backend_ == BfgsBackend::PER_MOLECULE || backend_ == BfgsBackend::HYBRID) {
     scratchBuffersDevice_.resize(5);
+    scratchBuffersDeviceF_.resize(5);
+    scratchBufferPointersHostF_.resize(5);
   }
 }
 BfgsBatchMinimizer::~BfgsBatchMinimizer() = default;
@@ -532,6 +543,19 @@ void BfgsBatchMinimizer::initialize(const std::vector<int>& atomStartsHost,
   hessianStarts_.setFromVector(hessianStartsHost_);
   inverseHessian_.resize(hessianStartsHost_.back());
   inverseHessian_.zero();
+
+  // FP32 working buffers for the per-molecule backend (see header). Sized to
+  // mirror the double buffers; only used on the PER_MOLECULE path.
+  if (effectiveBackend == BfgsBackend::PER_MOLECULE) {
+    const int totalTerms = atomStartsHost.back() * dataDim_;
+    inverseHessianF_.resize(hessianStartsHost_.back());
+    permolPositionsF_.resize(totalTerms);
+    permolGradF_.resize(totalTerms);
+    permolDirF_.resize(totalTerms);
+    permolScratchPosF_.resize(totalTerms);
+    permolDGradF_.resize(totalTerms);
+    permolOldPosF_.resize(totalTerms);
+  }
 
   hessDGrad_.resize(atomStartsHost.back() * dataDim_);
   hessDGrad_.zero();
@@ -666,6 +690,31 @@ void prepareScratchBuffers(AsyncDeviceVector<double>&  grad,
   cudaCheckError(hipMemcpyAsync(scratchBuffersDevice.data(),
                                  scratchBufferPointersHost.data(),
                                  5 * sizeof(double*),
+                                 hipMemcpyHostToDevice,
+                                 stream));
+}
+
+// FP32 variant: the per-molecule BFGS kernel works on float buffers. Slot 0
+// holds a dedicated float working copy of positions (the double context
+// positions array can no longer be aliased into the float kernel state).
+void prepareScratchBuffersF(AsyncDeviceVector<float>&  positionsF,
+                            AsyncDeviceVector<float>&  gradF,
+                            AsyncDeviceVector<float>&  lineSearchDirF,
+                            AsyncDeviceVector<float>&  scratchPositionsF,
+                            AsyncDeviceVector<float>&  hessDGradF,
+                            AsyncDeviceVector<float>&  scratchGradF,
+                            AsyncDeviceVector<float*>& scratchBuffersDeviceF,
+                            PinnedHostVector<float*>&  scratchBufferPointersHostF,
+                            hipStream_t                stream) {
+  scratchBufferPointersHostF[0] = positionsF.data();
+  scratchBufferPointersHostF[1] = lineSearchDirF.data();
+  scratchBufferPointersHostF[2] = scratchPositionsF.data();
+  scratchBufferPointersHostF[3] = hessDGradF.data();
+  scratchBufferPointersHostF[4] = scratchGradF.data();
+
+  cudaCheckError(hipMemcpyAsync(scratchBuffersDeviceF.data(),
+                                 scratchBufferPointersHostF.data(),
+                                 5 * sizeof(float*),
                                  hipMemcpyHostToDevice,
                                  stream));
 }
@@ -1108,14 +1157,15 @@ bool BfgsBatchMinimizer::minimizeWithMMFF(const int                            n
 
   const ScopedNvtxRange bfgsPerMolecule("BfgsBatchMinimizer::perMoleculeMinimize");
 
-  prepareScratchBuffers(systemDevice.grad,
-                        lineSearchDir_,
-                        scratchPositions_,
-                        hessDGrad_,
-                        scratchGrad_,
-                        scratchBuffersDevice_,
-                        scratchBufferPointersHost_,
-                        stream_);
+  prepareScratchBuffersF(permolPositionsF_,
+                         permolGradF_,
+                         permolDirF_,
+                         permolScratchPosF_,
+                         permolDGradF_,
+                         permolOldPosF_,
+                         scratchBuffersDeviceF_,
+                         scratchBufferPointersHostF_,
+                         stream_);
 
   auto terms         = MMFF::toEnergyForceContribsDevicePtr(systemDevice);
   auto systemIndices = MMFF::toBatchedIndicesDevicePtr(systemDevice);
@@ -1131,9 +1181,9 @@ bool BfgsBatchMinimizer::minimizeWithMMFF(const int                            n
                                                    terms,
                                                    systemIndices,
                                                    systemDevice.positions.data(),
-                                                   systemDevice.grad.data(),
-                                                   inverseHessian_.data(),
-                                                   scratchBuffersDevice_.data(),
+                                                   permolGradF_.data(),
+                                                   inverseHessianF_.data(),
+                                                   scratchBuffersDeviceF_.data(),
                                                    systemDevice.energyOuts.data(),
                                                    MMFF::batchHasConstraints(systemDevice.contribs),
                                                    statuses_.data(),
@@ -1172,14 +1222,15 @@ bool BfgsBatchMinimizer::minimizeWithETK(const int                              
 
   const ScopedNvtxRange bfgsPerMoleculeETK("BfgsBatchMinimizer::perMoleculeMinimizeETK");
 
-  prepareScratchBuffers(systemDevice.grad,
-                        lineSearchDir_,
-                        scratchPositions_,
-                        hessDGrad_,
-                        scratchGrad_,
-                        scratchBuffersDevice_,
-                        scratchBufferPointersHost_,
-                        stream_);
+  prepareScratchBuffersF(permolPositionsF_,
+                         permolGradF_,
+                         permolDirF_,
+                         permolScratchPosF_,
+                         permolDGradF_,
+                         permolOldPosF_,
+                         scratchBuffersDeviceF_,
+                         scratchBufferPointersHostF_,
+                         stream_);
 
   auto terms         = DistGeom::toEnergy3DForceContribsDevicePtr(systemDevice);
   auto systemIndices = DistGeom::toBatchedIndices3DDevicePtr(systemDevice, atomStarts.data());
@@ -1195,9 +1246,9 @@ bool BfgsBatchMinimizer::minimizeWithETK(const int                              
                                                       terms,
                                                       systemIndices,
                                                       positions.data(),
-                                                      systemDevice.grad.data(),
-                                                      inverseHessian_.data(),
-                                                      scratchBuffersDevice_.data(),
+                                                      permolGradF_.data(),
+                                                      inverseHessianF_.data(),
+                                                      scratchBuffersDeviceF_.data(),
                                                       systemDevice.energyOuts.data(),
                                                       statuses_.data(),
                                                       stream_);
@@ -1242,14 +1293,15 @@ bool BfgsBatchMinimizer::minimizeWithDG(const int                               
 
   const ScopedNvtxRange bfgsPerMoleculeDG("BfgsBatchMinimizer::perMoleculeMinimizeDG");
 
-  prepareScratchBuffers(systemDevice.grad,
-                        lineSearchDir_,
-                        scratchPositions_,
-                        hessDGrad_,
-                        scratchGrad_,
-                        scratchBuffersDevice_,
-                        scratchBufferPointersHost_,
-                        stream_);
+  prepareScratchBuffersF(permolPositionsF_,
+                         permolGradF_,
+                         permolDirF_,
+                         permolScratchPosF_,
+                         permolDGradF_,
+                         permolOldPosF_,
+                         scratchBuffersDeviceF_,
+                         scratchBufferPointersHostF_,
+                         stream_);
 
   auto terms         = DistGeom::toEnergyForceContribsDevicePtr(systemDevice);
   auto systemIndices = DistGeom::toBatchedIndicesDevicePtr(systemDevice, atomStarts.data());
@@ -1265,9 +1317,9 @@ bool BfgsBatchMinimizer::minimizeWithDG(const int                               
                                                      terms,
                                                      systemIndices,
                                                      positions.data(),
-                                                     systemDevice.grad.data(),
-                                                     inverseHessian_.data(),
-                                                     scratchBuffersDevice_.data(),
+                                                     permolGradF_.data(),
+                                                     inverseHessianF_.data(),
+                                                     scratchBuffersDeviceF_.data(),
                                                      systemDevice.energyOuts.data(),
                                                      chiralWeight,
                                                      fourthDimWeight,

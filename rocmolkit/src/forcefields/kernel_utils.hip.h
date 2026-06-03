@@ -32,7 +32,8 @@ __device__ __forceinline__ int mark_warp_uniform(const int input) {
   return __shfl_sync(0xffffffffffffffffULL, input, 0);
 }
 
-__device__ __forceinline__ double distanceSquared(const double* pos,
+template <typename CoordT = double>
+__device__ __forceinline__ double distanceSquared(const CoordT* pos,
                                                   const int     idx1,
                                                   const int     idx2,
                                                   const int     dim = 3) {
@@ -47,7 +48,8 @@ __device__ __forceinline__ double distanceSquared(const double* pos,
   return dist;
 }
 
-__device__ __forceinline__ double distanceSquaredPosIdx(const double* pos,
+template <typename CoordT = double>
+__device__ __forceinline__ double distanceSquaredPosIdx(const CoordT* pos,
                                                         const int     posIdx1,
                                                         const int     posIdx2,
                                                         const int     dim) {
@@ -62,8 +64,8 @@ __device__ __forceinline__ double distanceSquaredPosIdx(const double* pos,
   return dist;
 }
 
-template <int fixedDimension, typename floatType = double>
-__device__ __forceinline__ floatType distanceSquaredPosIdx(const double* pos, const int posIdx1, const int posIdx2) {
+template <int fixedDimension, typename floatType = double, typename CoordT = double>
+__device__ __forceinline__ floatType distanceSquaredPosIdx(const CoordT* pos, const int posIdx1, const int posIdx2) {
   const floatType dx   = pos[posIdx1 + 0] - pos[posIdx2 + 0];
   const floatType dy   = pos[posIdx1 + 1] - pos[posIdx2 + 1];
   const floatType dz   = pos[posIdx1 + 2] - pos[posIdx2 + 2];
@@ -118,6 +120,10 @@ __device__ __forceinline__ T dotProduct(const T& x1, const T& y1, const T& z1, c
 
 __device__ __forceinline__ void clipToOne(double& x) {
   x = fmax(-1.0, fmin(1.0, x));
+}
+
+__device__ __forceinline__ void clipToOne(float& x) {
+  x = fmaxf(-1.0f, fminf(1.0f, x));
 }
 
 __device__ __forceinline__ bool isDoubleZero(const double val) {

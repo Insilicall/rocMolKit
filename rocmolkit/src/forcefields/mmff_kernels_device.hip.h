@@ -26,13 +26,14 @@ constexpr double radianToDegree = 180.0 / M_PI;
 
 namespace rdkit_ports {
 
-static __device__ __forceinline__ void oopGrad(const double* pos,
+template <typename CoordT = double, typename GradT = double>
+static __device__ __forceinline__ void oopGrad(const CoordT* pos,
                                                const int     idx1,
                                                const int     idx2,
                                                const int     idx3,
                                                const int     idx4,
                                                const double  koop,
-                                               double*       grad) {
+                                               GradT*        grad) {
   constexpr double prefactor = 143.9325 * degreeToRadian;
 
   float dJIx = pos[3 * idx1 + 0] - pos[3 * idx2 + 0];
@@ -108,7 +109,8 @@ static __device__ __forceinline__ void oopGrad(const double* pos,
   atomicAdd(&grad[3 * idx4 + 2], dE_dChi * tg4[2]);
 }
 
-static __device__ __forceinline__ void torsionGrad(const double* pos,
+template <typename CoordT = double, typename GradT = double>
+static __device__ __forceinline__ void torsionGrad(const CoordT* pos,
                                                    const int     idx1,
                                                    const int     idx2,
                                                    const int     idx3,
@@ -116,7 +118,7 @@ static __device__ __forceinline__ void torsionGrad(const double* pos,
                                                    const float   V1,
                                                    const float   V2,
                                                    const float   V3,
-                                                   double*       grad) {
+                                                   GradT*        grad) {
   // P1 - P2
   const float dx1 = pos[3 * idx1 + 0] - pos[3 * idx2 + 0];
   const float dy1 = pos[3 * idx1 + 1] - pos[3 * idx2 + 1];
@@ -188,12 +190,13 @@ static __device__ __forceinline__ void torsionGrad(const double* pos,
   atomicAdd(&grad[3 * idx4 + 1], sinTerm * (dCos_dT5 * (-dx2) - dCos_dT3 * (-dz2)));
   atomicAdd(&grad[3 * idx4 + 2], sinTerm * (dCos_dT3 * (-dy2) - dCos_dT4 * (-dx2)));
 }
-static __device__ __forceinline__ void vDWGrad(const double* pos,
+template <typename CoordT = double, typename GradT = double>
+static __device__ __forceinline__ void vDWGrad(const CoordT* pos,
                                                const int     idx1,
                                                const int     idx2,
                                                const double  R_ij_star,
                                                const double  wellDepth,
-                                               double*       grad) {
+                                               GradT*        grad) {
   constexpr float vdw1   = 1.07;
   constexpr float vdw1m1 = vdw1 - 1.0;
   constexpr float vdw2   = 1.12;
@@ -239,7 +242,8 @@ static __device__ __forceinline__ void vDWGrad(const double* pos,
 
 }  // namespace rdkit_ports
 
-static __device__ __forceinline__ double bondStretchEnergy(const double* pos,
+template <typename CoordT = double>
+static __device__ __forceinline__ double bondStretchEnergy(const CoordT* pos,
                                                            const int     idx1,
                                                            const int     idx2,
                                                            const double  r0,
@@ -256,12 +260,13 @@ static __device__ __forceinline__ double bondStretchEnergy(const double* pos,
   return prefactor * kb * deltaR2 * (1.0 + csFactorDist * deltaR + csFactorDistSquared * deltaR2);
 }
 
-static __device__ __forceinline__ void bondStretchGrad(const double* pos,
+template <typename CoordT = double, typename GradT = double>
+static __device__ __forceinline__ void bondStretchGrad(const CoordT* pos,
                                                        const int     idx1,
                                                        const int     idx2,
                                                        const double  r0,
                                                        const double  kb,
-                                                       double*       grad) {
+                                                       GradT*        grad) {
   constexpr double c1                          = 143.9325;
   constexpr double cs                          = -2.0;
   constexpr double csFactorTimesSecondConstant = cs * 1.5;
@@ -295,7 +300,8 @@ static __device__ __forceinline__ void bondStretchGrad(const double* pos,
   atomicAdd(&grad[3 * idx2 + 2], -dE_dz);
 }
 
-static __device__ __forceinline__ double angleBendEnergy(const double* pos,
+template <typename CoordT = double>
+static __device__ __forceinline__ double angleBendEnergy(const CoordT* pos,
                                                          const int     idx1,
                                                          const int     idx2,
                                                          const int     idx3,
@@ -324,14 +330,15 @@ static __device__ __forceinline__ double angleBendEnergy(const double* pos,
   return prefactor * ka * deltaTheta2 * (1.0 + cb * deltaTheta);
 }
 
+template <typename CoordT = double, typename GradT = double>
 static __device__ __forceinline__ void angleBendGrad(const int     idx1,
                                                      const int     idx2,
                                                      const int     idx3,
                                                      const double  theta0,
                                                      const double  ka,
                                                      const bool    isLinear,
-                                                     const double* pos,
-                                                     double*       grad) {
+                                                     const CoordT* pos,
+                                                     GradT*        grad) {
   constexpr double c1       = 143.9325 * degreeToRadian;
   constexpr double cbFactor = -0.006981317 * 1.5;
   // These values are sensitive to double precision.
@@ -390,7 +397,8 @@ static __device__ __forceinline__ void angleBendGrad(const int     idx1,
   atomicAdd(&grad[3 * idx3 + 2], constantFactor * intermediate6);
 }
 
-static __device__ __forceinline__ double bendStretchEnergy(const double* pos,
+template <typename CoordT = double>
+static __device__ __forceinline__ double bendStretchEnergy(const CoordT* pos,
                                                            const int     idx1,
                                                            const int     idx2,
                                                            const int     idx3,
@@ -418,7 +426,8 @@ static __device__ __forceinline__ double bendStretchEnergy(const double* pos,
   return prefactor * deltaTheta * (deltaR1 * forceConst1 + deltaR2 * forceConst2);
 }
 
-static __device__ __forceinline__ void bendStretchGrad(const double* pos,
+template <typename CoordT = double, typename GradT = double>
+static __device__ __forceinline__ void bendStretchGrad(const CoordT* pos,
                                                        const int     idx1,
                                                        const int     idx2,
                                                        const int     idx3,
@@ -427,7 +436,7 @@ static __device__ __forceinline__ void bendStretchGrad(const double* pos,
                                                        const double  restLen2,
                                                        const double  forceConst1,
                                                        const double  forceConst2,
-                                                       double*       grad) {
+                                                       GradT*        grad) {
   constexpr float prefactor = 143.9325 * M_PI / 180.0;
 
   float       dx1, dy1, dz1, dx2, dy2, dz2;
@@ -495,7 +504,8 @@ static __device__ __forceinline__ void bendStretchGrad(const double* pos,
   atomicAdd(&grad[3 * idx2 + 2], gradz2);
 }
 
-static __device__ __forceinline__ double oopBendEnergy(const double* pos,
+template <typename CoordT = double>
+static __device__ __forceinline__ double oopBendEnergy(const CoordT* pos,
                                                        const int     idx1,
                                                        const int     idx2,
                                                        const int     idx3,
@@ -538,7 +548,8 @@ static __device__ __forceinline__ double oopBendEnergy(const double* pos,
   return prefactor * koop * chi * chi;
 }
 
-static __device__ __forceinline__ double torsionEnergy(const double* pos,
+template <typename CoordT = double>
+static __device__ __forceinline__ double torsionEnergy(const CoordT* pos,
                                                        const int     idx1,
                                                        const int     idx2,
                                                        const int     idx3,
@@ -576,7 +587,8 @@ static __device__ __forceinline__ double torsionEnergy(const double* pos,
   return 0.5 * (V1 * (1.0 + cosPhi) + V2 * (1.0 - cosf(2.0 * phi)) + V3 * (1.0 + cosf(3.0 * phi)));
 }
 
-static __device__ __forceinline__ double vdwEnergy(const double* pos,
+template <typename CoordT = double>
+static __device__ __forceinline__ double vdwEnergy(const CoordT* pos,
                                                    const int     idx1,
                                                    const int     idx2,
                                                    const double  R_ij_star,
@@ -600,7 +612,8 @@ static __device__ __forceinline__ double vdwEnergy(const double* pos,
   return epsilon * term1_7th * (term2Fraction - 2.0);
 }
 
-static __device__ __forceinline__ double eleEnergy(const double* pos,
+template <typename CoordT = double>
+static __device__ __forceinline__ double eleEnergy(const CoordT* pos,
                                                    const int     idx1,
                                                    const int     idx2,
                                                    const double  chargeTerm,
@@ -620,13 +633,14 @@ static __device__ __forceinline__ double eleEnergy(const double* pos,
   return energy;
 }
 
-static __device__ __forceinline__ void eleGrad(const double* pos,
+template <typename CoordT = double, typename GradT = double>
+static __device__ __forceinline__ void eleGrad(const CoordT* pos,
                                                const int     idx1,
                                                const int     idx2,
                                                const double  chargeTerm,
                                                const int     dielModel,
                                                const bool    is1_4,
-                                               double*       grad) {
+                                               GradT*        grad) {
   constexpr float prefactor         = 332.0716;
   constexpr float bufferingConstant = 0.05;
 
@@ -671,7 +685,8 @@ static __device__ __forceinline__ double normalizeAngleDeg(double angleDeg) {
   return angleDeg;
 }
 
-static __device__ __forceinline__ double distanceConstraintEnergy(const double* pos,
+template <typename CoordT = double>
+static __device__ __forceinline__ double distanceConstraintEnergy(const CoordT* pos,
                                                                   const int     idx1,
                                                                   const int     idx2,
                                                                   const double  minLen,
@@ -689,13 +704,14 @@ static __device__ __forceinline__ double distanceConstraintEnergy(const double* 
   return 0.5 * forceConstant * difference * difference;
 }
 
-static __device__ __forceinline__ void distanceConstraintGrad(const double* pos,
+template <typename CoordT = double, typename GradT = double>
+static __device__ __forceinline__ void distanceConstraintGrad(const CoordT* pos,
                                                               const int     idx1,
                                                               const int     idx2,
                                                               const double  minLen,
                                                               const double  maxLen,
                                                               const double  forceConstant,
-                                                              double*       grad) {
+                                                              GradT*        grad) {
   const double distance2Val = distanceSquared(pos, idx1, idx2);
   double       preFactor    = 0.0;
   double       distance     = 0.0;
@@ -717,7 +733,8 @@ static __device__ __forceinline__ void distanceConstraintGrad(const double* pos,
   }
 }
 
-static __device__ __forceinline__ double positionConstraintEnergy(const double* pos,
+template <typename CoordT = double>
+static __device__ __forceinline__ double positionConstraintEnergy(const CoordT* pos,
                                                                   const int     idx,
                                                                   const double  refX,
                                                                   const double  refY,
@@ -732,14 +749,15 @@ static __device__ __forceinline__ double positionConstraintEnergy(const double* 
   return 0.5 * forceConstant * distTerm * distTerm;
 }
 
-static __device__ __forceinline__ void positionConstraintGrad(const double* pos,
+template <typename CoordT = double, typename GradT = double>
+static __device__ __forceinline__ void positionConstraintGrad(const CoordT* pos,
                                                               const int     idx,
                                                               const double  refX,
                                                               const double  refY,
                                                               const double  refZ,
                                                               const double  maxDispl,
                                                               const double  forceConstant,
-                                                              double*       grad) {
+                                                              GradT*        grad) {
   const double dx   = pos[3 * idx + 0] - refX;
   const double dy   = pos[3 * idx + 1] - refY;
   const double dz   = pos[3 * idx + 2] - refZ;
@@ -765,7 +783,8 @@ static __device__ __forceinline__ double computeAngleConstraintTerm(const double
   return angleTerm;
 }
 
-static __device__ __forceinline__ double angleConstraintEnergy(const double* pos,
+template <typename CoordT = double>
+static __device__ __forceinline__ double angleConstraintEnergy(const CoordT* pos,
                                                                const int     idx1,
                                                                const int     idx2,
                                                                const int     idx3,
@@ -797,14 +816,15 @@ static __device__ __forceinline__ double angleConstraintEnergy(const double* pos
   return forceConstant * angleTerm * angleTerm;
 }
 
-static __device__ __forceinline__ void angleConstraintGrad(const double* pos,
+template <typename CoordT = double, typename GradT = double>
+static __device__ __forceinline__ void angleConstraintGrad(const CoordT* pos,
                                                            const int     idx1,
                                                            const int     idx2,
                                                            const int     idx3,
                                                            const double  minAngleDeg,
                                                            const double  maxAngleDeg,
                                                            const double  forceConstant,
-                                                           double*       grad) {
+                                                           GradT*        grad) {
   const double p1x = pos[3 * idx1 + 0];
   const double p1y = pos[3 * idx1 + 1];
   const double p1z = pos[3 * idx1 + 2];
@@ -888,7 +908,8 @@ static __device__ __forceinline__ double computeDihedralConstraintTerm(double   
   return normalizeAngleDeg(dihedral - dihedralTarget);
 }
 
-static __device__ __forceinline__ double computeSignedDihedral(const double* pos,
+template <typename CoordT = double>
+static __device__ __forceinline__ double computeSignedDihedral(const CoordT* pos,
                                                                const int     idx1,
                                                                const int     idx2,
                                                                const int     idx3,
@@ -942,7 +963,8 @@ static __device__ __forceinline__ double computeSignedDihedral(const double* pos
   return -atan2((mX * t[1][0] + mY * t[1][1] + mZ * t[1][2]) / mLength, cosPhi);
 }
 
-static __device__ __forceinline__ double torsionConstraintEnergy(const double* pos,
+template <typename CoordT = double>
+static __device__ __forceinline__ double torsionConstraintEnergy(const CoordT* pos,
                                                                  const int     idx1,
                                                                  const int     idx2,
                                                                  const int     idx3,
@@ -955,7 +977,8 @@ static __device__ __forceinline__ double torsionConstraintEnergy(const double* p
   return forceConstant * dihedralTerm * dihedralTerm;
 }
 
-static __device__ __forceinline__ void torsionConstraintGrad(const double* pos,
+template <typename CoordT = double, typename GradT = double>
+static __device__ __forceinline__ void torsionConstraintGrad(const CoordT* pos,
                                                              const int     idx1,
                                                              const int     idx2,
                                                              const int     idx3,
@@ -963,7 +986,7 @@ static __device__ __forceinline__ void torsionConstraintGrad(const double* pos,
                                                              const double  minDihedralDeg,
                                                              const double  maxDihedralDeg,
                                                              const double  forceConstant,
-                                                             double*       grad) {
+                                                             GradT*        grad) {
   double       r[4][3];
   double       t[2][3];
   double       d[2];
@@ -1036,10 +1059,10 @@ static __device__ __forceinline__ void torsionConstraintGrad(const double* pos,
 namespace nvMolKit {
 namespace MMFF {
 
-template <int stride, bool HasConstraints>
+template <int stride, bool HasConstraints, typename CoordT = double>
 static __device__ __inline__ double molEnergy(const EnergyForceContribsDevicePtr& terms,
                                               const BatchedIndicesDevicePtr&      systemIndices,
-                                              const double*                       molCoords,
+                                              const CoordT*                       molCoords,
                                               const int                           molIdx,
                                               const int                           tid) {
   const int atomStart = systemIndices.atomStarts[molIdx];
@@ -1197,11 +1220,11 @@ static __device__ __inline__ double molEnergy(const EnergyForceContribsDevicePtr
   return energy;
 }
 
-template <int stride, bool HasConstraints>
+template <int stride, bool HasConstraints, typename CoordT = double, typename GradT = double>
 static __device__ __inline__ void molGrad(const EnergyForceContribsDevicePtr& terms,
                                           const BatchedIndicesDevicePtr&      systemIndices,
-                                          const double*                       molCoords,
-                                          double*                             grad,
+                                          const CoordT*                       molCoords,
+                                          GradT*                              grad,
                                           const int                           molIdx,
                                           const int                           tid) {
   const int atomStart = systemIndices.atomStarts[molIdx];

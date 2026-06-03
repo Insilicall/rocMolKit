@@ -246,6 +246,22 @@ struct BfgsBatchMinimizer {
   // Device-side array of scratch buffer pointers (used by per-molecule kernel)
   AsyncDeviceVector<double*> scratchBuffersDevice_;
 
+  // FP32 working buffers used exclusively by the per-molecule BFGS kernel.
+  // The per-molecule path computes the force-field math and BFGS state in
+  // float for RDNA4 throughput; the shared context positions/energies remain
+  // double and are converted inside the kernel. These mirror the double
+  // buffers above (grad, lineSearchDir_, scratchPositions_, hessDGrad_,
+  // scratchGrad_, inverseHessian_) plus a dedicated float positions copy.
+  AsyncDeviceVector<float>  inverseHessianF_;
+  AsyncDeviceVector<float>  permolPositionsF_;  // float working copy of positions
+  AsyncDeviceVector<float>  permolGradF_;
+  AsyncDeviceVector<float>  permolDirF_;
+  AsyncDeviceVector<float>  permolScratchPosF_;
+  AsyncDeviceVector<float>  permolDGradF_;
+  AsyncDeviceVector<float>  permolOldPosF_;
+  AsyncDeviceVector<float*> scratchBuffersDeviceF_;
+  PinnedHostVector<float*>  scratchBufferPointersHostF_;
+
   // Pinned host buffers for async transfers (allocated lazily in initialize())
   PinnedHostVector<uint8_t> activeHost_;
   PinnedHostVector<int16_t> convergenceHost_;  // Changed to int16_t to match statuses_
