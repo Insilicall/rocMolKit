@@ -114,6 +114,11 @@ CPU). So the 20x gap decomposes as roughly:
 Priority order to close it: (1) cut host round-trips / keep the GPU fed
 (GPU coordgen, fewer stages, pipeline batches); (2) drop minimization
 threadgroup to ~32 threads/conformer; (3) FP32 across the minimization path.
+
+**DONE — (2) BLOCK_SIZE 128 -> 32: +74%.** Measured N=1000 k=4 on RX 9060 XT:
+110 -> 191 conf/s, correctness unchanged (75.0% success, MMFF94 energy median
+26.07 -> 26.21, max 103, no outliers). 64 -> 186 c/s; 16 unsafe (breaks tile32).
+One-line change (commit e96bdea). Remaining levers: (1) idle gaps and (3) FP32.
 This corrects the earlier "98% minimization" reading, which was taken with the
 debug per-stage sync and hid the idle gaps.
 
