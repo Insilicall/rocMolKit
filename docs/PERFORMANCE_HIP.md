@@ -62,7 +62,33 @@ so larger batches do not help. It stays ~8× behind the CPU on this workload.
 3. A batch-size autotuner is a minor lever here: the GPU saturates on compute,
    not on configuration.
 
-## FP32 conversion plan (TDD — the only speed lever on consumer RDNA)
+## FP32 experiment result (measured) — not the silver bullet
+
+We tested the highest-value FP32 step in isolation: converting the **inverse
+Hessian** (the largest `double` structure, O(n^2) global traffic per BFGS
+iteration) to `float`, gated by `tools/fp32_gate.py`.
+
+| metric | double baseline | Hessian float |
+|--------|-----------------|---------------|
+| success (N=200, k=4) | 75.0% | 75.0% |
+| MMFF94 energy median | 26.07 | 25.79 |
+| MMFF94 energy **max** | 103 | **485** |
+| throughput N=1000 | 110 conf/s | **114 conf/s (+3.6%)** |
+
+**~4% speedup and convergence outliers** (max energy 103 -> 485: some conformers
+converge poorly in `float`). Reverted.
+
+Why so small: nvMolKit **already** computes the gradients in `float` (the
+ALU-heavy part — see `distViolationGrad`). What is left in `double` is the
+Hessian (tiny for drug-like molecules, so it fits in cache and the bandwidth
+win is small) and the energy / line search (numerically sensitive). The
+full FP32 refactor would likely yield ~10-20%, **not** close the 8x gap, and
+would degrade correctness. The real ceiling on consumer RDNA is structural
+(per-system minimization saturates ~110 conf/s), not precision. A datacenter
+CDNA GPU remains the clean answer; for consumer cards, the honest conclusion is
+that ETKDG of small molecules belongs on the CPU.
+
+## FP32 conversion plan (TDD — if targeting larger molecules / CDNA tuning)
 
 The minimization subsystem shares one `double` state (positions, gradient,
 inverse Hessian) between the force field and BFGS, so the conversion is
