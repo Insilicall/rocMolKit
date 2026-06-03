@@ -124,6 +124,12 @@ MMFFMinimizeResult MMFFMinimizeMoleculesConfs(std::vector<RDKit::ROMol*>&       
     return {moleculeEnergies, moleculeConverged, std::nullopt};
   }
 
+  // Persistent per-thread cache of MMFF force-field contribs: a molecule whose conformers span
+  // multiple batches is parametrized once per thread instead of once per batch (the old cache was
+  // declared inside the batch loop, so it was thrown away every batch — the GPU sat ~95% idle).
+  // Kept INSIDE the parallel region (constructForcefieldContribs allocates device memory and needs
+  // the per-thread device context), but declared here so it survives across batches.
+  std::vector<std::unordered_map<RDKit::ROMol*, CachedMoleculeData>> threadCaches(ctx.numThreads);
   std::vector<ThreadLocalBuffers>           threadBuffers(ctx.numThreads);
   std::vector<detail::DeviceCoordCollector> deviceCollectors(deviceOutput ? ctx.numThreads : 0);
   if (deviceOutput) {
@@ -154,13 +160,14 @@ MMFFMinimizeResult MMFFMinimizeMoleculesConfs(std::vector<RDKit::ROMol*>&       
                                                                                               deviceInput,        \
                                                                                               deviceInputIndex,   \
                                                                                               backend,            \
+                                                                                              threadCaches,       \
                                                                                               exceptionHandler)
   for (size_t batchStart = 0; batchStart < totalConformers; batchStart += effectiveBatchSize) {
     try {
-      std::unordered_map<RDKit::ROMol*, CachedMoleculeData> moleculeCache;
       ScopedNvtxRange                                       singleBatchRange("OpenMP loop thread");
       ScopedNvtxRange                                       setupBatchRange("OpenMP loop preprocessing");
       const int                                             threadId     = omp_get_thread_num();
+      auto&                                                 moleculeCache = threadCaches[threadId];
       const int                                             executingGpu = ctx.devicesPerThread[threadId];
       const WithDevice                                      dev(executingGpu);
       const size_t batchEnd = std::min(batchStart + effectiveBatchSize, totalConformers);

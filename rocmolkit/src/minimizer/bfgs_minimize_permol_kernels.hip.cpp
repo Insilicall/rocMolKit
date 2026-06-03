@@ -27,22 +27,27 @@
 namespace nvMolKit {
 
 namespace {
-constexpr int16_t BLOCK_SIZE           = 128;
-constexpr int16_t MAX_LINESEARCH_ITERS = 1000;
-constexpr double  FUNCTOL              = 1e-4;
-constexpr double  MOVETOL              = 1e-7;
-constexpr double  TOLX                 = 4. * 3e-8;
+// Precision used for the BFGS minimizer's internal working state and the
+// force-field math invoked from this kernel. The shared pipeline context
+// positions/energies remain double; conversions happen at the kernel boundary.
+using MinReal = float;
 
-__device__ void setMaxStep(const double*                                               pos,
+constexpr int16_t BLOCK_SIZE           = 32;
+constexpr int16_t MAX_LINESEARCH_ITERS = 1000;
+constexpr float   FUNCTOL              = 1e-4;
+constexpr float   MOVETOL              = 1e-7;
+constexpr float   TOLX                 = 4.f * 3e-8f;
+
+__device__ void setMaxStep(const MinReal*                                               pos,
                            const int                                                   numTerms,
                            float*                                                      maxStepOutSquared,
-                           typename hipcub::BlockReduce<double, BLOCK_SIZE>::TempStorage& tempStorage) {
+                           typename hipcub::BlockReduce<float, BLOCK_SIZE>::TempStorage& tempStorage) {
   float sumSquaredPos = 0.0;
   for (int i = threadIdx.x; i < numTerms; i += blockDim.x) {
     float dx2 = pos[i] * pos[i];
     sumSquaredPos += dx2;
   }
-  using BlockReduce = hipcub::BlockReduce<double, BLOCK_SIZE>;
+  using BlockReduce = hipcub::BlockReduce<float, BLOCK_SIZE>;
 
   const float squaredSum = BlockReduce(tempStorage).Sum(sumSquaredPos);
   if (threadIdx.x == 0) {
@@ -53,15 +58,15 @@ __device__ void setMaxStep(const double*                                        
 }
 
 __device__ void lineSearchSetup(const int                                                   numTerms,
-                                const double*                                               posStart,
-                                const double*                                               gradStart,
+                                const MinReal*                                              posStart,
+                                const MinReal*                                              gradStart,
                                 const float                                                 maxStepSquared,
-                                double*                                                     dirStart,
-                                double&                                                     slope,
-                                double&                                                     lambdaMin,
-                                typename hipcub::BlockReduce<double, BLOCK_SIZE>::TempStorage& tempStorage) {
+                                MinReal*                                                    dirStart,
+                                float&                                                      slope,
+                                float&                                                      lambdaMin,
+                                typename hipcub::BlockReduce<float, BLOCK_SIZE>::TempStorage& tempStorage) {
   const int idxInSys = threadIdx.x;
-  using BlockReduce  = hipcub::BlockReduce<double, BLOCK_SIZE>;
+  using BlockReduce  = hipcub::BlockReduce<float, BLOCK_SIZE>;
   __shared__ float dirSumSquared;
 
   // ---------------------------------
@@ -128,19 +133,19 @@ __device__ void lineSearchSetup(const int                                       
 
   float localInvMax = localMax_denominator / (localMax_numerator > 0.0f ? localMax_numerator : 1.0e-20f);
   // Perform block-wide reduction to find the maximum
-  float blockInvMax = BlockReduce(tempStorage).Reduce(static_cast<double>(localInvMax), cubMin());
+  float blockInvMax = BlockReduce(tempStorage).Reduce(localInvMax, cubMin());
 
   // The first thread in the block writes the result
   if (threadIdx.x == 0) {
-    lambdaMin = static_cast<float>(MOVETOL) * blockInvMax;
+    lambdaMin = MOVETOL * blockInvMax;
   }
 }
 
-__device__ void lineSearchPerturb(const int     numTerms,
-                                  const double* refPos,
-                                  const double* dirStart,
-                                  const float   lambda,
-                                  double*       scratchPos) {
+__device__ void lineSearchPerturb(const int      numTerms,
+                                  const MinReal* refPos,
+                                  const MinReal* dirStart,
+                                  const float    lambda,
+                                  MinReal*       scratchPos) {
   for (int i = threadIdx.x; i < numTerms; i += blockDim.x) {
     scratchPos[i] = refPos[i] + lambda * dirStart[i];
   }
@@ -153,9 +158,9 @@ __device__ bool lineSearchPostEnergy(const bool  isFirstIter,
                                      const float slope,
                                      const float lambda,
                                      const float lambdaMin,
-                                     double&     lambda2,
-                                     double&     eScratch,
-                                     double&     lambdaOut) {
+                                     float&      lambda2,
+                                     float&      eScratch,
+                                     float&      lambdaOut) {
   bool converged = false;
 
   if (threadIdx.x == 0) {
@@ -197,13 +202,13 @@ __device__ bool lineSearchPostEnergy(const bool  isFirstIter,
 }
 
 __device__ void setDirection(const int                                                   numTerms,
-                             const double*                                               posFromLineSearch,
-                             const double*                                               pos,
-                             double*                                                     xi,
-                             double*                                                     dGrad,
-                             const double*                                               grad,
+                             const MinReal*                                              posFromLineSearch,
+                             const MinReal*                                              pos,
+                             MinReal*                                                    xi,
+                             MinReal*                                                    dGrad,
+                             const MinReal*                                              grad,
                              bool&                                                       converged,
-                             typename hipcub::BlockReduce<double, BLOCK_SIZE>::TempStorage& tempStorage) {
+                             typename hipcub::BlockReduce<float, BLOCK_SIZE>::TempStorage& tempStorage) {
   float localMax_numerator   = 0.0;
   float localMax_denominator = 1.0;
   for (int i = threadIdx.x; i < numTerms; i += blockDim.x) {
@@ -222,7 +227,7 @@ __device__ void setDirection(const int                                          
   }
 
   float localMax = localMax_numerator / localMax_denominator;
-  float blockMax = hipcub::BlockReduce<double, BLOCK_SIZE>(tempStorage).Reduce(localMax, cubMax());
+  float blockMax = hipcub::BlockReduce<float, BLOCK_SIZE>(tempStorage).Reduce(localMax, cubMax());
 
   if (threadIdx.x == 0 && blockMax < TOLX) {
     converged = true;
@@ -232,28 +237,28 @@ __device__ void setDirection(const int                                          
 
 template <bool scaleGrads>
 __device__ void scaleGrad(const int                                                   numTerms,
-                          double*                                                     grad,
-                          double&                                                     gradScale,
-                          typename hipcub::BlockReduce<double, BLOCK_SIZE>::TempStorage& tempStorage) {
+                          MinReal*                                                    grad,
+                          float&                                                      gradScale,
+                          typename hipcub::BlockReduce<float, BLOCK_SIZE>::TempStorage& tempStorage) {
   // See scaleGradKernel in bfgs_minimize.cu for the RDKit 5b1d04d23 (2025.09) rationale.
   constexpr bool kRdkitHasGradScaleFix =
     RDKIT_VERSION_MAJOR > 2025 || (RDKIT_VERSION_MAJOR == 2025 && RDKIT_VERSION_MINOR >= 9);
-  gradScale = scaleGrads ? 0.1 : 1.0;
+  gradScale = scaleGrads ? 0.1f : 1.0f;
 
-  double maxGrad = kRdkitHasGradScaleFix ? 0.0 : -1e8;
+  float maxGrad = kRdkitHasGradScaleFix ? 0.0f : -1e8f;
   for (int i = threadIdx.x; i < numTerms; i += blockDim.x) {
     if constexpr (scaleGrads) {
       grad[i] *= gradScale;
     }
-    const double cmp = kRdkitHasGradScaleFix ? fabs(grad[i]) : grad[i];
+    const float cmp = kRdkitHasGradScaleFix ? fabsf(grad[i]) : grad[i];
     if (cmp > maxGrad) {
       maxGrad = cmp;
     }
   }
 
-  double blockMax = hipcub::BlockReduce<double, BLOCK_SIZE>(tempStorage).Reduce(maxGrad, cubMax());
+  float blockMax = hipcub::BlockReduce<float, BLOCK_SIZE>(tempStorage).Reduce(maxGrad, cubMax());
 
-  __shared__ double distributedMax[1];
+  __shared__ float distributedMax[1];
   if (threadIdx.x == 0) {
     distributedMax[0] = blockMax;
   }
@@ -261,9 +266,9 @@ __device__ void scaleGrad(const int                                             
 
   maxGrad = distributedMax[0];
 
-  if (scaleGrads && maxGrad > 10.0) {
-    while (maxGrad * gradScale > 10.0) {
-      gradScale *= 0.5;
+  if (scaleGrads && maxGrad > 10.0f) {
+    while (maxGrad * gradScale > 10.0f) {
+      gradScale *= 0.5f;
     }
     for (int i = threadIdx.x; i < numTerms; i += blockDim.x) {
       grad[i] *= gradScale;
@@ -273,27 +278,27 @@ __device__ void scaleGrad(const int                                             
 }
 
 __device__ void updateDGrad(const int                                                   numTerms,
-                            const double                                                gradTol,
-                            const double                                                energy,
-                            const double                                                gradScale,
-                            const double*                                               grad,
-                            const double*                                               pos,
-                            double*                                                     dGrad,
+                            const float                                                 gradTol,
+                            const float                                                 energy,
+                            const float                                                 gradScale,
+                            const MinReal*                                              grad,
+                            const MinReal*                                              pos,
+                            MinReal*                                                    dGrad,
                             bool&                                                       converged,
-                            typename hipcub::BlockReduce<double, BLOCK_SIZE>::TempStorage& tempStorage) {
-  double localMax = 0.0;
+                            typename hipcub::BlockReduce<float, BLOCK_SIZE>::TempStorage& tempStorage) {
+  float localMax = 0.0f;
   for (int i = threadIdx.x; i < numTerms; i += blockDim.x) {
-    dGrad[i]    = grad[i] - dGrad[i];
-    double temp = fabs(grad[i]) * fmax(fabs(pos[i]), 1.0);
+    dGrad[i]   = grad[i] - dGrad[i];
+    float temp = fabsf(grad[i]) * fmaxf(fabsf(pos[i]), 1.0f);
     if (temp > localMax) {
       localMax = temp;
     }
   }
 
-  float blockMax = hipcub::BlockReduce<double, BLOCK_SIZE>(tempStorage).Reduce(localMax, cubMax());
+  float blockMax = hipcub::BlockReduce<float, BLOCK_SIZE>(tempStorage).Reduce(localMax, cubMax());
 
   if (threadIdx.x == 0) {
-    const float term = max(energy * gradScale, 1.0);
+    const float term = fmaxf(energy * gradScale, 1.0f);
     blockMax /= term;
     if (blockMax < gradTol) {
       converged = true;
@@ -303,17 +308,17 @@ __device__ void updateDGrad(const int                                           
 }
 
 __device__ void updateInverseHessian(const int                                                   numTerms,
-                                     double*                                                     invHessian,
-                                     double*                                                     dGrad,
-                                     double*                                                     xi,
-                                     double*                                                     hessDGrad,
-                                     double*                                                     grad,
-                                     typename hipcub::BlockReduce<double, BLOCK_SIZE>::TempStorage& tempStorage) {
-  using BlockReduce = hipcub::BlockReduce<double, BLOCK_SIZE>;
+                                     MinReal*                                                    invHessian,
+                                     MinReal*                                                    dGrad,
+                                     MinReal*                                                    xi,
+                                     MinReal*                                                    hessDGrad,
+                                     MinReal*                                                    grad,
+                                     typename hipcub::BlockReduce<float, BLOCK_SIZE>::TempStorage& tempStorage) {
+  using BlockReduce = hipcub::BlockReduce<float, BLOCK_SIZE>;
 
   // Compute hessDGrad = invHessian * dGrad
   for (int row = threadIdx.x; row < numTerms; row += blockDim.x) {
-    double dotProduct = 0.0;
+    float dotProduct = 0.0f;
     for (int col = 0; col < numTerms; col++) {
       dotProduct += invHessian[col * numTerms + row] * dGrad[col];
     }
@@ -322,52 +327,52 @@ __device__ void updateInverseHessian(const int                                  
   __syncthreads();
 
   // Compute BFGS sums
-  __shared__ double fac, fae, fad, sumDGrad, sumXi;
-  __shared__ bool   needUpdate;
+  __shared__ float fac, fae, fad, sumDGrad, sumXi;
+  __shared__ bool  needUpdate;
 
-  double sumFac = 0.0;
+  float sumFac = 0.0f;
   for (int i = threadIdx.x; i < numTerms; i += blockDim.x) {
     sumFac += dGrad[i] * xi[i];
   }
-  double facReduced = BlockReduce(tempStorage).Sum(sumFac);
+  float facReduced = BlockReduce(tempStorage).Sum(sumFac);
   if (threadIdx.x == 0)
     fac = facReduced;
   __syncthreads();
 
-  double sumFae = 0.0;
+  float sumFae = 0.0f;
   for (int i = threadIdx.x; i < numTerms; i += blockDim.x) {
     sumFae += dGrad[i] * hessDGrad[i];
   }
-  double faeReduced = BlockReduce(tempStorage).Sum(sumFae);
+  float faeReduced = BlockReduce(tempStorage).Sum(sumFae);
   if (threadIdx.x == 0)
     fae = faeReduced;
   __syncthreads();
 
-  double sumDGradSq = 0.0;
+  float sumDGradSq = 0.0f;
   for (int i = threadIdx.x; i < numTerms; i += blockDim.x) {
     sumDGradSq += dGrad[i] * dGrad[i];
   }
-  double sumDGradReduced = BlockReduce(tempStorage).Sum(sumDGradSq);
+  float sumDGradReduced = BlockReduce(tempStorage).Sum(sumDGradSq);
   if (threadIdx.x == 0)
     sumDGrad = sumDGradReduced;
   __syncthreads();
 
-  double sumXiSq = 0.0;
+  float sumXiSq = 0.0f;
   for (int i = threadIdx.x; i < numTerms; i += blockDim.x) {
     sumXiSq += xi[i] * xi[i];
   }
-  double sumXiReduced = BlockReduce(tempStorage).Sum(sumXiSq);
+  float sumXiReduced = BlockReduce(tempStorage).Sum(sumXiSq);
   if (threadIdx.x == 0)
     sumXi = sumXiReduced;
   __syncthreads();
 
   if (threadIdx.x == 0) {
-    constexpr double EPS = 3e-8;
-    needUpdate           = (fac > 0) && ((fac * fac) > (EPS * sumDGrad * sumXi));
+    constexpr float EPS = 3e-8f;
+    needUpdate          = (fac > 0) && ((fac * fac) > (EPS * sumDGrad * sumXi));
 
     if (needUpdate) {
-      fac = 1.0 / fac;
-      fad = 1.0 / fae;
+      fac = 1.0f / fac;
+      fad = 1.0f / fae;
     }
   }
   __syncthreads();
@@ -381,15 +386,15 @@ __device__ void updateInverseHessian(const int                                  
 
     // Update inverse Hessian
     for (int row = threadIdx.x; row < numTerms; row += blockDim.x) {
-      double pxi  = fac * xi[row];
-      double hdgi = fad * hessDGrad[row];
-      double dgi  = fae * dGrad[row];
+      float pxi  = fac * xi[row];
+      float hdgi = fad * hessDGrad[row];
+      float dgi  = fae * dGrad[row];
 
       for (int col = 0; col < numTerms; col++) {
-        double pxj    = xi[col];
-        double hdgj   = hessDGrad[col];
-        double dgj    = dGrad[col];
-        double update = pxi * pxj - hdgi * hdgj + dgi * dgj;
+        float pxj    = xi[col];
+        float hdgj   = hessDGrad[col];
+        float dgj    = dGrad[col];
+        float update = pxi * pxj - hdgi * hdgj + dgi * dgj;
         invHessian[col * numTerms + row] += update;
       }
     }
@@ -398,7 +403,7 @@ __device__ void updateInverseHessian(const int                                  
 
   // Update xi = -invHessian * grad
   for (int row = threadIdx.x; row < numTerms; row += blockDim.x) {
-    double dotProduct = 0.0;
+    float dotProduct = 0.0f;
     for (int col = 0; col < numTerms; col++) {
       dotProduct += invHessian[col * numTerms + row] * grad[col];
     }
@@ -439,9 +444,9 @@ __launch_bounds__(BLOCK_SIZE) __global__ void bfgsMinimizeKernel(const int      
                                                                  const int*              atomStarts,
                                                                  const int*              hessianStarts,
                                                                  double*                 positions,
-                                                                 double*                 grad,
-                                                                 double*                 inverseHessian,
-                                                                 double**                scratchBuffers,
+                                                                 MinReal*                grad,
+                                                                 MinReal*                inverseHessian,
+                                                                 MinReal**               scratchBuffers,
                                                                  double*                 energyOuts,
                                                                  int16_t*                statuses,
                                                                  [[maybe_unused]] double chiralWeight,
@@ -458,23 +463,26 @@ __launch_bounds__(BLOCK_SIZE) __global__ void bfgsMinimizeKernel(const int      
   constexpr int16_t maxTerms = MaxAtoms * dataDim;
   const int16_t     numTerms = dataDim * numAtoms;
 
-  // Pointers to working memory (either shared or global)
-  double* localPos;
-  double* localGrad;
-  double* localDir;
-  double* scratchPos;
-  double* dGrad;
-  double* oldPos;
+  // Pointers to working memory (either shared or global). The minimizer's
+  // internal working state is computed in MinReal (float); the shared context
+  // positions stay double and are converted at kernel entry/exit below.
+  MinReal* localPos;
+  MinReal* localGrad;
+  MinReal* localDir;
+  MinReal* scratchPos;
+  MinReal* dGrad;
+  MinReal* oldPos;
+
+  const int termStart = atomStart * dataDim;
 
   if constexpr (UseSharedMem) {
-    // Shared memory for small molecules (≤64 atoms)
-    __shared__ double sharedLocalPos[maxTerms];
-    __shared__ double sharedLocalGrad[maxTerms];
-    __shared__ double sharedLocalDir[maxTerms];
-    __shared__ double sharedScratchPos[maxTerms];
-    __shared__ double sharedDGrad[maxTerms];
+    // Shared memory for small molecules (≤128 atoms)
+    __shared__ MinReal sharedLocalPos[maxTerms];
+    __shared__ MinReal sharedLocalGrad[maxTerms];
+    __shared__ MinReal sharedLocalDir[maxTerms];
+    __shared__ MinReal sharedScratchPos[maxTerms];
+    __shared__ MinReal sharedDGrad[maxTerms];
 
-    const int termStart = atomStart * dataDim;
     localPos            = sharedLocalPos;
     localGrad           = sharedLocalGrad;
     localDir            = sharedLocalDir;
@@ -483,10 +491,11 @@ __launch_bounds__(BLOCK_SIZE) __global__ void bfgsMinimizeKernel(const int      
     // For small molecules, grad buffer is unused (using sharedLocalGrad), so reuse it for oldPos
     oldPos              = scratchBuffers[0] + termStart;  // Reuse grad buffer for oldPos
   } else {
-    // Global memory for large molecules (>64 atoms) - index into pre-allocated buffers
-    const int termStart = atomStart * dataDim;
-    localPos            = positions + atomStart * dataDim;  // Use main positions array directly (no separate copy)
-    localGrad           = grad + termStart;                 // Use main gradient buffer
+    // Global memory for large molecules (>128 atoms) - index into pre-allocated float buffers.
+    // scratchBuffers[0] holds the float working copy of positions (the double context
+    // positions array can no longer be aliased directly).
+    localPos            = scratchBuffers[0] + termStart;  // float working positions
+    localGrad           = grad + termStart;                // Use main (float) gradient buffer
     localDir            = scratchBuffers[1] + termStart;    // lineSearchDir
     scratchPos          = scratchBuffers[2] + termStart;    // scratchPositions
     dGrad               = scratchBuffers[3] + termStart;    // hessDGrad
@@ -494,41 +503,38 @@ __launch_bounds__(BLOCK_SIZE) __global__ void bfgsMinimizeKernel(const int      
   }
 
   // Shared scalars
-  __shared__ float  maxStep;
-  __shared__ double prevE;
-  __shared__ double currE;
-  __shared__ double slope;
-  __shared__ double lambda;
-  __shared__ double lambdaMin;
-  __shared__ double lambda2;
-  __shared__ double eScratch;
-  __shared__ double gradScale;
-  __shared__ bool   converged;
-  __shared__ bool   lineSearchConverged;
+  __shared__ float maxStep;
+  __shared__ float prevE;
+  __shared__ float currE;
+  __shared__ float slope;
+  __shared__ float lambda;
+  __shared__ float lambdaMin;
+  __shared__ float lambda2;
+  __shared__ float eScratch;
+  __shared__ float gradScale;
+  __shared__ bool  converged;
+  __shared__ bool  lineSearchConverged;
 
   // Inverse Hessian in global memory (O(n^2), too large for shared)
   // Indexed by hessianStarts which stores cumulative (numTerms * numTerms) offsets
-  double* invHessian = inverseHessian + hessianStarts[molIdx];
+  MinReal* invHessian = inverseHessian + hessianStarts[molIdx];
 
-  // Initialize positions from global memory
+  // Initialize float working positions from the double context positions.
+  // (float->double convert on read; results are written back at kernel exit.)
   double* globalPos = positions + atomStart * dataDim;
-  // For shared memory case, copy to local shared buffer
-  // For non-shared case, localPos already points to globalPos, so no copy needed
-  if constexpr (UseSharedMem) {
-    for (int i = tid; i < numTerms; i += blockDim.x) {
-      localPos[i] = globalPos[i];
-    }
-    __syncthreads();
+  for (int i = tid; i < numTerms; i += blockDim.x) {
+    localPos[i] = static_cast<MinReal>(globalPos[i]);
   }
+  __syncthreads();
 
   // Initialize inverse Hessian to identity
   const int hessianSize = numTerms * numTerms;
   for (int i = tid; i < hessianSize; i += blockDim.x) {
-    invHessian[i] = 0.0;
+    invHessian[i] = 0.0f;
   }
   __syncthreads();
   for (int i = tid; i < numTerms; i += blockDim.x) {
-    invHessian[i * numTerms + i] = 1.0;
+    invHessian[i * numTerms + i] = 1.0f;
   }
 
   if (tid == 0) {
@@ -537,11 +543,11 @@ __launch_bounds__(BLOCK_SIZE) __global__ void bfgsMinimizeKernel(const int      
   __syncthreads();
 
   // Shared temp storage for all BlockReduce operations
-  using BlockReduce = hipcub::BlockReduce<double, BLOCK_SIZE>;
+  using BlockReduce = hipcub::BlockReduce<float, BLOCK_SIZE>;
   __shared__ typename BlockReduce::TempStorage tempStorage;
 
   // Compute initial energy
-  double threadEnergy;
+  float threadEnergy;
   if constexpr (FFType == ForceFieldType::MMFF) {
     threadEnergy = MMFF::molEnergy<BLOCK_SIZE, HasConstraints>(*terms, *systemIndices, localPos, molIdx, tid);
   } else if constexpr (FFType == ForceFieldType::ETK) {
@@ -550,7 +556,7 @@ __launch_bounds__(BLOCK_SIZE) __global__ void bfgsMinimizeKernel(const int      
     threadEnergy =
       DistGeom::molEnergyDG<dataDim>(*terms, *systemIndices, localPos, molIdx, chiralWeight, fourthDimWeight, tid);
   }
-  const double blockEnergy = BlockReduce(tempStorage).Sum(threadEnergy);
+  const float blockEnergy = BlockReduce(tempStorage).Sum(threadEnergy);
 
   if (tid == 0) {
     prevE              = blockEnergy;
@@ -559,7 +565,7 @@ __launch_bounds__(BLOCK_SIZE) __global__ void bfgsMinimizeKernel(const int      
   __syncthreads();
 
   for (int i = tid; i < numTerms; i += blockDim.x) {
-    localGrad[i] = 0.0;
+    localGrad[i] = 0.0f;
   }
   __syncthreads();
 
@@ -631,7 +637,7 @@ __launch_bounds__(BLOCK_SIZE) __global__ void bfgsMinimizeKernel(const int      
       lineSearchPerturb(numTerms, oldPos, localDir, lambda, scratchPos);
 
       // Compute energy at perturbed position (use scratchPos which has the perturbed coordinates)
-      double lsThreadEnergy;
+      float lsThreadEnergy;
       if constexpr (FFType == ForceFieldType::MMFF) {
         lsThreadEnergy = MMFF::molEnergy<BLOCK_SIZE, HasConstraints>(*terms, *systemIndices, scratchPos, molIdx, tid);
       } else if constexpr (FFType == ForceFieldType::ETK) {
@@ -645,16 +651,25 @@ __launch_bounds__(BLOCK_SIZE) __global__ void bfgsMinimizeKernel(const int      
                                                         fourthDimWeight,
                                                         tid);
       }
-      const double lsBlockEnergy = BlockReduce(tempStorage).Sum(lsThreadEnergy);
+      const float lsBlockEnergy = BlockReduce(tempStorage).Sum(lsThreadEnergy);
 
       if (tid == 0) {
         currE = lsBlockEnergy;
       }
       __syncthreads();
 
-      // Check convergence and update lambda
-      lineSearchConverged =
+      // Check convergence and update lambda. lineSearchPostEnergy computes the
+      // converged flag only on thread 0; assigning its return to the shared
+      // lineSearchConverged from every thread raced thread 0's `true` away with
+      // the other lanes' `false`, so the flag never latched and the search ran
+      // the full MAX_LINESEARCH_ITERS (1000) every BFGS step (~100x wasted work,
+      // worst at high conformers/molecule and in ETK generation). Latch it from
+      // thread 0 only.
+      const bool lsConverged =
         lineSearchPostEnergy(lineSearchIter == 0, prevE, currE, slope, lambda, lambdaMin, lambda2, eScratch, lambda);
+      if (tid == 0) {
+        lineSearchConverged = lsConverged;
+      }
       __syncthreads();
 
       if (tid == 0) {
@@ -683,7 +698,7 @@ __launch_bounds__(BLOCK_SIZE) __global__ void bfgsMinimizeKernel(const int      
 
     // Compute gradients at new position
     for (int i = tid; i < numTerms; i += blockDim.x) {
-      localGrad[i] = 0.0;
+      localGrad[i] = 0.0f;
     }
     __syncthreads();
 
@@ -725,12 +740,11 @@ __launch_bounds__(BLOCK_SIZE) __global__ void bfgsMinimizeKernel(const int      
     __syncthreads();
   }
 
-  // If in shared mem mode, we've been updating positions in shared memory. Copy back to global memory
-  // If not in shared memory mode, it's already in global memory
-  if constexpr (UseSharedMem) {
-    for (int i = tid; i < numTerms; i += blockDim.x) {
-      globalPos[i] = localPos[i];
-    }
+  // The minimizer operated on a float working copy of positions in both the
+  // shared-memory and global-memory paths. Write the float result back to the
+  // double context positions array (float->double convert).
+  for (int i = tid; i < numTerms; i += blockDim.x) {
+    globalPos[i] = static_cast<double>(localPos[i]);
   }
 
   // Write final energy and status
@@ -761,9 +775,9 @@ hipError_t launchKernelForSize(int                numMols,
                                 const int*         atomStarts,
                                 const int*         hessianStarts,
                                 double*            positions,
-                                double*            grad,
-                                double*            inverseHessian,
-                                double**           scratchBuffers,
+                                MinReal*           grad,
+                                MinReal*           inverseHessian,
+                                MinReal**          scratchBuffers,
                                 double*            energyOuts,
                                 int16_t*           statuses,
                                 hipStream_t       stream,
@@ -806,9 +820,9 @@ hipError_t dispatchByMaxAtoms(int                numMols,
                                const int*         atomStarts,
                                const int*         hessianStarts,
                                double*            positions,
-                               double*            grad,
-                               double*            inverseHessian,
-                               double**           scratchBuffers,
+                               MinReal*           grad,
+                               MinReal*           inverseHessian,
+                               MinReal**          scratchBuffers,
                                double*            energyOuts,
                                int16_t*           statuses,
                                hipStream_t       stream,
@@ -945,9 +959,9 @@ hipError_t launchBfgsMinimizePerMolKernel(int                                   
                                            const MMFF::EnergyForceContribsDevicePtr& terms,
                                            const MMFF::BatchedIndicesDevicePtr&      systemIndices,
                                            double*                                   positions,
-                                           double*                                   grad,
-                                           double*                                   inverseHessian,
-                                           double**                                  scratchBuffers,
+                                           float*                                    grad,
+                                           float*                                    inverseHessian,
+                                           float**                                   scratchBuffers,
                                            double*                                   energyOuts,
                                            bool                                      hasConstraints,
                                            int16_t*                                  statuses,
@@ -1011,9 +1025,9 @@ hipError_t launchBfgsMinimizePerMolKernelETK(int                                
                                               const DistGeom::Energy3DForceContribsDevicePtr& terms,
                                               const DistGeom::BatchedIndices3DDevicePtr&      systemIndices,
                                               double*                                         positions,
-                                              double*                                         grad,
-                                              double*                                         inverseHessian,
-                                              double**                                        scratchBuffers,
+                                              float*                                          grad,
+                                              float*                                          inverseHessian,
+                                              float**                                         scratchBuffers,
                                               double*                                         energyOuts,
                                               int16_t*                                        statuses,
                                               hipStream_t                                    stream) {
@@ -1056,9 +1070,9 @@ hipError_t launchBfgsMinimizePerMolKernelDG(int                                 
                                              const DistGeom::EnergyForceContribsDevicePtr& terms,
                                              const DistGeom::BatchedIndicesDevicePtr&      systemIndices,
                                              double*                                       positions,
-                                             double*                                       grad,
-                                             double*                                       inverseHessian,
-                                             double**                                      scratchBuffers,
+                                             float*                                        grad,
+                                             float*                                        inverseHessian,
+                                             float**                                       scratchBuffers,
                                              double*                                       energyOuts,
                                              double                                        chiralWeight,
                                              double                                        fourthDimWeight,

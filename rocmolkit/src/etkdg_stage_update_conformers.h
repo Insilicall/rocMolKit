@@ -30,7 +30,7 @@ class ETKDGUpdateConformersStage final : public ETKDGStage {
  public:
   ETKDGUpdateConformersStage(
     const std::vector<RDKit::ROMol*>&                                                        mols,
-    const std::vector<EmbedArgs>&                                                            eargs,
+    const std::vector<const EmbedArgs*>&                                                     eargs,
     std::unordered_map<const RDKit::ROMol*, std::vector<std::unique_ptr<RDKit::Conformer>>>& conformers,
     PinnedHostVector<double>&                                                                positionsScratch,
     PinnedHostVector<uint8_t>&                                                               activeScratch,
@@ -43,7 +43,8 @@ class ETKDGUpdateConformersStage final : public ETKDGStage {
 
  private:
   const std::vector<RDKit::ROMol*>&                                                        mols_;
-  const std::vector<EmbedArgs>&                                                            eargs_;
+  // Stored by value (cheap pointer vector); pointed-to EmbedArgs are owned upstream.
+  const std::vector<const EmbedArgs*>                                                      eargs_;
   std::unordered_map<const RDKit::ROMol*, std::vector<std::unique_ptr<RDKit::Conformer>>>& conformers_;
   PinnedHostVector<double>&                                                                positionsScratch_;
   PinnedHostVector<uint8_t>&                                                               activeScratch_;

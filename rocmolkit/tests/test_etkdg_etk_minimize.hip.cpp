@@ -255,8 +255,12 @@ TEST_P(ETKStageSingleMolTestFixture, MinimizeCompare) {
   std::vector<std::unique_ptr<ETKDGStage>> stages;
   std::vector<const RDKit::ROMol*>         molsPtrs;
   molsPtrs.push_back(molPtr_.get());
+  std::vector<const nvMolKit::detail::EmbedArgs*> eargPtrs;
+  for (const auto& earg : eargs_) {
+    eargPtrs.push_back(&earg);
+  }
   auto        stage    = std::make_unique<nvMolKit::detail::ETKMinimizationStage>(molsPtrs,
-                                                                        eargs_,
+                                                                        eargPtrs,
                                                                         embedParam_,
                                                                         context_,
                                                                         minimizer,
@@ -364,8 +368,12 @@ TEST_P(ETKStageMultiMolTestFixture, MinimizeCompare) {
   }
   const int count = molsPtrs.size();
 
+  std::vector<const nvMolKit::detail::EmbedArgs*> eargPtrs;
+  for (const auto& earg : eargs_) {
+    eargPtrs.push_back(&earg);
+  }
   auto        stage    = std::make_unique<nvMolKit::detail::ETKMinimizationStage>(molsPtrs,
-                                                                        eargs_,
+                                                                        eargPtrs,
                                                                         embedParam_,
                                                                         context_,
                                                                         minimizer,

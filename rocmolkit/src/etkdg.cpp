@@ -325,9 +325,14 @@ std::optional<DeviceCoordResult> embedMolecules(const std::vector<RDKit::ROMol*>
           break;
         }
 
-        // Create batch of molecules and eargs for the dispatched work
-        std::vector<RDKit::ROMol*>     batchMolsWithConfs;
-        std::vector<detail::EmbedArgs> batchEargs;
+        // Create batch of molecules and eargs for the dispatched work.
+        // conf_to_mol indirection: the k conformer attempts of one molecule share a single
+        // per-molecule EmbedArgs (bounds matrix, chiral centers, ETKDG torsion details). We
+        // store POINTERS into the shared `eargs` (computed once per unique molecule above)
+        // instead of deep-copying EmbedArgs per conformer. This removes O(batchSize) deep
+        // copies of bounds matrices / torsion tables per batch.
+        std::vector<RDKit::ROMol*>            batchMolsWithConfs;
+        std::vector<const detail::EmbedArgs*> batchEargs;
 
         batchMolsWithConfs.reserve(molIds.size());
         batchEargs.reserve(molIds.size());
@@ -335,7 +340,7 @@ std::optional<DeviceCoordResult> embedMolecules(const std::vector<RDKit::ROMol*>
         for (const int molId : molIds) {
           // Use the original unique molecules and their prepared eargs
           batchMolsWithConfs.push_back(sortedMols[molId]);
-          batchEargs.push_back(eargs[molId]);
+          batchEargs.push_back(&eargs[molId]);
         }
 
         if (_dbg && omp_get_thread_num() == 0) std::fprintf(stderr, "[setup] make_unique<ETKDGContext>\n");
@@ -355,14 +360,36 @@ std::optional<DeviceCoordResult> embedMolecules(const std::vector<RDKit::ROMol*>
         // Convert to const pointers for stages that require them
         const std::vector<const RDKit::ROMol*> constMolPtrs(batchMolsWithConfs.begin(), batchMolsWithConfs.end());
 
-        // Create coordinate generation stage based on parameter
-        // FIXME: arguments still involve useRDKitcoordgen.
-        stages.push_back(std::make_unique<detail::ETKDGCoordGenRDKitStage>(paramsCopy,
-                                                                           constMolPtrs,
-                                                                           batchEargs,
-                                                                           positionsScratch,
-                                                                           activeScratch,
-                                                                           streamPtr));
+        // Coordinate generation stage.
+        //
+        // Both nvMolKit and rocMolKit ship two implementations: a serial
+        // host-side RNG (ETKDGCoordGenRDKitStage) and a fully GPU-resident
+        // generator (ETKDGCoordGenStage, backed by coord_gen.hip.cpp). Upstream
+        // defaults to the host path ("once ETKDGCoordGenStage is optimized...").
+        //
+        // We keep the host path as the default because the GPU generator
+        // currently FAULTS at batch sizes >~100 systems: ETKDGCoordGenStage
+        // calls positions.zero() but never resizes ctx.systemDevice.positions
+        // (unlike the RDKit stage, which resizes to requiredPositionsSize), so
+        // a downstream kernel reads past the buffer and the GPU aborts with a
+        // "Memory access fault ... Page not present" coredump. Verified on
+        // gfx1200: N=25 works, N=100/N=400 coredump. The host coordgen is also
+        // not the bottleneck (~0.06 s for N=100), so forcing it onto the GPU
+        // buys nothing until the kernel is fixed.
+        //
+        // Opt in to the GPU generator with ROCMOLKIT_GPU_COORDGEN=1 (small
+        // batches only) for debugging / once the resize bug is fixed.
+        static const bool useGpuCoordGen = std::getenv("ROCMOLKIT_GPU_COORDGEN") != nullptr;
+        if (useGpuCoordGen) {
+          stages.push_back(std::make_unique<detail::ETKDGCoordGenStage>(paramsCopy, constMolPtrs));
+        } else {
+          stages.push_back(std::make_unique<detail::ETKDGCoordGenRDKitStage>(paramsCopy,
+                                                                             constMolPtrs,
+                                                                             batchEargs,
+                                                                             positionsScratch,
+                                                                             activeScratch,
+                                                                             streamPtr));
+        }
 
         // First minimize, then first round of chiral checks.
         auto                           firstMinStage    = std::make_unique<detail::DistGeomMinimizeStage>(constMolPtrs,

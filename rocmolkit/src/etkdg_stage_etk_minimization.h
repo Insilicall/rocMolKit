@@ -33,7 +33,7 @@ class ETKMinimizationStage final : public ETKDGStage {
  public:
   ETKMinimizationStage(
     const std::vector<const RDKit::ROMol*>&                                                 mols,
-    const std::vector<EmbedArgs>&                                                           eargs,
+    const std::vector<const EmbedArgs*>&                                                    eargs,
     const RDKit::DGeomHelpers::EmbedParameters&                                             embedParam,
     const ETKDGContext&                                                                     ctx,
     BfgsBatchMinimizer&                                                                     minimizer,

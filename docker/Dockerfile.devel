@@ -43,6 +43,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         rocsolver-dev hipsolver-dev \
         hipcub-dev rocprim-dev rocthrust-dev \
         rocm-gdb rocm-debug-agent rocm-dbgapi rocprofiler \
+        rocprofiler-sdk hsa-amd-aqlprofile rocprofiler-register \
     && rm -rf /var/lib/apt/lists/*
 
 ENV PATH=/root/.local/bin:$PATH

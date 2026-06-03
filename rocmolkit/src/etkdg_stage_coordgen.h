@@ -45,7 +45,7 @@ class ETKDGCoordGenRDKitStage final : public ETKDGStage {
  public:
   ETKDGCoordGenRDKitStage(const RDKit::DGeomHelpers::EmbedParameters& params,
                           const std::vector<const RDKit::ROMol*>&     mols,
-                          const std::vector<EmbedArgs>&               eargs,
+                          const std::vector<const EmbedArgs*>&        eargs,
                           PinnedHostVector<double>&                   positionsScratch,
                           PinnedHostVector<uint8_t>&                  activeScratch,
                           hipStream_t                                stream = nullptr);
@@ -57,7 +57,9 @@ class ETKDGCoordGenRDKitStage final : public ETKDGStage {
  private:
   const RDKit::DGeomHelpers::EmbedParameters& params_;
   const std::vector<const RDKit::ROMol*>&     mols_;
-  const std::vector<EmbedArgs>&               eargs_;
+  // Stored by value (vector of pointers is cheap) so the stage does not depend on the
+  // lifetime of the caller's pointer vector; the pointed-to EmbedArgs are owned upstream.
+  const std::vector<const EmbedArgs*>         eargs_;
   PinnedHostVector<double>&                   positionsScratch_;
   PinnedHostVector<uint8_t>&                  activeScratch_;
   hipStream_t                                stream_;

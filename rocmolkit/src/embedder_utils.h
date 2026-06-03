@@ -77,6 +77,12 @@ struct EmbedArgs {
   MinimizeStage                                                     stage = MinimizeStage::FirstMinimize;
 };
 
+//! conf_to_mol indirection. A batch contains k conformer attempts per molecule; every attempt
+//! shares the same molecule-level EmbedArgs (bounds matrix, chiral centers, ETKDG torsion
+//! details). Stages take a vector of POINTERS into the per-unique-molecule EmbedArgs rather than
+//! deep-copied values, so molecule-level data is computed once and referenced k times.
+using EmbedArgsRefs = std::vector<const EmbedArgs*>;
+
 }  // namespace detail
 
 namespace DGeomHelpers {

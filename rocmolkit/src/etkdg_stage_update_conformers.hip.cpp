@@ -22,7 +22,7 @@ namespace detail {
 
 ETKDGUpdateConformersStage::ETKDGUpdateConformersStage(
   const std::vector<RDKit::ROMol*>&                                                        mols,
-  const std::vector<EmbedArgs>&                                                            eargs,
+  const std::vector<const EmbedArgs*>&                                                     eargs,
   std::unordered_map<const RDKit::ROMol*, std::vector<std::unique_ptr<RDKit::Conformer>>>& conformers,
   PinnedHostVector<double>&                                                                positionsScratch,
   PinnedHostVector<uint8_t>&                                                               activeScratch,
@@ -61,7 +61,7 @@ void ETKDGUpdateConformersStage::execute(ETKDGContext& ctx) {
     }
 
     const auto& mol         = mols_[i];
-    const int   dim         = eargs_[i].dim;
+    const int   dim         = eargs_[i]->dim;
     const int   startPosIdx = ctx.systemHost.atomStarts[i] * dim;
     const int   nAtoms      = mol->getNumAtoms();
 

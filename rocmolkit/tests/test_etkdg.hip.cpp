@@ -403,8 +403,12 @@ TEST_F(ETKDGPipelineUpdateConformersTestFixture, UpdateConformersStage) {
   nvMolKit::PinnedHostVector<double>  positionsScratch(totalAtoms * 3);
   nvMolKit::PinnedHostVector<uint8_t> activeScratch(mols_.size());
 
+  std::vector<const nvMolKit::detail::EmbedArgs*> eargPtrs;
+  for (const auto& earg : eargs) {
+    eargPtrs.push_back(&earg);
+  }
   nvMolKit::detail::ETKDGUpdateConformersStage
-    stage(mols_, eargs, conformers, positionsScratch, activeScratch, nullptr, nullptr, -1);
+    stage(mols_, eargPtrs, conformers, positionsScratch, activeScratch, nullptr, nullptr, -1);
   stage.execute(context);
   for (size_t i = 0; i < mols_.size(); ++i) {
     auto it = conformers.find(mols_[i]);
@@ -471,8 +475,12 @@ TEST_F(ETKDGPipelineUpdateConformersTestFixture, UpdateConformersStageWithInacti
   nvMolKit::PinnedHostVector<double>  positionsScratch(totalAtoms * 3);
   nvMolKit::PinnedHostVector<uint8_t> activeScratch(mols_.size());
 
+  std::vector<const nvMolKit::detail::EmbedArgs*> eargPtrs;
+  for (const auto& earg : eargs) {
+    eargPtrs.push_back(&earg);
+  }
   nvMolKit::detail::ETKDGUpdateConformersStage
-    stage(mols_, eargs, conformers, positionsScratch, activeScratch, nullptr, nullptr, -1);
+    stage(mols_, eargPtrs, conformers, positionsScratch, activeScratch, nullptr, nullptr, -1);
   stage.execute(context);
   for (size_t i = 0; i < mols_.size(); ++i) {
     if (i == 1) {

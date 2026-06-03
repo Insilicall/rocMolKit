@@ -21,12 +21,52 @@
 
 #include <cstdio>
 #include "rocmolkit/cuda_std_compat.h"
+#include <mutex>
 #include <stdexcept>
 #include <vector>
 
 #include "cuda_error_check.h"
 
 namespace nvMolKit {
+
+namespace detail {
+// The ETKDG driver fans batches out across OpenMP threads (one HIP stream per
+// thread), but hipMallocAsync/hipFreeAsync all draw from the device's single
+// default memory pool. Concurrent alloc/free on that shared pool from multiple
+// threads deadlocks the ROCm runtime — N>=2000 conformers reliably hangs with
+// the GPU idle (busy ~2%) until the process is killed. Serialising just the
+// pool calls (not the GPU work) fixes it at negligible cost, since the host-side
+// allocation is tiny next to the kernels and batch GPU parallelism was not
+// improving throughput anyway (the GPU itself is the bottleneck).
+inline std::mutex& deviceMemPoolMutex() {
+  static std::mutex m;
+  return m;
+}
+
+template <typename T>
+inline hipError_t mallocAsyncLocked(T** ptr, size_t bytes, hipStream_t stream) {
+  const std::lock_guard<std::mutex> guard(deviceMemPoolMutex());
+  return hipMallocAsync(reinterpret_cast<void**>(ptr), bytes, stream);
+}
+inline hipError_t freeAsyncLocked(void* ptr, hipStream_t stream) {
+  const std::lock_guard<std::mutex> guard(deviceMemPoolMutex());
+  // HIP 7.0 dropped the implicit synchronisation that hipFree() used to perform
+  // for hipMallocAsync/hipMallocFromPoolAsync allocations, to match CUDA's
+  // cudaFree (see HIP 7.0 API changes). That implicit wait had been masking a
+  // use-after-free in this port: hipFreeAsync returns a pool block to the
+  // allocator ordered only on `stream`, but the pool can hand it back out (and
+  // memset it) to a later allocation while an in-flight kernel still reads the
+  // old buffer — intermittently corrupting the ETKDG term/index buffers and
+  // faulting the GPU at scale (N>=~900). Synchronising the stream before the
+  // free restores the pre-7.0 safety: the buffer is provably idle before it can
+  // be recycled. Cost is a host-side wait per free, acceptable since the GPU is
+  // the bottleneck and this is correctness-critical.
+  if (stream != nullptr) {
+    hipStreamSynchronize(stream);
+  }
+  return hipFreeAsync(ptr, stream);
+}
+}  // namespace detail
 
 //! Simple replacement for thrust device vector allocation and storage, with all async operations.
 //! Responsibility is 100% on user for syncs and device management at the moment.
@@ -36,7 +76,7 @@ template <typename T> class AsyncDeviceVector {
   explicit AsyncDeviceVector() = default;
   explicit AsyncDeviceVector(size_t size, hipStream_t stream = 0) : size_(size), stream_(stream) {
     if (size > 0) {
-      cudaCheckError(hipMallocAsync(&data_, size * sizeof(T), stream_));
+      cudaCheckError(detail::mallocAsyncLocked(&data_, size * sizeof(T), stream_));
     }
   }
   AsyncDeviceVector(const AsyncDeviceVector& other) = delete;
@@ -55,7 +95,7 @@ template <typename T> class AsyncDeviceVector {
       return *this;
     }
     if (data_ != nullptr) {
-      hipFreeAsync(data_, stream_);
+      detail::freeAsyncLocked(data_, stream_);
     }
     stream_     = other.stream_;
     size_       = other.size_;
@@ -70,7 +110,7 @@ template <typename T> class AsyncDeviceVector {
     // is documented as a no-op but the AMD driver under load occasionally
     // segfaults on null + freed-stream combinations.
     if (data_ != nullptr) {
-      hipFreeAsync(data_, stream_);
+      detail::freeAsyncLocked(data_, stream_);
       data_ = nullptr;
     }
   }
@@ -100,7 +140,7 @@ template <typename T> class AsyncDeviceVector {
     }
     if (newSize == 0) {
       if (data_ != nullptr) {
-        hipFreeAsync(data_, stream_);
+        detail::freeAsyncLocked(data_, stream_);
         data_ = nullptr;
       }
       size_ = 0;
@@ -108,11 +148,11 @@ template <typename T> class AsyncDeviceVector {
     }
 
     T* newData;
-    cudaCheckError(hipMallocAsync(&newData, newSize * sizeof(T), stream_));
+    cudaCheckError(detail::mallocAsyncLocked(&newData, newSize * sizeof(T), stream_));
     if (size_ > 0 && data_ != nullptr) {
       cudaCheckError(
         hipMemcpyAsync(newData, data_, std::min(size_, newSize) * sizeof(T), hipMemcpyDeviceToDevice, stream_));
-      hipFreeAsync(data_, stream_);
+      detail::freeAsyncLocked(data_, stream_);
     }
     data_ = newData;
     size_ = newSize;
@@ -229,14 +269,14 @@ template <typename T> class AsyncDeviceVector {
 // TODO stream option
 template <typename T> class AsyncDevicePtr {
  public:
-  AsyncDevicePtr() : stream_(nullptr) { cudaCheckError(hipMallocAsync(&data_, sizeof(T), nullptr)); };
+  AsyncDevicePtr() : stream_(nullptr) { cudaCheckError(detail::mallocAsyncLocked(&data_, sizeof(T), nullptr)); };
   explicit AsyncDevicePtr(const T& data, const hipStream_t stream = nullptr) : stream_(stream) {
-    cudaCheckError(hipMallocAsync(&data_, sizeof(T), stream_));
+    cudaCheckError(detail::mallocAsyncLocked(&data_, sizeof(T), stream_));
     cudaCheckError(hipMemcpyAsync(data_, &data, sizeof(T), hipMemcpyHostToDevice, stream_));
   }
   ~AsyncDevicePtr() noexcept {
     if (data_ != nullptr) {
-      hipFreeAsync(data_, stream_);
+      detail::freeAsyncLocked(data_, stream_);
       data_ = nullptr;
     }
   }
@@ -251,7 +291,7 @@ template <typename T> class AsyncDevicePtr {
       return *this;
     }
     if (data_ != nullptr) {
-      hipFreeAsync(data_, stream_);
+      detail::freeAsyncLocked(data_, stream_);
     }
     data_         = other.data_;
     stream_       = other.stream_;
