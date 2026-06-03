@@ -62,6 +62,37 @@ so larger batches do not help. It stays ~8× behind the CPU on this workload.
 3. A batch-size autotuner is a minor lever here: the GPU saturates on compute,
    not on configuration.
 
+## FP32 conversion plan (TDD — the only speed lever on consumer RDNA)
+
+The minimization subsystem shares one `double` state (positions, gradient,
+inverse Hessian) between the force field and BFGS, so the conversion is
+all-or-nothing along the minimization path and must be guarded by a correctness
+gate. Suggested order, recompiling + re-running the gate after each step:
+
+0. **Gate.** Build with `-DROCMOLKIT_BUILD_TESTS=ON`, run `test_etkdg_minimize`
+   (energy decreases; energy/atom below threshold) and record conf success rate
+   at N=400/1000. Bond lengths within 0.02 A of RDKit (README claim) is the
+   acceptance bar.
+1. **Typedef switch.** Add `using MinReal = float;` (vs `double`) in the
+   minimization headers so the precision is one compile-time flip for A/B.
+2. **Force-field aggregators** (`dist_geom_kernels_device.hip.h`):
+   `molEnergyETK/molGradETK/molEnergyDG/molGradDG` + their term sub-functions —
+   read `double` positions, compute and accumulate in `MinReal`. This mirrors
+   what `distViolationGrad` already does (float interior, double boundary).
+3. **`bfgsMinimizeKernel` working set** (`bfgs_minimize_permol_kernels.hip.cpp`):
+   `localPos/localGrad/localDir/scratchPos/dGrad` + line-search scalars ->
+   `MinReal`. The shared-mem copy `globalPos -> localPos` is the natural
+   double<->float boundary.
+4. **Inverse Hessian** (host alloc in `BfgsBatchMinimizer` + `updateInverseHessian`
+   / `setDirection`) -> `MinReal`. Biggest single win: O(n^2) global traffic and
+   FLOPs per iteration, halved + 16x faster ALU.
+5. **Reductions**: `hipcub::BlockReduce<double>` -> `<MinReal>`.
+
+Expected sweet spot is **mixed precision**: float forces + float Hessian, but
+keep the energy sum (and possibly the Hessian update) in double if convergence
+or bond-length accuracy regresses. Measure ETK 3D + DistGeom stage times with
+`ROCMOLKIT_DEBUG_STAGES` against the double baseline.
+
 ## Robustness notes (this branch)
 
 - Multi-thread hang at N≥2000 was a deadlock in the shared async mem pool —
