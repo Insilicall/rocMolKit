@@ -42,6 +42,7 @@ inline std::mutex& deviceMemPoolMutex() {
   static std::mutex m;
   return m;
 }
+
 template <typename T>
 inline hipError_t mallocAsyncLocked(T** ptr, size_t bytes, hipStream_t stream) {
   const std::lock_guard<std::mutex> guard(deviceMemPoolMutex());
@@ -49,6 +50,20 @@ inline hipError_t mallocAsyncLocked(T** ptr, size_t bytes, hipStream_t stream) {
 }
 inline hipError_t freeAsyncLocked(void* ptr, hipStream_t stream) {
   const std::lock_guard<std::mutex> guard(deviceMemPoolMutex());
+  // HIP 7.0 dropped the implicit synchronisation that hipFree() used to perform
+  // for hipMallocAsync/hipMallocFromPoolAsync allocations, to match CUDA's
+  // cudaFree (see HIP 7.0 API changes). That implicit wait had been masking a
+  // use-after-free in this port: hipFreeAsync returns a pool block to the
+  // allocator ordered only on `stream`, but the pool can hand it back out (and
+  // memset it) to a later allocation while an in-flight kernel still reads the
+  // old buffer — intermittently corrupting the ETKDG term/index buffers and
+  // faulting the GPU at scale (N>=~900). Synchronising the stream before the
+  // free restores the pre-7.0 safety: the buffer is provably idle before it can
+  // be recycled. Cost is a host-side wait per free, acceptable since the GPU is
+  // the bottleneck and this is correctness-critical.
+  if (stream != nullptr) {
+    hipStreamSynchronize(stream);
+  }
   return hipFreeAsync(ptr, stream);
 }
 }  // namespace detail
