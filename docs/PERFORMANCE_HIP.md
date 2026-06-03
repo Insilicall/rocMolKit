@@ -62,7 +62,42 @@ so larger batches do not help. It stays ~8× behind the CPU on this workload.
 3. A batch-size autotuner is a minor lever here: the GPU saturates on compute,
    not on configuration.
 
-## FP32 experiment result (measured) — not the silver bullet
+## Reality check: mlxmolkit does ~20x better on weaker hardware
+
+**mlxmolkit** (github.com/guillaume-osmo/mlxmolkit) is *another port of the same
+nvMolKit*, to Apple Metal/MLX. Its published numbers:
+
+| Conformers | Time | Throughput |
+|-----------|------|-----------|
+| 1,000 | 0.43s | **2,342/s** |
+| 10,000 | 4.82s | **2,075/s** |
+
+That is **~2,300 conf/s on an M3 Max (~14 TFLOPS FP32)** vs our **110 conf/s on a
+RX 9060 XT (25.6 TFLOPS FP32)** — weaker hardware, ~20x faster. So the consumer
+GPU is NOT structurally limited; **our port is ~20x inefficient.** A 20x gap is
+not FP64 (that is 2-4x) — it is pipeline overhead.
+
+What mlxmolkit does differently:
+- **Fused kernel, zero CPU round-trips.** Our pipeline has 12 separate stages
+  with a sync between each, a serial CPU coordgen, and chirality/stereo checks
+  that round-trip. mlxmolkit fuses DG/ETK/MMFF into in-kernel threadgroup-per-
+  conformer passes.
+- **FP32 native** (MLX) vs our literal FP64 port.
+- **N×k with shared constraints** (`conf_to_mol`, 50% memory savings).
+- It uses **BFGS with the dense Hessian** (not L-BFGS) for drug-like sizes and
+  states it is *faster* than L-BFGS up to 74 atoms — so the Hessian is fine;
+  the overhead is elsewhere.
+
+**Caveat on our own profiling:** the "minimization = 98%" measurement was taken
+with `ROCMOLKIT_DEBUG_STAGES` (a sync after every stage), which hides the
+launch/sync overhead of the normal async path. Re-profile WITHOUT the debug sync
+(hipEvents or rocprofv2) before attributing the gap.
+
+**The real path = rewrite the pipeline fused + FP32, mlxmolkit-style** (move
+coordgen onto the GPU, collapse the 12 stages, cut host round-trips), not the
+incremental FP64→FP32 tweak tested below.
+
+## FP32 experiment result (measured) — Hessian alone is not the silver bullet
 
 We tested the highest-value FP32 step in isolation: converting the **inverse
 Hessian** (the largest `double` structure, O(n^2) global traffic per BFGS
