@@ -1,0 +1,349 @@
+// SPDX-FileCopyrightText: Copyright (c) 2025 InsilicAll. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+// Closed-shell NDDO/PM6 SCF (sp basis) host reference, ported from the PYSEQM
+// reference nddo_energy / _build_fock. The hot kernels here (Fock build,
+// diagonalization, density) are what Stage 7 moves to HIP/rocSOLVER. See
+// docs/SEMIEMPIRICAL_DESIGN.md.
+
+#include "scf.h"
+
+#include <algorithm>
+#include <cmath>
+#include <vector>
+
+#include "core_hamiltonian.h"
+#include "energy_device.h"
+#include "fock_device.h"
+#include "pm6_params.h"
+#include "two_center_device.h"  // AtomIntParams
+
+namespace nvMolKit {
+namespace semiempirical {
+
+namespace {
+
+int spCount(int z) {
+  const int n = pm6NumOrbitals(z);
+  return (n >= 4) ? 4 : n;
+}
+
+// Cyclic Jacobi eigensolver for a symmetric n x n matrix. Writes ascending
+// eigenvalues into eval and the corresponding eigenvectors into the columns of
+// evec (row-major n x n). A is overwritten. Returns false if the off-diagonal
+// norm did not fall below threshold within the sweep budget (caller must treat
+// the result as untrustworthy).
+bool jacobiEigen(std::vector<double>& A, int n, std::vector<double>& eval,
+                 std::vector<double>& evec) {
+  evec.assign(static_cast<size_t>(n) * n, 0.0);
+  for (int i = 0; i < n; ++i) evec[i * n + i] = 1.0;
+
+  // Converge relative to the (rotation-invariant) Frobenius norm: an absolute
+  // off-diagonal threshold is unreachable for larger matrices with large entries.
+  double frob2 = 0.0;
+  for (int i = 0; i < n * n; ++i) frob2 += A[i] * A[i];
+  const double offTol = 1e-26 * (frob2 > 0.0 ? frob2 : 1.0);
+
+  const int maxSweeps = 60 + 4 * n;  // scale with size for stiff/clustered cases
+  bool converged = false;
+  for (int sweep = 0; sweep < maxSweeps; ++sweep) {
+    double off = 0.0;
+    for (int p = 0; p < n; ++p)
+      for (int q = p + 1; q < n; ++q) off += A[p * n + q] * A[p * n + q];
+    if (off < offTol) {
+      converged = true;
+      break;
+    }
+
+    for (int p = 0; p < n; ++p) {
+      for (int q = p + 1; q < n; ++q) {
+        const double apq = A[p * n + q];
+        if (std::fabs(apq) < 1e-300) continue;
+        const double app = A[p * n + p], aqq = A[q * n + q];
+        const double phi = 0.5 * std::atan2(2.0 * apq, aqq - app);
+        const double c = std::cos(phi), s = std::sin(phi);
+        for (int k = 0; k < n; ++k) {
+          const double akp = A[k * n + p], akq = A[k * n + q];
+          A[k * n + p] = c * akp - s * akq;
+          A[k * n + q] = s * akp + c * akq;
+        }
+        for (int k = 0; k < n; ++k) {
+          const double apk = A[p * n + k], aqk = A[q * n + k];
+          A[p * n + k] = c * apk - s * aqk;
+          A[q * n + k] = s * apk + c * aqk;
+        }
+        for (int k = 0; k < n; ++k) {
+          const double vkp = evec[k * n + p], vkq = evec[k * n + q];
+          evec[k * n + p] = c * vkp - s * vkq;
+          evec[k * n + q] = s * vkp + c * vkq;
+        }
+      }
+    }
+  }
+
+  std::vector<int> order(n);
+  for (int i = 0; i < n; ++i) order[i] = i;
+  std::vector<double> diag(n);
+  for (int i = 0; i < n; ++i) diag[i] = A[i * n + i];
+  std::sort(order.begin(), order.end(), [&](int a, int b) { return diag[a] < diag[b]; });
+
+  eval.assign(n, 0.0);
+  std::vector<double> v(static_cast<size_t>(n) * n, 0.0);
+  for (int j = 0; j < n; ++j) {
+    eval[j] = diag[order[j]];
+    for (int i = 0; i < n; ++i) v[i * n + j] = evec[i * n + order[j]];
+  }
+  evec.swap(v);
+  return converged;
+}
+
+// Density from the lowest nOcc orbitals: P = 2 * sum_k C[:,k] C[:,k]^T.
+void buildDensity(const std::vector<double>& C, int n, int nOcc, std::vector<double>& P) {
+  P.assign(n * n, 0.0);
+  for (int k = 0; k < nOcc; ++k)
+    for (int i = 0; i < n; ++i) {
+      const double cik = C[i * n + k];
+      for (int j = 0; j < n; ++j) P[i * n + j] += 2.0 * cik * C[j * n + k];
+    }
+}
+
+// Gather the per-atom integral parameters for a molecule from the PM6 table.
+void gatherMoleculeParams(int nAtoms, const int* atoms, std::vector<AtomIntParams>& ap) {
+  ap.resize(nAtoms);
+  for (int a = 0; a < nAtoms; ++a) gatherAtomIntParams(atoms[a], ap[a]);
+}
+
+// F = H + G(P): thin host wrapper over the shared device buildFockDev.
+void buildFock(const std::vector<double>& H, const std::vector<double>& P, int nBasis,
+               int nAtoms, const std::vector<AtomIntParams>& ap,
+               const std::vector<int>& start, const std::vector<int>& norb, const double* coords,
+               std::vector<double>& F) {
+  F.assign(static_cast<size_t>(nBasis) * nBasis, 0.0);
+  buildFockDev(nBasis, nAtoms, ap.data(), start.data(), norb.data(), coords,
+               H.data(), P.data(), F.data());
+}
+
+// Solve the (nd+1) DIIS system B c = rhs (Gaussian elimination, partial pivot).
+// Returns false if singular.
+bool solveLinear(std::vector<double> B, std::vector<double> rhs, int m, std::vector<double>& x) {
+  for (int col = 0; col < m; ++col) {
+    int piv = col;
+    for (int r = col + 1; r < m; ++r)
+      if (std::fabs(B[r * m + col]) > std::fabs(B[piv * m + col])) piv = r;
+    if (std::fabs(B[piv * m + col]) < 1e-14) return false;
+    if (piv != col) {
+      for (int c = 0; c < m; ++c) std::swap(B[piv * m + c], B[col * m + c]);
+      std::swap(rhs[piv], rhs[col]);
+    }
+    for (int r = 0; r < m; ++r) {
+      if (r == col) continue;
+      const double f = B[r * m + col] / B[col * m + col];
+      for (int c = 0; c < m; ++c) B[r * m + c] -= f * B[col * m + c];
+      rhs[r] -= f * rhs[col];
+    }
+  }
+  x.assign(m, 0.0);
+  for (int i = 0; i < m; ++i) x[i] = rhs[i] / B[i * m + i];
+  return true;
+}
+
+}  // namespace
+
+int scfSp(int nAtoms, const int* atoms, const double* coords,
+          double* density, double* eigenvalues, ScfResult* out,
+          int maxIter, double convTol) {
+  const int nBasis = spBasisSize(nAtoms, atoms);
+  if (nBasis == 0) return 0;
+
+  int nElec = 0;
+  for (int a = 0; a < nAtoms; ++a) nElec += pm6ValenceElectrons(atoms[a]);
+  if (nElec % 2 != 0) return 0;  // open shell not handled here
+  const int nOcc = nElec / 2;
+
+  std::vector<int> start(nAtoms), norb(nAtoms);
+  for (int a = 0, off = 0; a < nAtoms; ++a) {
+    start[a] = off;
+    norb[a] = spCount(atoms[a]);
+    off += norb[a];
+  }
+  std::vector<AtomIntParams> ap;
+  gatherMoleculeParams(nAtoms, atoms, ap);
+
+  const size_t n2 = static_cast<size_t>(nBasis) * nBasis;
+  std::vector<double> H(n2);
+  if (buildCoreHamiltonianSp(nAtoms, atoms, coords, H.data()) == 0) return 0;
+
+  // Initial density from the H_core eigenvectors.
+  std::vector<double> A = H, eval, C, P;
+  bool diagOk = jacobiEigen(A, nBasis, eval, C);
+  buildDensity(C, nBasis, nOcc, P);
+
+  std::vector<std::vector<double>> diisF, diisE;
+  const int kDiisMax = 6;
+  std::vector<double> F, Pnew;
+  bool converged = false;
+  int iteration = 0;
+  double delta = 1.0;
+
+  for (iteration = 0; iteration < maxIter; ++iteration) {
+    buildFock(H, P, nBasis, nAtoms, ap, start, norb, coords, F);
+
+    if (iteration >= 2) {
+      std::vector<double> e(n2, 0.0);  // e = F*P - P*F
+      for (int i = 0; i < nBasis; ++i)
+        for (int j = 0; j < nBasis; ++j) {
+          double fp = 0.0, pf = 0.0;
+          for (int k = 0; k < nBasis; ++k) {
+            fp += F[i * nBasis + k] * P[k * nBasis + j];
+            pf += P[i * nBasis + k] * F[k * nBasis + j];
+          }
+          e[i * nBasis + j] = fp - pf;
+        }
+      diisF.push_back(F);
+      diisE.push_back(e);
+      if (static_cast<int>(diisF.size()) > kDiisMax) {
+        diisF.erase(diisF.begin());
+        diisE.erase(diisE.begin());
+      }
+      const int nd = static_cast<int>(diisF.size());
+      if (nd >= 2) {
+        const int m = nd + 1;
+        std::vector<double> B(m * m, 0.0), rhs(m, 0.0), c;
+        for (int i = 0; i < nd; ++i)
+          for (int j = 0; j < nd; ++j) {
+            double dot = 0.0;
+            for (size_t t = 0; t < diisE[i].size(); ++t) dot += diisE[i][t] * diisE[j][t];
+            B[i * m + j] = dot;
+          }
+        for (int i = 0; i < nd; ++i) {
+          B[nd * m + i] = -1.0;
+          B[i * m + nd] = -1.0;
+        }
+        rhs[nd] = -1.0;
+        if (solveLinear(B, rhs, m, c)) {
+          std::fill(F.begin(), F.end(), 0.0);
+          for (int i = 0; i < nd; ++i)
+            for (size_t t = 0; t < n2; ++t) F[t] += c[i] * diisF[i][t];
+          // The extrapolated F is symmetric in exact arithmetic; force it so the
+          // eigensolver never sees rounding-induced asymmetry.
+          for (int i = 0; i < nBasis; ++i)
+            for (int j = i + 1; j < nBasis; ++j) {
+              const double avg = 0.5 * (F[i * nBasis + j] + F[j * nBasis + i]);
+              F[i * nBasis + j] = avg;
+              F[j * nBasis + i] = avg;
+            }
+        }
+      }
+    }
+
+    A = F;
+    diagOk = jacobiEigen(A, nBasis, eval, C) && diagOk;
+    buildDensity(C, nBasis, nOcc, Pnew);
+
+    double ss = 0.0;
+    for (size_t t = 0; t < n2; ++t) {
+      const double d = Pnew[t] - P[t];
+      ss += d * d;
+    }
+    delta = std::sqrt(ss / static_cast<double>(n2));
+    if (delta < convTol) {
+      P = Pnew;
+      converged = true;
+      break;
+    }
+
+    double mix;
+    if (iteration < 3) mix = 0.5;
+    else if (delta > 0.1) mix = 0.4;
+    else if (delta > 0.01) mix = 0.5;
+    else mix = 0.8;
+    for (size_t t = 0; t < n2; ++t) P[t] = mix * Pnew[t] + (1.0 - mix) * P[t];
+  }
+
+  // A failed diagonalization makes the result untrustworthy, regardless of the
+  // density-change test.
+  if (!diagOk) converged = false;
+
+  // Final Fock + electronic energy with the converged density.
+  buildFock(H, P, nBasis, nAtoms, ap, start, norb, coords, F);
+  double eElec = 0.0;
+  for (size_t t = 0; t < n2; ++t) eElec += 0.5 * P[t] * (H[t] + F[t]);
+
+  for (size_t t = 0; t < n2; ++t) density[t] = P[t];
+  for (int i = 0; i < nBasis; ++i) eigenvalues[i] = eval[i];
+  if (out != nullptr) {
+    out->nBasis = nBasis;
+    out->nIter = iteration + 1;
+    out->converged = converged;
+    out->electronicEv = eElec;
+  }
+  return nBasis;
+}
+
+bool mullikenCharges(int nAtoms, const int* atoms, const double* coords, double* q) {
+  const int nBasis = spBasisSize(nAtoms, atoms);
+  if (nBasis == 0) return false;
+
+  std::vector<double> density(static_cast<size_t>(nBasis) * nBasis), eval(nBasis);
+  ScfResult res;
+  if (scfSp(nAtoms, atoms, coords, density.data(), eval.data(), &res) == 0) {
+    return false;
+  }
+  if (!res.converged) return false;  // never report charges from an unconverged SCF
+
+  for (int a = 0, off = 0; a < nAtoms; ++a) {
+    const int c = spCount(atoms[a]);
+    double pop = 0.0;
+    for (int o = 0; o < c; ++o) {
+      const int mu = off + o;
+      pop += density[mu * nBasis + mu];
+    }
+    q[a] = static_cast<double>(pm6ValenceElectrons(atoms[a])) - pop;
+    off += c;
+  }
+  return true;
+}
+
+double nuclearRepulsionEv(int nAtoms, const int* atoms, const double* coords) {
+  std::vector<AtomIntParams> ap(nAtoms);
+  for (int a = 0; a < nAtoms; ++a)
+    if (!gatherAtomIntParams(atoms[a], ap[a])) return 0.0;
+  return nuclearRepulsionDev(nAtoms, ap.data(), coords);
+}
+
+bool heatOfFormationKcal(int nAtoms, const int* atoms, const double* coords, double* hofKcal) {
+  const int nBasis = spBasisSize(nAtoms, atoms);
+  if (nBasis == 0) return false;
+
+  std::vector<AtomIntParams> ap(nAtoms);
+  for (int a = 0; a < nAtoms; ++a) {
+    if (!gatherAtomIntParams(atoms[a], ap[a])) return false;
+    // Every HoF-supported element has nonzero eisol/eheat; a zero is the
+    // unsupported sentinel.
+    if (ap[a].eisol == 0.0 || ap[a].eheat == 0.0) return false;
+  }
+
+  std::vector<double> density(static_cast<size_t>(nBasis) * nBasis), eval(nBasis);
+  ScfResult res;
+  if (scfSp(nAtoms, atoms, coords, density.data(), eval.data(), &res) == 0) return false;
+  if (!res.converged) return false;
+
+  const double eNuc = nuclearRepulsionDev(nAtoms, ap.data(), coords);
+  *hofKcal = heatOfFormationKcalDev(res.electronicEv, eNuc, nAtoms, ap.data());
+  return true;
+}
+
+}  // namespace semiempirical
+}  // namespace nvMolKit
