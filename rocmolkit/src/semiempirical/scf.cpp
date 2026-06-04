@@ -324,5 +324,28 @@ int scfSp(int nAtoms, const int* atoms, const double* coords,
   return nBasis;
 }
 
+bool mullikenCharges(int nAtoms, const int* atoms, const double* coords, double* q) {
+  const int nBasis = spBasisSize(nAtoms, atoms);
+  if (nBasis == 0) return false;
+
+  std::vector<double> density(nBasis * nBasis), eval(nBasis);
+  ScfResult res;
+  if (scfSp(nAtoms, atoms, coords, density.data(), eval.data(), &res) == 0) {
+    return false;
+  }
+
+  for (int a = 0, off = 0; a < nAtoms; ++a) {
+    const int c = spCount(atoms[a]);
+    double pop = 0.0;
+    for (int o = 0; o < c; ++o) {
+      const int mu = off + o;
+      pop += density[mu * nBasis + mu];
+    }
+    q[a] = static_cast<double>(pm6ValenceElectrons(atoms[a])) - pop;
+    off += c;
+  }
+  return true;
+}
+
 }  // namespace semiempirical
 }  // namespace nvMolKit

@@ -40,6 +40,12 @@ int scfSp(int nAtoms, const int* atoms, const double* coords,
           double* density, double* eigenvalues, ScfResult* out,
           int maxIter = 200, double convTol = 1e-8);
 
+// Mulliken atomic charges q_A = Z_A^core - sum_{mu in A} P[mu,mu], from an SCF
+// density. atoms/coords as in scfSp; writes nAtoms charges into q. Returns true
+// on success (false if an element is unsupported). Convenience wrapper that runs
+// scfSp internally.
+bool mullikenCharges(int nAtoms, const int* atoms, const double* coords, double* q);
+
 }  // namespace semiempirical
 }  // namespace nvMolKit
 
