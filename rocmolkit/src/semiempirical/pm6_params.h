@@ -53,6 +53,14 @@ int pm6ValenceElectrons(int z);
 // or 9 (sp+d on P, S, Cl, Br, I and heavier). Returns 0 if unknown.
 int pm6NumOrbitals(int z);
 
+// Isolated-atom electronic energy (eV): eisol = sum of occupation-weighted
+// one-center integrals (MOPAC/PYSEQM coefficients). Returns 0 if z is not in the
+// supported main-group set. Used in the heat-of-formation binding term.
+double pm6Eisol(int z);
+
+// Experimental atomic heat of formation (kcal/mol) for z. Returns 0 if unknown.
+double pm6Eheat(int z);
+
 }  // namespace semiempirical
 }  // namespace nvMolKit
 

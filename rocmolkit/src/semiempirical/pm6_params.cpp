@@ -59,6 +59,45 @@ int pm6ValenceElectrons(int z) {
   return 0;  // transition metals / unsupported in current phases
 }
 
+double pm6Eisol(int z) {
+  const Pm6ElementParams* p = pm6ParamsForZ(z);
+  if (p == nullptr) return 0.0;
+  // (ussc, uppc, gssc, gppc, gspc, gp2c, hspc) per element (MOPAC/PYSEQM).
+  // Period-3+ analogues share their period-2 occupation pattern.
+  double c[7] = {0, 0, 0, 0, 0, 0, 0};
+  switch (z) {
+    case 1:  c[0] = 1.0; break;                                              // H
+    case 6:  c[0] = 2; c[1] = 2; c[2] = 1; c[3] = -0.5; c[4] = 4;  c[5] = 1.5; c[6] = -2; break;  // C
+    case 7:                                                                  // N / P
+    case 15: c[0] = 2; c[1] = 3; c[2] = 1; c[3] = -1.5; c[4] = 6;  c[5] = 4.5; c[6] = -3; break;
+    case 8:                                                                  // O / S
+    case 16: c[0] = 2; c[1] = 4; c[2] = 1; c[3] = -0.5; c[4] = 8;  c[5] = 6.5; c[6] = -4; break;
+    case 9:                                                                  // F / Cl / Br / I
+    case 17:
+    case 35:
+    case 53: c[0] = 2; c[1] = 5; c[2] = 1; c[3] = 0.5;  c[4] = 10; c[5] = 9.5; c[6] = -5; break;
+    default: return 0.0;  // unsupported for HoF
+  }
+  return c[0] * p->Uss + c[1] * p->Upp + c[2] * p->gss + c[3] * p->gpp
+         + c[4] * p->gsp + c[5] * p->gp2 + c[6] * p->hsp;
+}
+
+double pm6Eheat(int z) {
+  switch (z) {
+    case 1:  return 52.102;
+    case 6:  return 170.89;
+    case 7:  return 113.0;
+    case 8:  return 59.559;
+    case 9:  return 18.86;
+    case 15: return 75.42;
+    case 16: return 66.4;
+    case 17: return 28.99;
+    case 35: return 26.74;
+    case 53: return 25.517;
+    default: return 0.0;
+  }
+}
+
 int pm6NumOrbitals(int z) {
   const Pm6ElementParams* p = pm6ParamsForZ(z);
   if (p == nullptr || pm6ValenceElectrons(z) == 0) {
