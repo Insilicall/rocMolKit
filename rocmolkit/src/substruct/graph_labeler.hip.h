@@ -119,9 +119,14 @@ __device__ void populateLabelMatrix(const TargetMoleculeView&                   
       }
     }
   } else {
-    // Use fast path for simple AND-only queries
-    __shared__ AtomDataPacked sharedQueryPacked[MaxQueryAtoms];
-    __shared__ AtomQueryMask  sharedQueryMasks[MaxQueryAtoms];
+    // Use fast path for simple AND-only queries.
+    // AtomDataPacked / AtomQueryMask have member initializers (non-trivial
+    // default ctor), which HIP forbids for __shared__. Back them with raw,
+    // aligned shared buffers (every slot is written before it is read).
+    __shared__ alignas(AtomDataPacked) unsigned char sharedQueryPackedStorage[MaxQueryAtoms * sizeof(AtomDataPacked)];
+    __shared__ alignas(AtomQueryMask) unsigned char  sharedQueryMasksStorage[MaxQueryAtoms * sizeof(AtomQueryMask)];
+    AtomDataPacked* sharedQueryPacked = reinterpret_cast<AtomDataPacked*>(sharedQueryPackedStorage);
+    AtomQueryMask*  sharedQueryMasks  = reinterpret_cast<AtomQueryMask*>(sharedQueryMasksStorage);
 
     for (int q = tid; q < numQueryAtoms; q += numThreads) {
       sharedQueryPacked[q] = query.getAtomPacked(q);

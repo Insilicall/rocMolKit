@@ -142,7 +142,7 @@ constexpr int kWarpsPerBlock = kDefaultBlockSize / 32;
 // =============================================================================
 
 template <typename KernelFunc> void configureSharedMemCarveout(KernelFunc kernel) {
-  hipFuncSetAttribute(reinterpret_cast<const void*>(kernel), hipFuncAttributePreferredSharedMemoryCarveout, cudaSharedmemCarveoutMaxShared);
+  hipFuncSetAttribute(reinterpret_cast<const void*>(kernel), hipFuncAttributePreferredSharedMemoryCarveout, 100 /* cudaSharedmemCarveoutMaxShared */);
 }
 
 inline bool& sharedMemCarveoutConfigured() {
