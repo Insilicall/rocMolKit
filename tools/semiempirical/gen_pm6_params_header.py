@@ -31,11 +31,9 @@ SCALAR = [
 
 def _f(row: dict, key: str) -> str:
     val = (row.get(key) or "").strip()
-    if not val:
-        return "0.0"
-    # One upstream row (Re, Z=75, unused) has a missing comma that merges two
-    # cells into one whitespace-separated field; take the first numeric token.
-    return repr(float(val.split()[0]))
+    # Strict parse: a non-numeric cell means a malformed CSV row (e.g. a missing
+    # delimiter) — fail loudly rather than silently corrupt the table.
+    return repr(float(val)) if val else "0.0"
 
 
 def main() -> None:

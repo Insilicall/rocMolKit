@@ -61,7 +61,9 @@ int pm6ValenceElectrons(int z) {
 
 int pm6NumOrbitals(int z) {
   const Pm6ElementParams* p = pm6ParamsForZ(z);
-  if (p == nullptr) {
+  if (p == nullptr || pm6ValenceElectrons(z) == 0) {
+    // Not parameterized, or a transition-metal/f-block atom outside the current
+    // main-group phases. Stay consistent with pm6ValenceElectrons().
     return 0;
   }
   if (z <= 2) {                 // H, He: s only

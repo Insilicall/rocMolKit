@@ -39,9 +39,9 @@ diagonalizer the SCF needs is in the tree.
 Same discipline as the rest of rocMolKit: we do not trust our own numbers — we
 anchor to an external reference. Here the anchor is **PYSEQM/MOPAC**.
 
-- `tools/semiempirical/data/golden_pm6_charges.py` — 16 molecules with PM6_D
+- `tools/semiempirical/data/golden_pm6_charges.py` — 15 molecules with PM6_D
   Mulliken charges frozen from PYSEQM (sp-only + YH match to machine precision;
-  YX to ~0.01 e). This is the bit-exactness target.
+  YX/YY to ~0.01 e). This is the bit-exactness target.
 - PM6 parameters are public (Stewart PM6 / MOPAC), vendored as
   `tools/semiempirical/data/pm6_params_mopac.csv`.
 
@@ -50,15 +50,21 @@ heat of formation) to the stated tolerance — never timing alone.
 
 ## Two-step methodology
 
-1. **CPU reference first** (`tools/semiempirical/pm6_reference.py`, NumPy):
-   correct, readable, validated bit-exact against the golden anchor. This is the
-   oracle we develop the GPU code against — fast to iterate, no Docker build.
-2. **HIP port** (`rocmolkit/src/semiempirical/`): 100%-GPU production path,
-   validated to reproduce the CPU reference, then measured for throughput vs the
-   Metal-hybrid reference.
+1. **CPU oracle first.** Rather than write our own NumPy SCF, we reuse the
+   already-validated reference (guillaume-osmo/mlxmolkit native PM6_D, MIT →
+   PYSEQM NumPy port, BSD-3). It runs end-to-end in pure NumPy on Linux/x86 and
+   reproduces every golden charge (worst |Δq| = 0.00045 e). `oracle_dump.py`
+   freezes its outputs — charges, heat of formation, eigenvalues, and the
+   H_core/density of the simplest molecules — into `golden_intermediates.json`,
+   so the C++/HIP code validates against frozen numbers with no external
+   dependency at build time.
+2. **C++ then HIP port** (`rocmolkit/src/semiempirical/`): build each SCF stage
+   as C++ host code validated against the frozen intermediates, then move the hot
+   loops to HIP kernels for the 100%-GPU production path, then measure throughput
+   vs the Metal-hybrid reference.
 
-Never port to HIP before the CPU reference matches the anchor — that is how the
-conformer numbers went wrong before.
+Each stage must reproduce the frozen golden before the next begins — that is the
+discipline that was missing when the conformer numbers went wrong before.
 
 ## Layout
 
@@ -66,8 +72,12 @@ conformer numbers went wrong before.
 docs/SEMIEMPIRICAL_DESIGN.md          # this file
 tools/semiempirical/
   data/pm6_params_mopac.csv           # vendored PM6 params (public, MOPAC)
-  data/golden_pm6_charges.py          # PYSEQM-frozen validation anchor
-  pm6_reference.py                    # NumPy reference SCF (oracle)
-  test_pm6_reference.py               # reference vs golden
-rocmolkit/src/semiempirical/          # HIP SCF engine (100% GPU) — to come
+  data/golden_pm6_charges.py          # PYSEQM-frozen charge anchor (15 mols)
+  data/golden_intermediates.json      # frozen oracle intermediates (generated)
+  oracle_dump.py                      # runs the MIT oracle, freezes targets
+  gen_pm6_params_header.py            # CSV -> C++ pm6_params_data.h
+rocmolkit/src/semiempirical/
+  pm6_params.{h,cpp}                  # stage 1: parameter loader (done)
+  pm6_params_data.h                   # generated PM6 table (107 elements)
+  # overlap, H_core, two-electron, SCF, Mulliken, HIP kernels  — to come
 ```
