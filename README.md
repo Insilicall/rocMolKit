@@ -7,8 +7,13 @@
 
 HIP/ROCm port of [nvMolKit](https://github.com/NVIDIA-Digital-Bio/nvMolKit) (NVIDIA CUDA, Apache 2.0) — same API surface, AMD backend. On a **consumer** Radeon RX 9060 XT it runs ETKDG conformer generation and MMFF94 optimization **faster than the published Apple-Silicon sibling port ([mlxmolkit](https://github.com/guillaume-osmo/mlxmolkit))** and an order of magnitude faster than multi-threaded RDKit on CPU.
 
-> **Status: alpha** — ETKDG + MMFF94 functional and validated on AMD RDNA4 (gfx1200).
-> Pending: fingerprints, clustering, substructure, TFD. See [PLAN.md](PLAN.md), [ISSUES.md](ISSUES.md), [CHANGELOG.md](CHANGELOG.md).
+> **Status: alpha.** Functional: **ETKDG** generation and **MMFF94** optimization
+> (both validated on AMD RDNA4 / gfx1200 — see Performance), plus **UFF**,
+> **batched forcefield** and **conformer RMSD**.
+> Pending — scaffolded (CUDA code + tests present) but their HIP kernels are not
+> yet ported, so they are disabled in the build: **fingerprints, similarity,
+> Butina clustering, substructure, TFD**. Porting plan in [PLAN.md](PLAN.md);
+> see also [ISSUES.md](ISSUES.md), [CHANGELOG.md](CHANGELOG.md).
 
 ## Performance
 
