@@ -54,11 +54,11 @@ rocMolKit runs all of it on the GPU.
   one-thread-per-molecule layout and the H-heavy (HX) device recursion (currently
   needing a 64 KB stack) are the obvious targets; de-recursing the HX case and a
   one-block-per-molecule layout with shared memory should help.
-- **Phase 2 — sp-heavy.** P/S/Cl (qn=3, `PM6_SP`) **done**: charges bit-exact
-  (CPU + GPU) for H2S/PH3/HCl/CSC/CH3SH/CH3Cl/CCl4. Remaining: Br/I (qn 4/5) need
-  the higher-qn sp overlap formulas; and **PWCCT core-core repulsion** so HoF
-  matches MOPAC PM6/PM6_SP for the heavy elements (the engine currently uses the
-  AM1-style core-core of PM6_D — exact for H/C/N/O/F, approximate for P/S/Cl).
+- **Phase 2 — sp-heavy.** P/S/Cl (qn=3, `PM6_SP`) **done**: charges **and** heat
+  of formation bit-exact (CPU + GPU) for H2S/PH3/HCl/CSC/CH3SH/CH3Cl/CCl4. The
+  core-core repulsion is now PM6's pairwise PWCCT (real PM6), so HoF matches
+  PM6_SP across all sp elements. Remaining: Br/I (qn 4/5) need the higher-qn sp
+  overlap formulas.
 - **Phase 3 — d-orbitals.** `PM6_D` (22-integral local frame + Wigner-D
   rotation) for P/S/Cl/Br/I, then the PM6-D3H4 post-SCF corrections. Other
   methods (AM1/PM3/RM1) reuse the skeleton.
