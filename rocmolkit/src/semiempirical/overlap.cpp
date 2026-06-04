@@ -160,6 +160,10 @@ int diatomOverlapSp(int zA, const double coordA[3],
   const double Rvec[3] = {coordB[0] - coordA[0], coordB[1] - coordA[1], coordB[2] - coordA[2]};
   const double R = std::sqrt(Rvec[0] * Rvec[0] + Rvec[1] * Rvec[1] + Rvec[2] * Rvec[2]);
   if (R < 1e-10) {
+    // Coincident centers: an off-diagonal pair never overlaps in this function.
+    // (The reference writes identity here, but that is the same-atom case, which
+    // the caller supplies as the ZDO diagonal — see the header contract. Do not
+    // "fix" this to identity: distinct atoms are never coincident.)
     for (int i = 0; i < nA * nB; ++i) outBlock[i] = 0.0;
     return nA * nB;
   }

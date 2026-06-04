@@ -32,9 +32,12 @@ int principalQn(int z);
 // order is [s, px, py, pz]. coordA/coordB are in Angstrom.
 //
 // Currently covers valence shells with principal qn in {1, 2} (H, C, N, O, F).
-// Heavier atoms (qn >= 3: P, S, Cl, Br, I) return all zeros and are a later
-// phase (see docs/SEMIEMPIRICAL_DESIGN.md). Returns the number of elements
-// written (nA*nB), or 0 if a shell is unsupported.
+// Heavier atoms (qn >= 3: P, S, Cl, Br, I) write all-zero blocks and are a later
+// phase (see docs/SEMIEMPIRICAL_DESIGN.md).
+//
+// Returns nA*nB on success (the number of elements written, even when that block
+// is all zeros for a not-yet-supported qn>=3 shell). Returns 0 only when an
+// element is absent from the PM6 parameter table.
 int diatomOverlapSp(int zA, const double coordA[3],
                     int zB, const double coordB[3],
                     double* outBlock);
