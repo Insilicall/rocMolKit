@@ -62,7 +62,15 @@ def _load_oracle(mlx_path: str):
     scf = importlib.import_module("rm1.scf")
     methods = importlib.import_module("rm1.methods")
     overlap_d = importlib.import_module("rm1.overlap_d")
-    return scf, methods.get_params, overlap_d.overlap_d_molecular_frame
+    tci = importlib.import_module("rm1.two_center_integrals")
+    return {
+        "nddo_energy": scf.nddo_energy,
+        "get_params": methods.get_params,
+        "overlap_fn": overlap_d.overlap_d_molecular_frame,
+        "build_basis_info": scf._build_basis_info,
+        "build_core_hamiltonian": scf._build_core_hamiltonian,
+        "two_center_integrals": tci.two_center_integrals,
+    }
 
 
 def _overlap_matrix(z_list, coords, params, overlap_fn):
@@ -103,11 +111,40 @@ def _mulliken(density: np.ndarray, z_list: list[int]) -> list[float]:
     return q
 
 
+# Representative atom pairs / distances (Angstrom) for the local-frame
+# two-electron integral targets: HH, XH (heavy-H), and XX (heavy-heavy) across
+# the sp elements, at chemically reasonable separations.
+_TWO_CENTER_PAIRS = [
+    (1, 1, 0.74), (8, 1, 0.96), (6, 1, 1.09), (7, 1, 1.01), (9, 1, 0.92),
+    (6, 6, 1.54), (6, 8, 1.43), (7, 7, 1.45), (6, 7, 1.47), (8, 8, 1.48),
+    (6, 9, 1.38),
+]
+
+
+def _two_center_targets(oracle) -> list:
+    """Freeze local-frame two-electron integral arrays (ri) + core attraction
+    for representative pairs — the bit-exact targets for the C++ Stage 4."""
+    tci = oracle["two_center_integrals"]
+    params = oracle["get_params"]("PM6_D")
+    targets = []
+    for za, zb, r_ang in _TWO_CENTER_PAIRS:
+        ri, core, ptype = tci(params[za], params[zb], r_ang)
+        targets.append({
+            "zA": za, "zB": zb, "R_ang": r_ang, "pair_type": ptype,
+            "ri": [round(float(v), 8) for v in np.asarray(ri).ravel()],
+            "core": [round(float(v), 8) for v in np.asarray(core).ravel()],
+        })
+    return targets
+
+
 def main() -> None:
     mlx_path = os.environ.get("MLXMOLKIT")
     if not mlx_path or not Path(mlx_path).is_dir():
         sys.exit("set MLXMOLKIT to the cloned mlxmolkit package dir (see module docstring)")
-    scf, get_params, overlap_fn = _load_oracle(mlx_path)
+    oracle = _load_oracle(mlx_path)
+    scf_nddo = oracle["nddo_energy"]
+    get_params = oracle["get_params"]
+    overlap_fn = oracle["overlap_fn"]
     params = get_params("PM6_D")
 
     out: dict[str, object] = {
@@ -116,9 +153,11 @@ def main() -> None:
         "method": "PM6_D",
         "molecules": {},
     }
+    out["two_center_ri"] = _two_center_targets(oracle)
+
     worst = 0.0
     for name, z, coords, q_heavy, tol, tier in _load_golden():
-        r = scf.nddo_energy(z, np.array(coords, float), method="PM6_D", native=True)
+        r = scf_nddo(z, np.array(coords, float), method="PM6_D", native=True)
         density = np.asarray(r["density"])
         q = _mulliken(density, z)
         heavy = [q[i] for i, zz in enumerate(z) if zz != 1]
@@ -139,6 +178,9 @@ def main() -> None:
             entry["density"] = [[round(float(v), 8) for v in row] for row in density]
             S = _overlap_matrix(z, coords, params, overlap_fn)
             entry["overlap"] = [[round(float(v), 8) for v in row] for row in S]
+            info = oracle["build_basis_info"](z, params)
+            H = np.asarray(oracle["build_core_hamiltonian"](z, np.array(coords, float), info))
+            entry["h_core"] = [[round(float(v), 8) for v in row] for row in H]
         out["molecules"][name] = entry
         print(f"{name:7} {tier:4} max|dq|={dq:.5f}")
 
