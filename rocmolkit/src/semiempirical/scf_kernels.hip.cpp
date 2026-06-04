@@ -23,8 +23,8 @@
 
 #include <vector>
 
-#include "core_hamiltonian.h"
-#include "overlap.h"  // principalQn
+#include "core_hamiltonian.h"          // gatherAtomIntParams
+#include "core_hamiltonian_device.h"   // buildCoreHamiltonianDev
 #include "pm6_params.h"
 #include "scf_device.h"
 #include "scf_kernels.h"
@@ -35,23 +35,18 @@ namespace semiempirical {
 
 namespace {
 
-int spCountHost(int z) {
-  const int n = pm6NumOrbitals(z);
-  return (n >= 4) ? 4 : n;
-}
-
 __global__ void scfBatchKernel(int nMol, const AtomIntParams* ap, const int* start,
-                               const int* norb, const double* coords, const double* H,
-                               const int* atomOff, const int* nAtomsArr, const int* nBasisArr,
-                               const int* basisOff, const int* nOccArr, const long* scratchOff,
-                               double* scratch, double* chargesOut, int* convOut,
-                               int maxIter, double convTol) {
+                               const int* norb, const double* coords, const int* atomOff,
+                               const int* nAtomsArr, const int* nBasisArr, const int* nOccArr,
+                               const long* scratchOff, double* scratch, double* chargesOut,
+                               int* convOut, int maxIter, double convTol) {
   const int m = blockIdx.x * blockDim.x + threadIdx.x;
   if (m >= nMol) return;
-  const int nB = nBasisArr[m], na = nAtomsArr[m], ao = atomOff[m], bo = basisOff[m];
+  const int nB = nBasisArr[m], na = nAtomsArr[m], ao = atomOff[m];
   const int n2 = nB * nB;
   double* base = &scratch[scratchOff[m]];
-  double* density = base;
+  double* H = base;
+  double* density = H + n2;
   double* eval = density + n2;
   double* F = eval + nB;
   double* eigA = F + n2;
@@ -61,8 +56,11 @@ __global__ void scfBatchKernel(int nMol, const AtomIntParams* ap, const int* sta
   double* diisF = ecom + n2;
   double* diisE = diisF + kScfDiisMax * n2;
 
+  // Build the core Hamiltonian on the device (closing the 100%-GPU SCF).
+  buildCoreHamiltonianDev(nB, na, &ap[ao], &start[ao], &norb[ao], &coords[3 * ao], H);
+
   int conv = 0, niter = 0;
-  scfLoopDev(nB, na, &ap[ao], &start[ao], &norb[ao], &coords[3 * ao], &H[bo], nOccArr[m],
+  scfLoopDev(nB, na, &ap[ao], &start[ao], &norb[ao], &coords[3 * ao], H, nOccArr[m],
              maxIter, convTol, density, eval, F, eigA, C, Pnew, ecom, diisF, diisE,
              &conv, &niter);
   convOut[m] = conv;
@@ -84,38 +82,28 @@ bool scfBatchGpu(int nMol, const int* molNAtoms, const int* molNBasis,
                  double* chargesAll, int* convergedAll, int maxIter, double convTol) {
   if (nMol <= 0) return true;
 
-  std::vector<int> atomOff(nMol), basisOff(nMol), nOcc(nMol);
+  std::vector<int> atomOff(nMol), nOcc(nMol);
   std::vector<long> scratchOff(nMol);
   int totAtoms = 0;
-  long totBasis2 = 0, totScratch = 0;
+  long totScratch = 0;
   for (int m = 0; m < nMol; ++m) {
     atomOff[m] = totAtoms;
-    basisOff[m] = static_cast<int>(totBasis2);
     scratchOff[m] = totScratch;
     const long nB = molNBasis[m];
     totAtoms += molNAtoms[m];
-    totBasis2 += nB * nB;
-    // density,F,eigA,C,Pnew,ecom (6 n^2) + diisF,diisE (2*kScfDiisMax n^2) + eval (n)
-    totScratch += (6 + 2 * kScfDiisMax) * nB * nB + nB;
+    // H,density,F,eigA,C,Pnew,ecom (7 n^2) + diisF,diisE (2*kScfDiisMax n^2) + eval (n)
+    totScratch += (7 + 2 * kScfDiisMax) * nB * nB + nB;
   }
 
-  // Gather params and build H_core host-side (validated), molecule-local start/norb.
+  // Gather params + molecule-local start/norb (H_core is built on the device).
   std::vector<AtomIntParams> ap(totAtoms);
   std::vector<int> start(totAtoms), norb(totAtoms);
-  std::vector<double> Hall(totBasis2);
   for (int m = 0; m < nMol; ++m) {
-    const int na = molNAtoms[m], ao = atomOff[m], nB = molNBasis[m];
+    const int na = molNAtoms[m], ao = atomOff[m];
     int off = 0, nElec = 0;
     for (int a = 0; a < na; ++a) {
-      const int z = atomsAll[ao + a];
-      const Pm6ElementParams* p = pm6ParamsForZ(z);
-      if (p == nullptr) return false;
       AtomIntParams& o = ap[ao + a];
-      o.zetaS = p->zeta_s; o.zetaP = p->zeta_p;
-      o.gss = p->gss; o.gsp = p->gsp; o.gpp = p->gpp; o.gp2 = p->gp2; o.hsp = p->hsp;
-      o.qn = principalQn(z);
-      o.valence = pm6ValenceElectrons(z);
-      o.nOrb = spCountHost(z);
+      if (!gatherAtomIntParams(atomsAll[ao + a], o)) return false;
       start[ao + a] = off;
       norb[ao + a] = o.nOrb;
       off += o.nOrb;
@@ -123,15 +111,13 @@ bool scfBatchGpu(int nMol, const int* molNAtoms, const int* molNBasis,
     }
     if (nElec % 2 != 0) return false;  // open shell not handled
     nOcc[m] = nElec / 2;
-    if (buildCoreHamiltonianSp(na, &atomsAll[ao], &coordsAll[3 * ao], &Hall[basisOff[m]]) == 0)
-      return false;
   }
 
   AtomIntParams* dAp = nullptr;
   int *dStart = nullptr, *dNorb = nullptr, *dAtomOff = nullptr, *dNAtoms = nullptr,
-      *dNBasis = nullptr, *dBasisOff = nullptr, *dNOcc = nullptr, *dConv = nullptr;
+      *dNBasis = nullptr, *dNOcc = nullptr, *dConv = nullptr;
   long* dScratchOff = nullptr;
-  double *dCoords = nullptr, *dH = nullptr, *dScratch = nullptr, *dCharges = nullptr;
+  double *dCoords = nullptr, *dScratch = nullptr, *dCharges = nullptr;
   bool ok = true;
   auto need = [&](hipError_t e) { if (e != hipSuccess) ok = false; };
 
@@ -141,12 +127,10 @@ bool scfBatchGpu(int nMol, const int* molNAtoms, const int* molNBasis,
   need(hipMalloc(&dAtomOff, sizeof(int) * nMol));
   need(hipMalloc(&dNAtoms, sizeof(int) * nMol));
   need(hipMalloc(&dNBasis, sizeof(int) * nMol));
-  need(hipMalloc(&dBasisOff, sizeof(int) * nMol));
   need(hipMalloc(&dNOcc, sizeof(int) * nMol));
   need(hipMalloc(&dConv, sizeof(int) * nMol));
   need(hipMalloc(&dScratchOff, sizeof(long) * nMol));
   need(hipMalloc(&dCoords, sizeof(double) * 3 * totAtoms));
-  need(hipMalloc(&dH, sizeof(double) * totBasis2));
   need(hipMalloc(&dScratch, sizeof(double) * totScratch));
   need(hipMalloc(&dCharges, sizeof(double) * totAtoms));
 
@@ -157,16 +141,19 @@ bool scfBatchGpu(int nMol, const int* molNAtoms, const int* molNBasis,
     hipMemcpy(dAtomOff, atomOff.data(), sizeof(int) * nMol, hipMemcpyHostToDevice);
     hipMemcpy(dNAtoms, molNAtoms, sizeof(int) * nMol, hipMemcpyHostToDevice);
     hipMemcpy(dNBasis, molNBasis, sizeof(int) * nMol, hipMemcpyHostToDevice);
-    hipMemcpy(dBasisOff, basisOff.data(), sizeof(int) * nMol, hipMemcpyHostToDevice);
     hipMemcpy(dNOcc, nOcc.data(), sizeof(int) * nMol, hipMemcpyHostToDevice);
     hipMemcpy(dScratchOff, scratchOff.data(), sizeof(long) * nMol, hipMemcpyHostToDevice);
     hipMemcpy(dCoords, coordsAll, sizeof(double) * 3 * totAtoms, hipMemcpyHostToDevice);
-    hipMemcpy(dH, Hall.data(), sizeof(double) * totBasis2, hipMemcpyHostToDevice);
+
+    // buildCoreHamiltonianDev's electron-core loop hits the H-heavy (HX) case in
+    // twoCenterMolecularDev, which recurses one level; each frame holds a 256-
+    // double w tensor, so bump the per-thread stack above the ~1 KB default.
+    hipDeviceSetLimit(hipLimitStackSize, 64 * 1024);
 
     const int block = 64;
     const int grid = (nMol + block - 1) / block;
-    scfBatchKernel<<<grid, block>>>(nMol, dAp, dStart, dNorb, dCoords, dH, dAtomOff, dNAtoms,
-                                    dNBasis, dBasisOff, dNOcc, dScratchOff, dScratch, dCharges,
+    scfBatchKernel<<<grid, block>>>(nMol, dAp, dStart, dNorb, dCoords, dAtomOff, dNAtoms,
+                                    dNBasis, dNOcc, dScratchOff, dScratch, dCharges,
                                     dConv, maxIter, convTol);
     if (hipDeviceSynchronize() != hipSuccess) ok = false;
   }
@@ -176,8 +163,8 @@ bool scfBatchGpu(int nMol, const int* molNAtoms, const int* molNBasis,
   }
 
   hipFree(dAp); hipFree(dStart); hipFree(dNorb); hipFree(dAtomOff); hipFree(dNAtoms);
-  hipFree(dNBasis); hipFree(dBasisOff); hipFree(dNOcc); hipFree(dConv); hipFree(dScratchOff);
-  hipFree(dCoords); hipFree(dH); hipFree(dScratch); hipFree(dCharges);
+  hipFree(dNBasis); hipFree(dNOcc); hipFree(dConv); hipFree(dScratchOff);
+  hipFree(dCoords); hipFree(dScratch); hipFree(dCharges);
   return ok;
 }
 

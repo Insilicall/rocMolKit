@@ -16,8 +16,15 @@
 #ifndef NVMOLKIT_SEMIEMPIRICAL_CORE_HAMILTONIAN_H
 #define NVMOLKIT_SEMIEMPIRICAL_CORE_HAMILTONIAN_H
 
+#include "device_macros.h"  // AtomIntParams
+
 namespace nvMolKit {
 namespace semiempirical {
+
+// Fill an AtomIntParams from the PM6 table for atomic number z (all fields the
+// SCF stages need). Returns false if z is unparameterized. Single source of the
+// host-side gather, shared by the CPU wrappers and the GPU batch entries.
+bool gatherAtomIntParams(int z, AtomIntParams& out);
 
 // Number of sp basis functions for a molecule (1 per H/He, 4 per other sp
 // atom). Returns 0 if any atom is unparameterized or carries d-orbitals (qn>=3,

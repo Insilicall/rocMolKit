@@ -34,6 +34,8 @@ namespace semiempirical {
 struct AtomIntParams {
   double zetaS, zetaP;             // valence Slater exponents
   double gss, gsp, gpp, gp2, hsp;  // one-center two-electron integrals
+  double uss, upp;                 // one-center one-electron core integrals
+  double betaS, betaP;             // resonance (two-center one-electron) params
   int qn;        // principal quantum number of the valence shell
   int valence;   // core charge (valence electrons)
   int nOrb;      // sp orbital count: 1 (H/He) or 4

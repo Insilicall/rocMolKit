@@ -117,20 +117,7 @@ void buildDensity(const std::vector<double>& C, int n, int nOcc, std::vector<dou
 // Gather the per-atom integral parameters for a molecule from the PM6 table.
 void gatherMoleculeParams(int nAtoms, const int* atoms, std::vector<AtomIntParams>& ap) {
   ap.resize(nAtoms);
-  for (int a = 0; a < nAtoms; ++a) {
-    const Pm6ElementParams* p = pm6ParamsForZ(atoms[a]);
-    AtomIntParams& o = ap[a];
-    o.zetaS = p->zeta_s;
-    o.zetaP = p->zeta_p;
-    o.gss = p->gss;
-    o.gsp = p->gsp;
-    o.gpp = p->gpp;
-    o.gp2 = p->gp2;
-    o.hsp = p->hsp;
-    o.qn = principalQn(atoms[a]);
-    o.valence = pm6ValenceElectrons(atoms[a]);
-    o.nOrb = spCount(atoms[a]);
-  }
+  for (int a = 0; a < nAtoms; ++a) gatherAtomIntParams(atoms[a], ap[a]);
 }
 
 // F = H + G(P): thin host wrapper over the shared device buildFockDev.
