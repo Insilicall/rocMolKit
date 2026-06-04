@@ -11,7 +11,7 @@ if(NOT ROCMOLKIT_BUILD_PYTHON_BINDINGS OR NOT TARGET rocmolkit_core)
 endif()
 
 find_package(Python COMPONENTS Interpreter Development REQUIRED)
-find_package(Boost REQUIRED COMPONENTS python)
+find_package(Boost REQUIRED COMPONENTS python numpy)
 
 set(CMAKE_SHARED_MODULE_PREFIX "")
 
@@ -24,6 +24,7 @@ set(ROCMOLKIT_PHASE2_BINDINGS
     conformerRmsd
     arrayHelpers
     Fingerprints   # F1: Morgan fingerprints (module _Fingerprints, source fingerprints.cpp)
+    substructure   # F5: substructure search (module _substructure, source substructure.cpp)
 )
 
 # Each name corresponds to a `_<NameCamelCase>.so` plus `<source>.cpp`.
@@ -56,6 +57,7 @@ foreach(_binding IN LISTS ROCMOLKIT_PHASE2_BINDINGS)
         PRIVATE
             rocmolkit_core
             Boost::python
+            Boost::numpy
             Python::Module
     )
     target_compile_options(${_module} PRIVATE

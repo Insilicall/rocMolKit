@@ -230,7 +230,7 @@ gfx1200**, then its `_<Module>.so` binding is added back to
 | F2 | **Similarity (Tanimoto/Cosine)** | PTX inline asm (BMMA tensor-core matmul + async copy) in `macros_ptx.hip.h` | `test_similarity` | F1 |
 | F3 | **Butina clustering** | CUDA Graphs Conditional nodes (no hipGraph conditional) | `test_butina` | F1, F2 |
 | F4 | **TFD** | depends on butina (kernels in `src/tfd/` are already written) | `test_tfd{,_cpu,_gpu,_kernels}` | F3 |
-| F5 | **Substructure** | `cudaSharedmemCarveoutMaxShared` → `hipFuncAttributePreferredSharedMemoryCarveout` (value 100) | `test_substruct_{algos,integration,label_integration,search}` | — (independent) |
+| F5 | ✅ **Substructure — done** (840/840 pairs match RDKit HasSubstructMatch via tools/ss_validate.py) | `cudaSharedmemCarveoutMaxShared` → `hipFuncAttributePreferredSharedMemoryCarveout` (value 100) | `test_substruct_{algos,integration,label_integration,search}` | — (independent) |
 
 Notes / per-phase work:
 

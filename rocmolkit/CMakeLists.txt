@@ -57,7 +57,7 @@ list(REMOVE_ITEM ROCMOLKIT_CPP_SOURCES ${ROCMOLKIT_HIP_SOURCES})
 #   similarity_kernels:         PTX inline asm (BMMA, async copy) em macros_ptx.hip.h
 #   symmetric_eigensolver:      cuda::std::abs em contexto onde shim não resolve (Phase 4 reescrita)
 list(FILTER ROCMOLKIT_HIP_SOURCES EXCLUDE REGEX "/(butina|tfd)\\.hip\\.cpp$")
-list(FILTER ROCMOLKIT_HIP_SOURCES EXCLUDE REGEX "/(tfd|substruct)/")
+list(FILTER ROCMOLKIT_HIP_SOURCES EXCLUDE REGEX "/tfd/")
 # bfgs_hessian re-included after providing rocmolkit/cg_reduce_shim.h.
 # # bfgs_hessian re-included.
 # list(FILTER ROCMOLKIT_HIP_SOURCES EXCLUDE REGEX "/bfgs_hessian\\.hip\\.cpp$")
@@ -70,7 +70,7 @@ list(FILTER ROCMOLKIT_CPP_SOURCES EXCLUDE REGEX "/bfgs_hessian_stub\\.cpp$")
 list(FILTER ROCMOLKIT_HIP_SOURCES EXCLUDE REGEX "/similarity_kernels\\.hip\\.cpp$")
 list(FILTER ROCMOLKIT_CPP_SOURCES EXCLUDE REGEX "/similarity\\.cpp$")
 # list(FILTER ROCMOLKIT_HIP_SOURCES EXCLUDE REGEX "/symmetric_eigensolver\\.hip\\.cpp$")
-list(FILTER ROCMOLKIT_CPP_SOURCES EXCLUDE REGEX "/(tfd|substruct|testutils)/")
+list(FILTER ROCMOLKIT_CPP_SOURCES EXCLUDE REGEX "/(tfd|testutils)/")
 list(FILTER ROCMOLKIT_CPP_SOURCES EXCLUDE REGEX "/(butina|tfd)\\.cpp$")
 list(FILTER ROCMOLKIT_HIP_SOURCES EXCLUDE REGEX "/testutils/")
 
@@ -106,6 +106,7 @@ if(ROCMOLKIT_HIP_SOURCES AND CMAKE_HIP_COMPILER AND hip_FOUND)
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/forcefields>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/minimizer>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/data_structures>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/substruct>  # F5
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/rdkit_extensions>
         $<INSTALL_INTERFACE:include>
     )
