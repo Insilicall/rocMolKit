@@ -58,8 +58,8 @@ axL.annotate("saturates ~3,400 mol/s", xy=(3000, 3467), xytext=(900, 1500),
 colors = [palette["accent_warm"] if s < 1 else palette["brand_secondary"] for s in sp]
 bars = axR.bar([str(n) for n in N], sp, color=colors, width=0.62, zorder=3)
 axR.axhline(1, color=palette["ink_muted"], lw=1.2, ls="--", zorder=2)
-axR.text(0.02, 1.0, "  break-even (1×)", transform=axR.get_yaxis_transform(),
-         va="bottom", ha="left", color=palette["ink_muted"], fontsize=9)
+axR.text(0.5, 2.0, "break-even (1×)", ha="center", va="bottom",
+         color=palette["ink_muted"], fontsize=9)
 axR.set_xlabel("Batch size (molecules)")
 axR.set_ylabel("Speedup vs single-core RDKit")
 axR.set_title("GPU advantage grows, then holds at scale", loc="left", fontweight="bold")
