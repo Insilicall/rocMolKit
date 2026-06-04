@@ -1,0 +1,3 @@
+# Vendored ROCm tooling — exclude from GitHub's language stats (it's a ~1 MB
+# Perl script, which otherwise shows up as ~20% Perl in a C++/HIP project).
+tools/bin/hipify-perl linguist-vendored
