@@ -25,8 +25,11 @@
 #include <vector>
 
 #include "core_hamiltonian.h"
+#include "fock_device.h"
+#include "overlap.h"  // principalQn
 #include "pm6_params.h"
 #include "two_center.h"
+#include "two_center_device.h"  // AtomIntParams
 
 namespace nvMolKit {
 namespace semiempirical {
@@ -36,10 +39,6 @@ namespace {
 int spCount(int z) {
   const int n = pm6NumOrbitals(z);
   return (n >= 4) ? 4 : n;
-}
-
-inline int wIdx(int mu, int nu, int lam, int sig) {
-  return ((mu * 4 + nu) * 4 + lam) * 4 + sig;
 }
 
 // Cyclic Jacobi eigensolver for a symmetric n x n matrix. Writes ascending
@@ -115,79 +114,33 @@ void buildDensity(const std::vector<double>& C, int n, int nOcc, std::vector<dou
     }
 }
 
-// F = H + G(P): one-center Slater-Condon + two-center Coulomb/exchange (w).
-void buildFock(const std::vector<double>& H, const std::vector<double>& P, int nBasis,
-               int nAtoms, const int* atoms, const double* coords,
-               const std::vector<int>& start, const std::vector<int>& norb,
-               std::vector<double>& F) {
-  F = H;
-
+// Gather the per-atom integral parameters for a molecule from the PM6 table.
+void gatherMoleculeParams(int nAtoms, const int* atoms, std::vector<AtomIntParams>& ap) {
+  ap.resize(nAtoms);
   for (int a = 0; a < nAtoms; ++a) {
     const Pm6ElementParams* p = pm6ParamsForZ(atoms[a]);
-    const int s = start[a];
-    const double Pss = P[s * nBasis + s];
-    if (norb[a] == 1) {
-      F[s * nBasis + s] += Pss * p->gss * 0.5;
-      continue;
-    }
-    const int pk0 = s + 1, pk1 = s + 2, pk2 = s + 3;
-    const double Ppp = P[pk0 * nBasis + pk0] + P[pk1 * nBasis + pk1] + P[pk2 * nBasis + pk2];
-    const double sp1 = p->gsp - 0.5 * p->hsp;
-    const double sp2 = 1.5 * p->hsp - 0.5 * p->gsp;
-    const double ppd = 1.25 * p->gp2 - 0.25 * p->gpp;
-    const double ppoff = 0.75 * p->gpp - 1.25 * p->gp2;
-
-    F[s * nBasis + s] += Pss * p->gss * 0.5 + Ppp * sp1;
-    for (int k = 1; k <= 3; ++k) {
-      const int pk = s + k;
-      F[pk * nBasis + pk] += Pss * sp1 + P[pk * nBasis + pk] * p->gpp * 0.5
-                             + (Ppp - P[pk * nBasis + pk]) * ppd;
-      F[s * nBasis + pk] += P[s * nBasis + pk] * sp2;
-      F[pk * nBasis + s] += P[pk * nBasis + s] * sp2;
-    }
-    for (int k = 1; k <= 3; ++k)
-      for (int l = k + 1; l <= 3; ++l) {
-        const int pk = s + k, pl = s + l;
-        F[pk * nBasis + pl] += P[pk * nBasis + pl] * ppoff;
-        F[pl * nBasis + pk] += P[pl * nBasis + pk] * ppoff;
-      }
+    AtomIntParams& o = ap[a];
+    o.zetaS = p->zeta_s;
+    o.zetaP = p->zeta_p;
+    o.gss = p->gss;
+    o.gsp = p->gsp;
+    o.gpp = p->gpp;
+    o.gp2 = p->gp2;
+    o.hsp = p->hsp;
+    o.qn = principalQn(atoms[a]);
+    o.valence = pm6ValenceElectrons(atoms[a]);
+    o.nOrb = spCount(atoms[a]);
   }
+}
 
-  for (int i = 0; i < nAtoms; ++i) {
-    for (int j = i + 1; j < nAtoms; ++j) {
-      double w[256], e1b[16], e2a[16];
-      twoCenterMolecular(atoms[i], &coords[3 * i], atoms[j], &coords[3 * j], w, e1b, e2a);
-      const int nA = norb[i], nB = norb[j], sA = start[i], sB = start[j];
-      // J on A and J on B.
-      for (int mu = 0; mu < nA; ++mu)
-        for (int nu = 0; nu < nA; ++nu) {
-          double acc = 0.0;
-          for (int lam = 0; lam < nB; ++lam)
-            for (int sig = 0; sig < nB; ++sig)
-              acc += P[(sB + lam) * nBasis + (sB + sig)] * w[wIdx(mu, nu, lam, sig)];
-          F[(sA + mu) * nBasis + (sA + nu)] += acc;
-        }
-      for (int lam = 0; lam < nB; ++lam)
-        for (int sig = 0; sig < nB; ++sig) {
-          double acc = 0.0;
-          for (int mu = 0; mu < nA; ++mu)
-            for (int nu = 0; nu < nA; ++nu)
-              acc += P[(sA + mu) * nBasis + (sA + nu)] * w[wIdx(mu, nu, lam, sig)];
-          F[(sB + lam) * nBasis + (sB + sig)] += acc;
-        }
-      // Exchange: K[mu,lam] = -0.5 sum_{nu,sig} w[mu,nu,lam,sig] P[A nu, B sig].
-      for (int mu = 0; mu < nA; ++mu)
-        for (int lam = 0; lam < nB; ++lam) {
-          double acc = 0.0;
-          for (int nu = 0; nu < nA; ++nu)
-            for (int sig = 0; sig < nB; ++sig)
-              acc += w[wIdx(mu, nu, lam, sig)] * P[(sA + nu) * nBasis + (sB + sig)];
-          acc *= -0.5;
-          F[(sA + mu) * nBasis + (sB + lam)] += acc;
-          F[(sB + lam) * nBasis + (sA + mu)] += acc;
-        }
-    }
-  }
+// F = H + G(P): thin host wrapper over the shared device buildFockDev.
+void buildFock(const std::vector<double>& H, const std::vector<double>& P, int nBasis,
+               int nAtoms, const std::vector<AtomIntParams>& ap,
+               const std::vector<int>& start, const std::vector<int>& norb, const double* coords,
+               std::vector<double>& F) {
+  F.assign(static_cast<size_t>(nBasis) * nBasis, 0.0);
+  buildFockDev(nBasis, nAtoms, ap.data(), start.data(), norb.data(), coords,
+               H.data(), P.data(), F.data());
 }
 
 // Solve the (nd+1) DIIS system B c = rhs (Gaussian elimination, partial pivot).
@@ -233,6 +186,8 @@ int scfSp(int nAtoms, const int* atoms, const double* coords,
     norb[a] = spCount(atoms[a]);
     off += norb[a];
   }
+  std::vector<AtomIntParams> ap;
+  gatherMoleculeParams(nAtoms, atoms, ap);
 
   const size_t n2 = static_cast<size_t>(nBasis) * nBasis;
   std::vector<double> H(n2);
@@ -251,7 +206,7 @@ int scfSp(int nAtoms, const int* atoms, const double* coords,
   double delta = 1.0;
 
   for (iteration = 0; iteration < maxIter; ++iteration) {
-    buildFock(H, P, nBasis, nAtoms, atoms, coords, start, norb, F);
+    buildFock(H, P, nBasis, nAtoms, ap, start, norb, coords, F);
 
     if (iteration >= 2) {
       std::vector<double> e(n2, 0.0);  // e = F*P - P*F
@@ -330,7 +285,7 @@ int scfSp(int nAtoms, const int* atoms, const double* coords,
   if (!diagOk) converged = false;
 
   // Final Fock + electronic energy with the converged density.
-  buildFock(H, P, nBasis, nAtoms, atoms, coords, start, norb, F);
+  buildFock(H, P, nBasis, nAtoms, ap, start, norb, coords, F);
   double eElec = 0.0;
   for (size_t t = 0; t < n2; ++t) eElec += 0.5 * P[t] * (H[t] + F[t]);
 
