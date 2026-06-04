@@ -230,27 +230,30 @@ jobs:
           fi
 
   rocm-runner:
-    # Job real com GPU AMD — exige runner self-hosted.
-    if: false  # ativar quando o runner estiver online
+    # Real GPU job — needs a self-hosted runner labelled [self-hosted, rocm].
+    # Enable it by setting the repo variable ROCM_RUNNER_ONLINE=true once the
+    # runner is registered (Settings → Secrets and variables → Actions →
+    # Variables). Until then the job is skipped, so PRs don't queue forever
+    # waiting for a runner that doesn't exist.
+    if: ${{ vars.ROCM_RUNNER_ONLINE == 'true' }}
     runs-on: [self-hosted, rocm]
     steps:
       - uses: actions/checkout@v4
-      - name: Build + test
+
+      - name: Build devel image (installs all bindings into the image)
+        run: docker build -f docker/Dockerfile.devel -t rocmolkit:devel .
+
+      - name: GPU feature validation (pytest --rocm vs RDKit)
+        # The devel image already has rocmolkit + every binding installed in
+        # site-packages, so import resolves there; we mount the checkout only
+        # for the test files and data. --rocm un-skips the `gpu`-marked tests.
+        # /tmp must stay writable — comgr JIT-compiles blit kernels there.
         run: |
-          docker build -f docker/Dockerfile.devel -t rocmolkit:devel .
           docker run --rm \
             --device=/dev/kfd --device=/dev/dri \
-            --group-add video \
-            -v ${{ github.workspace }}:/workspace \
+            --group-add video --group-add render \
+            --security-opt seccomp=unconfined \
+            -e HIP_VISIBLE_DEVICES=0 \
+            -v ${{ github.workspace }}:/workspace -w /workspace \
             rocmolkit:devel \
-            bash -c "cmake -S /workspace -B /workspace/build -GNinja -DROCMOLKIT_BUILD_TESTS=ON && \
-                     cmake --build /workspace/build && \
-                     ctest --test-dir /workspace/build --output-on-failure"
-
-      - name: Numerical parity gate
-        run: |
-          docker run --rm \
-            --device=/dev/kfd --device=/dev/dri --group-add video \
-            -v ${{ github.workspace }}:/workspace \
-            rocmolkit:devel \
-            python3 /workspace/tools/numerical_diff.py etkdg /workspace/tests/data/spice_100.smi
+            python3 -m pytest tests/ --rocm -v
