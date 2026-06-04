@@ -116,7 +116,7 @@ ARG UBUNTU_CODENAME
 ARG GPU_TARGETS
 
 ENV DEBIAN_FRONTEND=noninteractive \
-    LD_LIBRARY_PATH=/usr/local/lib:/opt/rocm/lib:/opt/rocm/lib/llvm/lib \
+    LD_LIBRARY_PATH=/usr/local/lib:/opt/rdkit/lib:/opt/rocm/lib:/opt/rocm/lib/llvm/lib \
     PATH=/opt/rocm/bin:$PATH \
     PYTHONUNBUFFERED=1
 
@@ -179,9 +179,28 @@ RUN python${PYTHON_VERSION} -m pip install --no-cache-dir 'numpy<2' rdkit-pypi \
 
 COPY --from=builder /install /usr/local
 
+# RDKit C++ runtime libs (~30 MB of .so). The builder compiled RDKit without
+# Python wrappers, so the runtime still needs `rdkit-pypi` (installed above) for
+# `import rdkit`, but the rocmolkit bindings link the C++ libs by soname
+# (libRDKitDistGeomHelpers.so.1, …) which only exist under /opt/rdkit/lib —
+# that dir is on LD_LIBRARY_PATH. Copy just the libs, not headers/cmake.
+COPY --from=builder /opt/rdkit/lib /opt/rdkit/lib
+
+# Small ROCm runtime libs the bindings load but the selective apt set + the
+# rocsolver/Tensile purge above leave out: libomp (LLVM OpenMP, on
+# LD_LIBRARY_PATH under llvm/lib), roctx (NVTX ranges), rocprofiler-register
+# (comgr/hip). Copied from the builder — a few MB total. We deliberately do NOT
+# pull librocsolver (~870 MB) / librocroller (~84 MB): they are not hard-loaded
+# by the ETKDG/MMFF/fingerprint/similarity/clustering/TFD paths, and dragging
+# them in would defeat the slim image. If a future binding hard-needs them the
+# smoke test below will fail and flag it.
+COPY --from=builder /opt/rocm/lib/llvm/lib/libomp.so /opt/rocm/lib/llvm/lib/libomp.so
+COPY --from=builder /opt/rocm/lib/libroctx64.so* /opt/rocm/lib/
+COPY --from=builder /opt/rocm/lib/librocprofiler-register.so* /opt/rocm/lib/
+
 # Smoke test: the bindings must import end-to-end at build time. This
-# catches missing runtime libs (libboost_python, libomp, librocmolkit_core)
-# before the image is ever pushed. No GPU is touched so it runs in CI.
+# catches missing runtime libs (libboost_python, libomp, librocmolkit_core,
+# libRDKit*) before the image is ever pushed. No GPU is touched so it runs in CI.
 RUN python${PYTHON_VERSION} -c "from rocmolkit._embedMolecules import EmbedMolecules, BatchHardwareOptions; print('_embedMolecules import OK')" \
     && python${PYTHON_VERSION} -c "from rocmolkit._mmffOptimization import MMFFOptimizeMoleculesConfs; print('_mmffOptimization import OK')"
 

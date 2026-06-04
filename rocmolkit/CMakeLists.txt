@@ -129,9 +129,11 @@ if(ROCMOLKIT_HIP_SOURCES AND CMAKE_HIP_COMPILER AND hip_FOUND)
     )
 
     target_link_libraries(rocmolkit_core PUBLIC hip::host hip::device)
-    if(hipblas_FOUND)
-        target_link_libraries(rocmolkit_core PUBLIC roc::hipblas)
-    endif()
+    # NOTE: deliberately NOT linking roc::hipblas. No code calls any hipBLAS API
+    # (it was an inherited link from nvMolKit), but libhipblas.so.3 hard-depends
+    # on librocsolver.so.0 (~870 MB) and, via hipblaslt, librocroller.so.1
+    # (~84 MB). Linking it would drag ~950 MB of unused math libraries into the
+    # runtime and break the slim image's size budget. hiprand IS used (coord_gen).
     if(hiprand_FOUND)
         target_link_libraries(rocmolkit_core PUBLIC hip::hiprand)
     endif()
