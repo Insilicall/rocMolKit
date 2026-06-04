@@ -229,7 +229,7 @@ gfx1200**, then its `_<Module>.so` binding is added back to
 | F1 | ✅ **Fingerprints (Morgan)** — **done** (bit-exact vs RDKit MorganGenerator, 103/103 incl. 70–110-atom molecules). 128-atom tile rewritten to block-level cooperation (AMD wave64); `cuda::std::span` CTAD replaced with a `__host__ __device__` helper; non-trivial `__shared__` backed by a raw buffer. Caveat: the 64-atom warp-sort still mismaps on wave64, so 32–127-atom molecules route through the (correct) 128-atom kernel — `tools/fp_validate.py`. | `cooperative_groups` tile>wavefront + `cuda::std::span` deduction | `test_morgan_fingerprint` | — |
 | F2 | ✅ **Similarity (Tanimoto/Cosine)** — **done** (bit-exact vs RDKit BulkTanimotoSimilarity, 10000/10000 pairs `max\|Δ\|=0`; cosine self-sim diag==1 + symmetric — `tools/sim_validate.py`). NVIDIA BMMA tensor-core PTX (`mma.sync…b1…popc`) guarded out on AMD; `supportsTensorOps()` returns false so the `__popc` fallback runs (correct on wave64). | PTX inline asm (BMMA tensor-core matmul + async copy) in `macros_ptx.hip.h` | `test_similarity` | F1 |
 | F3 | ✅ **Butina clustering** — **done** (matches RDKit Butina exactly for cutoffs ≤0.5; at higher cutoffs the partitions differ only by legitimate parallel tie-breaks — every GPU cluster is ball-valid — `tools/butina_validate.py`). Three HIP fixes: conditional-WHILE graph → host-driven loop; `pruneNeighborlistKernel`'s wave64 bug (default `hipcub::WarpReduce` is 64-wide on AMD, merging two 32-tiles) → manual shared-memory compaction; `hipcub::DeviceRadixSort::SortPairs` returned a garbled permutation on gfx1200 → host argsort in `renumberClustersBySize`. | CUDA Graphs Conditional nodes (no hipGraph conditional) | `test_butina` | F1, F2 |
-| F4 | **TFD** | depends on butina (kernels in `src/tfd/` are already written) | `test_tfd{,_cpu,_gpu,_kernels}` | F3 |
+| F4 | ✅ **TFD** — **done** (matches RDKit `GetTFDMatrix` to float32 precision, 25/25 mols, worst max\|Δ\|=4e-4 — `tools/tfd_validate.py`). Pure re-enable: the block-per-molecule kernels in `src/tfd/` use no CUDA-specific features; only needed `src/tfd` on the core include path and a `tfd.cpp` binding special-case. | depends on butina (kernels in `src/tfd/` are already written) | `test_tfd{,_cpu,_gpu,_kernels}` | F3 |
 | F5 | ✅ **Substructure — done** (840/840 pairs match RDKit HasSubstructMatch via tools/ss_validate.py) | `cudaSharedmemCarveoutMaxShared` → `hipFuncAttributePreferredSharedMemoryCarveout` (value 100) | `test_substruct_{algos,integration,label_integration,search}` | — (independent) |
 
 Notes / per-phase work:
@@ -247,7 +247,10 @@ Notes / per-phase work:
   32-lane cooperative-groups tile with a default-width `hipcub::WarpReduce`
   (64-wide on AMD), and `DeviceRadixSort::SortPairs` returned garbage for the
   renumber step (now a host argsort).
-- **F4 TFD** — mostly a re-enable once F3 lands; the GPU/CPU kernels exist.
+- **F4 TFD** — ✅ done. A pure re-enable: the `src/tfd/` kernels are block-per-
+  molecule with plain thread loops (no warp primitives, PTX, or `cuda::std`), so
+  they compiled unchanged. Added `src/tfd` to the core include path and a
+  `tfd.cpp` source special-case for the `_TFD` binding.
 - **F5 Substructure** — the blocker is a one-attribute translation; the rest of
   `src/substruct/` (executor, preprocessor, kernels, search; largest binding at
   342 lines) then needs an end-to-end build + the four substruct tests. Can be

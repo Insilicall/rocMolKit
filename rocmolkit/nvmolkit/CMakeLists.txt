@@ -27,6 +27,7 @@ set(ROCMOLKIT_PHASE2_BINDINGS
     substructure   # F5: substructure search (module _substructure, source substructure.cpp)
     DataStructs    # F2: Tanimoto/Cosine similarity (module _DataStructs, source DataStructs.cpp)
     clustering     # F3: Butina clustering (module _clustering, source clustering.cpp)
+    TFD            # F4: torsion fingerprint deviation (module _TFD, source tfd.cpp)
 )
 
 # Each name corresponds to a `_<NameCamelCase>.so` plus `<source>.cpp`.
@@ -38,6 +39,8 @@ foreach(_binding IN LISTS ROCMOLKIT_PHASE2_BINDINGS)
         set(_src "${CMAKE_CURRENT_SOURCE_DIR}/array_helpers.cpp")
     elseif(_binding STREQUAL "Fingerprints")
         set(_src "${CMAKE_CURRENT_SOURCE_DIR}/fingerprints.cpp")
+    elseif(_binding STREQUAL "TFD")
+        set(_src "${CMAKE_CURRENT_SOURCE_DIR}/tfd.cpp")
     else()
         set(_src "${CMAKE_CURRENT_SOURCE_DIR}/${_binding}.cpp")
     endif()
