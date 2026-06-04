@@ -1108,6 +1108,23 @@ void getSubstructMatchesImpl(const std::vector<const RDKit::ROMol*>& targets,
   }
 }
 
+// Recursive-SMARTS queries (`[$(...)]`) allocate GBs of per-target paint scratch,
+// so they must be chunked tightly (and the pool trimmed between chunks) to stay
+// within VRAM. Simple queries have negligible scratch, so the safety chunking is
+// pure overhead for them — large chunks avoid the per-chunk sync + pool-trim churn
+// and make GPU search several× faster than the small-chunk path.
+bool anyQueryRecursive(const std::vector<const RDKit::ROMol*>& queries) {
+  for (const auto* q : queries) {
+    if (q != nullptr && !extractRecursivePatterns(q).empty()) {
+      return true;
+    }
+  }
+  return false;
+}
+
+constexpr int kMaxTargetsRecursive = 1024;    // tight: bounds the GB-scale recursive scratch
+constexpr int kMaxTargetsSimple    = 65536;   // loose: simple scratch is tiny
+
 }  // anonymous namespace
 
 void getSubstructMatches(const std::vector<const RDKit::ROMol*>& targets,
@@ -1120,7 +1137,7 @@ void getSubstructMatches(const std::vector<const RDKit::ROMol*>& targets,
   const int numQueries = static_cast<int>(queries.size());
 
   // Chunk targets to bound GPU memory — see countSubstructMatches for the why.
-  constexpr int kMaxTargetsPerSearch = 1024;
+  const int kMaxTargetsPerSearch = anyQueryRecursive(queries) ? kMaxTargetsRecursive : kMaxTargetsSimple;
   if (numTargets <= kMaxTargetsPerSearch) {
     getSubstructMatchesImpl(targets, queries, results, algorithm, stream, config, nullptr, nullptr);
     return;
@@ -1171,7 +1188,7 @@ void countSubstructMatches(const std::vector<const RDKit::ROMol*>& targets,
   // (fresh executors free that state between chunks) and writes into its own
   // target slice, so results are identical to one big call but memory stays
   // bounded. Chunks are sequential — the GPU is already saturated within one.
-  constexpr int kMaxTargetsPerSearch = 1024;
+  const int kMaxTargetsPerSearch = anyQueryRecursive(queries) ? kMaxTargetsRecursive : kMaxTargetsSimple;
   if (numTargets <= kMaxTargetsPerSearch) {
     SubstructSearchResults matchResults;
     getSubstructMatchesImpl(targets, queries, matchResults, algorithm, stream, countConfig, nullptr, &counts);
@@ -1223,7 +1240,7 @@ void hasSubstructMatch(const std::vector<const RDKit::ROMol*>& targets,
   hasMatchConfig.maxMatches            = 1;
 
   // Chunk targets to bound GPU memory — see countSubstructMatches for the why.
-  constexpr int kMaxTargetsPerSearch = 1024;
+  const int kMaxTargetsPerSearch = anyQueryRecursive(queries) ? kMaxTargetsRecursive : kMaxTargetsSimple;
   if (numTargets <= kMaxTargetsPerSearch) {
     SubstructSearchResults matchResults;
     getSubstructMatchesImpl(targets, queries, matchResults, algorithm, stream, hasMatchConfig, &results, nullptr);
