@@ -27,8 +27,40 @@
 namespace nvMolKit {
 namespace semiempirical {
 
-// PM6_D core-core repulsion (eV): (ss|ss) Coulomb with per-element exponential +
-// Gaussian corrections and the N-H/O-H special case. coords in Angstrom.
+// Pairwise core-core terms (PWCCT) for PM6: (chi, alpha) per element pair (public
+// Stewart PM6 / MOPAC). Symmetric; pairs not listed contribute (0, 0). Covers the
+// sp elements H/C/N/O/F/P/S/Cl.
+NVMOLKIT_HD inline void getPwcct(int z1, int z2, double& chi, double& alp) {
+  const int a = z1 < z2 ? z1 : z2;
+  const int b = z1 < z2 ? z2 : z1;
+  // {min, max, chi, alpha}
+  const double kTab[36][4] = {
+      {1, 1, 2.24359, 3.54094}, {1, 6, 0.21651, 1.02781}, {6, 6, 0.81351, 2.61371},
+      {1, 7, 0.17551, 0.96941}, {6, 7, 0.85995, 2.68611}, {7, 7, 0.67531, 2.5745},
+      {1, 8, 0.19229, 1.26094}, {6, 8, 0.99021, 2.88961}, {7, 8, 0.76476, 2.78429},
+      {8, 8, 0.535112, 2.623998}, {1, 9, 0.8158, 3.13674}, {6, 9, 0.73297, 3.0276},
+      {7, 9, 0.63585, 2.85665}, {8, 9, 0.67425, 3.01544}, {9, 9, 0.68134, 3.17576},
+      {1, 15, 1.23499, 1.92654}, {6, 15, 0.97951, 1.99465}, {7, 15, 0.97215, 2.14704},
+      {8, 15, 0.8787, 2.22077}, {9, 15, 0.51458, 2.23436}, {15, 15, 0.9025, 1.50579},
+      {1, 16, 0.84971, 2.21597}, {6, 16, 0.66685, 2.2103}, {7, 16, 0.73871, 2.28999},
+      {8, 16, 0.74721, 2.38329}, {9, 16, 0.37525, 2.18719}, {15, 16, 0.56227, 1.59533},
+      {16, 16, 0.473856, 1.794556}, {1, 17, 0.75483, 2.40289}, {6, 17, 0.51579, 2.1622},
+      {7, 17, 0.52075, 2.17213}, {8, 17, 0.58551, 2.32324}, {9, 17, 0.41112, 2.31327},
+      {15, 17, 0.35236, 1.46831}, {16, 17, 0.35697, 1.71544}, {17, 17, 0.33292, 1.82324}};
+  for (int i = 0; i < 36; ++i) {
+    if (static_cast<int>(kTab[i][0]) == a && static_cast<int>(kTab[i][1]) == b) {
+      chi = kTab[i][2];
+      alp = kTab[i][3];
+      return;
+    }
+  }
+  chi = 0.0;
+  alp = 0.0;
+}
+
+// PM6 core-core (nuclear) repulsion (eV): (ss|ss) Coulomb with the pairwise PWCCT
+// term, the unpolarized-core repulsion, the C/N/O-H and C-C special cases, and
+// the per-element Gaussian corrections. coords in Angstrom. Exact PYSEQM PM6.
 NVMOLKIT_HD inline double nuclearRepulsionDev(int nAtoms, const AtomIntParams* ap,
                                               const double* coords) {
   constexpr double kEV = 27.21;
@@ -44,19 +76,32 @@ NVMOLKIT_HD inline double nuclearRepulsionDev(int nAtoms, const AtomIntParams* a
 
       const double rho0A = (ap[i].gss > 0.0) ? 0.5 * kEV / ap[i].gss : 0.0;
       const double rho0B = (ap[j].gss > 0.0) ? 0.5 * kEV / ap[j].gss : 0.0;
-      const double aee = (rho0A + rho0B) * (rho0A + rho0B);
-      const double ssss = kEV / std::sqrt(Rb * Rb + aee);
+      const double gam = kEV / std::sqrt(Rb * Rb + (rho0A + rho0B) * (rho0A + rho0B));
 
       const double ZA = static_cast<double>(ap[i].valence);
       const double ZB = static_cast<double>(ap[j].valence);
-      const double t1 = ZA * ZB * ssss;
+      const int zA = ap[i].z, zB = ap[j].z;
 
-      const bool nhohA = (ap[i].z == 7 || ap[i].z == 8) && ap[j].z == 1;
-      const bool nhohB = (ap[j].z == 7 || ap[j].z == 8) && ap[i].z == 1;
-      double t2 = std::exp(-ap[i].alpha * R);
-      if (nhohA) t2 *= R;
-      double t3 = std::exp(-ap[j].alpha * R);
-      if (nhohB) t3 *= R;
+      const double cbrt = std::pow(static_cast<double>(zA), 1.0 / 3.0)
+                          + std::pow(static_cast<double>(zB), 1.0 / 3.0);
+      double ratio = cbrt / R;
+      const double r6 = ratio * ratio * ratio;
+      const double unpolcore = 1e-8 * (r6 * r6) * (r6 * r6);  // (cbrt/R)^12
+
+      double chi, alp;
+      getPwcct(zA, zB, chi, alp);
+      const bool isXH = ((zA == 6 || zA == 7 || zA == 8) && zB == 1)
+                        || ((zB == 6 || zB == 7 || zB == 8) && zA == 1);
+      double expo2;
+      if (isXH) {
+        expo2 = unpolcore + ZA * ZB * gam * (1.0 + 2.0 * chi * std::exp(-alp * R * R));
+      } else {
+        const double f = R + 0.0003 * std::pow(R, 6);
+        expo2 = unpolcore + ZA * ZB * gam * (1.0 + 2.0 * chi * std::exp(-alp * f));
+      }
+      if (zA == 6 && zB == 6) {
+        expo2 += ZA * ZB * gam * 9.28 * std::exp(-5.98 * R);
+      }
 
       const double t4 = ZA * ZB / R;
       double t5 = 0.0, t6 = 0.0;
@@ -66,7 +111,7 @@ NVMOLKIT_HD inline double nuclearRepulsionDev(int nAtoms, const AtomIntParams* a
         if (ap[j].gaussK[k] != 0.0)
           t6 += ap[j].gaussK[k] * std::exp(-ap[j].gaussL[k] * (R - ap[j].gaussM[k]) * (R - ap[j].gaussM[k]));
       }
-      eNuc += t1 * (1.0 + t2 + t3) + t4 * (t5 + t6);
+      eNuc += expo2 + t4 * (t5 + t6);
     }
   }
   return eNuc;

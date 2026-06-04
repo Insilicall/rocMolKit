@@ -164,11 +164,15 @@ def main() -> None:
         dq = float(np.max(np.abs(np.array(heavy) - np.array(q_heavy))))
         worst = max(worst, dq)
 
+        # The engine uses PM6's pairwise core-core (PWCCT), i.e. the PM6_SP heat
+        # of formation. Charges/density are PM6_D (== PM6_SP for sp atoms).
+        hof = float(scf_nddo(z, np.array(coords, float), method="PM6_SP")["heat_of_formation_kcal"])
+
         entry: dict[str, object] = {
             "Z": z,
             "tier": tier,
             "charges": [round(v, 6) for v in q],
-            "heat_of_formation_kcal": round(float(r["heat_of_formation_kcal"]), 4),
+            "heat_of_formation_kcal": round(hof, 4),
             "energy_eV": round(float(r["energy_eV"]), 6),
             "n_iter": int(r["n_iter"]),
             "eigenvalues_eV": [round(float(v), 6) for v in np.asarray(r["eigenvalues"]).ravel()],

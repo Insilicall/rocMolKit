@@ -14,7 +14,7 @@
     0.304635,
     0.304635
    ],
-   "heat_of_formation_kcal": -154.9029,
+   "heat_of_formation_kcal": -54.1987,
    "energy_eV": -323.439526,
    "n_iter": 13,
    "eigenvalues_eV": [
@@ -193,7 +193,7 @@
     0.16362,
     0.16362
    ],
-   "heat_of_formation_kcal": -190.5574,
+   "heat_of_formation_kcal": -12.2363,
    "energy_eV": -184.900215,
    "n_iter": 14,
    "eigenvalues_eV": [
@@ -464,7 +464,7 @@
     -0.263786,
     0.263786
    ],
-   "heat_of_formation_kcal": -18.8453,
+   "heat_of_formation_kcal": -18.6066,
    "energy_eV": -485.180062,
    "n_iter": 14,
    "eigenvalues_eV": [
@@ -601,7 +601,7 @@
     0.192848,
     0.192848
    ],
-   "heat_of_formation_kcal": -134.2281,
+   "heat_of_formation_kcal": -2.6615,
    "energy_eV": -226.190848,
    "n_iter": 12,
    "eigenvalues_eV": [
@@ -834,7 +834,7 @@
     0.120321,
     0.120321
    ],
-   "heat_of_formation_kcal": -303.5782,
+   "heat_of_formation_kcal": -44.1628,
    "energy_eV": -629.135532,
    "n_iter": 13,
    "eigenvalues_eV": [
@@ -885,7 +885,7 @@
     0.109513,
     0.15243
    ],
-   "heat_of_formation_kcal": -280.3486,
+   "heat_of_formation_kcal": 8.904,
    "energy_eV": -531.776068,
    "n_iter": 14,
    "eigenvalues_eV": [
@@ -1596,5 +1596,6 @@
     31.87398152
    ]
   }
- ]
+ ],
+ "_hof_method": "PM6_SP (PWCCT core-core); charges/density PM6_D==PM6_SP for sp atoms"
 }
