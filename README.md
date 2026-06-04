@@ -18,6 +18,8 @@ HIP/ROCm port of [nvMolKit](https://github.com/NVIDIA-Digital-Bio/nvMolKit) (NVI
 
 ## Performance
 
+![rocMolKit GPU speedup over multi-threaded RDKit](docs/assets/rocmolkit_speedup.png)
+
 Conformers per second (higher is better), measured on an **AMD Radeon RX 9060 XT** (Navi 44, gfx1200, RDNA4, 32 CUs) + Ryzen 5 7600, ROCm 7.2.3, dataset `tests/data/druglike_100.smi`.
 
 | Workload | **rocMolKit**<br>(RX 9060 XT) | RDKit CPU<br>(1 core) | RDKit CPU<br>(12 threads) | mlxmolkit<br>(Apple Metal, published) |
