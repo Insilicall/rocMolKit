@@ -37,8 +37,13 @@ jobs:
             ghcr.io/${{ steps.repo.outputs.owner }}/rocmolkit:${{ github.ref_name }}-slim
           build-args: |
             GPU_TARGETS=gfx1100;gfx1200;gfx90a;gfx942
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # Registry cache (stored as a ghcr image) instead of GitHub Actions
+          # cache: the ROCm SDK (~4 GB) + RDKit source-build layers blow past
+          # GHA's 10 GB cap with mode=max across two images, so they were evicted
+          # and rebuilt every run (~40 min). The registry has no such cap, so the
+          # expensive base layers persist and only the rocmolkit build re-runs.
+          cache-from: type=registry,ref=ghcr.io/${{ steps.repo.outputs.owner }}/rocmolkit:buildcache-slim
+          cache-to: type=registry,ref=ghcr.io/${{ steps.repo.outputs.owner }}/rocmolkit:buildcache-slim,mode=max
 
       - name: Build and push devel
         uses: docker/build-push-action@v5
@@ -49,5 +54,5 @@ jobs:
           tags: |
             ghcr.io/${{ steps.repo.outputs.owner }}/rocmolkit:devel
             ghcr.io/${{ steps.repo.outputs.owner }}/rocmolkit:${{ github.ref_name }}-devel
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=registry,ref=ghcr.io/${{ steps.repo.outputs.owner }}/rocmolkit:buildcache-devel
+          cache-to: type=registry,ref=ghcr.io/${{ steps.repo.outputs.owner }}/rocmolkit:buildcache-devel,mode=max

@@ -1,0 +1,15 @@
+# Keep the build context small and stable so `COPY . /src` only invalidates on
+# real source changes (and local builds upload less). The image builds rocmolkit
+# + RDKit from source inside the container, so none of these are needed.
+.git
+.github
+.claude
+build
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/*.so
+.pytest_cache
+.ruff_cache
+*.log
+upstream
