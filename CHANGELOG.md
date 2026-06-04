@@ -4,6 +4,33 @@ All notable changes to rocMolKit will be documented here.
 
 ## [unreleased]
 
+## [v0.4.1] — 2026-06-04
+
+Packaging hotfix: the v0.4.0 `slim` image never imported (its build-time smoke
+test failed), which also blocked the tagged docker publish. Three pre-existing
+slim runtime gaps, fixed so the production image imports end-to-end:
+
+### Fixed
+- **Dead `roc::hipblas` link** in `rocmolkit_core`. No code calls any hipBLAS
+  API (an inherited nvMolKit link), but `libhipblas.so.3` hard-depends on
+  `librocsolver.so.0` (~870 MB) and, via hipblaslt, `librocroller.so.1`
+  (~84 MB) — so the dead link dragged ~950 MB of unused math libraries into the
+  runtime and made the slim image unsatisfiable. Dropped the link (`hiprand`
+  stays; `coord_gen` uses it). Shrinks every image.
+- **Missing RDKit C++ runtime libs in slim.** The builder compiles RDKit
+  without Python wrappers and the runtime installs `rdkit-pypi`, so the bindings
+  could not resolve `libRDKitDistGeomHelpers.so.1` et al. Copy `/opt/rdkit/lib`
+  (~30 MB) into the runtime and add it to `LD_LIBRARY_PATH`; also copy
+  `libomp.so` (a direct core dep) and the small roctx / rocprofiler-register libs.
+- **boost-python cross-module import order.** `_mmffOptimization` /
+  `_uffOptimization` / `_batchedForcefield` take a `BatchHardwareOptions` default
+  argument whose to_python converter is registered by `_embedMolecules`' init;
+  importing one of them first raised "No to_python converter for
+  BatchHardwareOptions". `rocmolkit/__init__` now eagerly imports
+  `_embedMolecules` (best-effort), so any `from rocmolkit._X import ...` works.
+
+Slim image: import smoke test passes; 2177 MB compressed (gfx1200, budget 2500).
+
 ## [v0.4.0] — 2026-06-04
 
 First **beta**: every module in the porting plan is now ported to HIP/RDNA4 and
