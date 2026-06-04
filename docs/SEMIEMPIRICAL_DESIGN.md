@@ -1,8 +1,47 @@
 # Semi-empirical SCF on AMD (HIP/ROCm) — design & roadmap
 
-Status: **in progress** (branch `feature/pm6-semiempirical`). New feature, not a
-port of nvMolKit — nvMolKit has no quantum chemistry. We build an NDDO
-semi-empirical SCF engine from scratch in HIP.
+Status: **Phase 1 CPU reference complete** (branch `feature/pm6-semiempirical`).
+New feature, not a port of nvMolKit — nvMolKit has no quantum chemistry. We build
+an NDDO semi-empirical SCF engine from scratch in HIP.
+
+## Progress
+
+The Phase-1 (sp: H/C/N/O/F) CPU path is done and **bit-exact to PYSEQM** at every
+stage (validated host-side against the frozen golden in
+`tools/semiempirical/data/golden_intermediates.json`), and compiles + links
+in-tree into `rocmolkit_core`:
+
+| Stage | Module | vs PYSEQM |
+| ----- | ------ | --------- |
+| 1 Parameters | `pm6_params.{h,cpp}` (+ generated `_data.h`) | 17/17 |
+| 2 Diatomic overlap | `overlap.{h,cpp}` | ΔS = 0.00 |
+| 3 Core Hamiltonian | `core_hamiltonian.{h,cpp}` | ΔH = 0.00 |
+| 4 Two-center integrals | `two_center.{h,cpp}` | Δri = 0.00 |
+| 5 SCF loop | `scf.{h,cpp}` | ΔP=3e-8, ΔEig=1e-6 (golden rounding) |
+| 6 Mulliken charges | `scf.cpp` | Δq = 0.00 |
+| 6b Nuclear rep. + HoF | `scf.cpp`, `pm6_params.cpp` | ΔHoF = 0.00 kcal/mol |
+
+Next: **Stage 7 — the HIP/GPU port** (below), then Phase 2/3 (d-orbitals, D3H4).
+
+## GPU architecture (Stage 7)
+
+The Phase-1 CPU code is the validated reference; the GPU path must reproduce it.
+Matrices are small per molecule (nBasis ~ 6-30 for sp drug fragments), so the
+throughput win is **batching**: one thread block per molecule, the whole SCF in
+shared memory. Plan:
+
+1. **Device-callable math.** Lift the integral math (`computeMultipoleParams`,
+   `twoCenterLocal/Molecular`, the overlap A/B integrals) into `__host__
+   __device__` headers so the same code feeds the CPU reference and the kernels —
+   keeping the bit-exact guarantee.
+2. **Batched Fock + integrals kernel.** One block per molecule builds H_core and
+   each SCF cycle's Fock in shared memory; validate against the CPU `buildFock`.
+3. **Diagonalization.** Per-cycle symmetric eigensolve — reuse
+   `src/symmetric_eigensolver.hip.cpp` (already in the tree) or a block-local
+   Jacobi for the small matrices; rocSOLVER for larger batched solves.
+4. **Density + DIIS on device**, convergence test on device, charges + HoF
+   reduction. Then measure throughput vs the Metal-hybrid reference, which keeps
+   everything but the Fock build on the CPU.
 
 ## Goal
 
