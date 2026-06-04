@@ -138,7 +138,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libdrm2 libdrm-amdgpu1 \
         libboost1.83-all \
         hip-runtime-amd hsa-rocr comgr \
-        rocblas \
+        rocblas hipblas \
         rocrand hiprand \
     # Drop transitive heavy deps not used in Phase 1-5: rocsolver (1.7 GB),
     # rocsparse (1.4 GB), hipsolver/hipsparse. ETKDG/MMFF do not call them.
