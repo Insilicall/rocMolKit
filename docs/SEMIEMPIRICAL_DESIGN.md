@@ -34,6 +34,7 @@ AMD Radeon RX 9060 XT (gfx1200/RDNA4) against the same PYSEQM golden:
 | 7b Fock-build kernel | `fock_kernels.hip.cpp` | GPU==CPU, Δ=5e-14 |
 | 7c Full SCF on device | `scf_kernels.hip.cpp`, `scf_device.h` | bit-exact PYSEQM, Δq=4e-7 |
 | 7d H_core on device (100% GPU) | `overlap_device.h`, `core_hamiltonian_device.h` | bit-exact PYSEQM, Δq=4e-7 |
+| 7e Heat of formation on device | `energy_device.h` | bit-exact PYSEQM, ΔHoF=4e-4 kcal/mol |
 
 The key idea: a single `__host__ __device__` codebase feeds both the CPU
 reference (validated against PYSEQM) and the HIP kernels, so the bit-exact
@@ -53,8 +54,6 @@ rocMolKit runs all of it on the GPU.
   one-thread-per-molecule layout and the H-heavy (HX) device recursion (currently
   needing a 64 KB stack) are the obvious targets; de-recursing the HX case and a
   one-block-per-molecule layout with shared memory should help.
-- **Heat of formation on the GPU.** The SCF + charges are on-device; HoF
-  (nuclear repulsion + eisol/eheat) is still a host call — mechanical to lift.
 - **Phase 2/3 — element coverage.** sp-heavy (P/S/Cl/Br/I as `PM6_SP`), then
   d-orbitals (`PM6_D`: 22-integral local frame + Wigner-D rotation), then the
   PM6-D3H4 post-SCF corrections. Other methods (AM1/PM3/RM1) reuse the skeleton.
