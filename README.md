@@ -79,7 +79,7 @@ vs single-core / vs 12-thread RDKit.
 |---|---|---|---|---|---|
 | **Morgan fingerprints** | 500k mols | **1.5M mol/s** | 96k | 216k | **16× / 7×** |
 | **Tanimoto similarity** | 10k × 10k | **10B pair/s** | 16M | 15M | **645× / 658×** |
-| **Substructure** | 50k × 29 | **4.7M pair/s** | 1.2M | 393k | **3.9× / 12×** |
+| **Substructure** | 50k × 20 | **3.8M pair/s** | 1.2M | 402k | **3.1× / 9×** |
 | **TFD** | 1000 mols × 10 conf | **8.4M pair/s** | 68k | 61k | **123× / 137×** |
 | **Butina clustering** | 8k mols | **274k mol/s** | 5.6k | 5.6k | **49× / 48×** |
 
@@ -87,10 +87,11 @@ vs single-core / vs 12-thread RDKit.
   furthest behind; RDKit's `BulkTanimotoSimilarity` / `GetTFDMatrix` / Butina are
   effectively single-threaded (the 1-core and 12-thread columns match), so the
   GPU lead widens with N.
-- **Substructure** handles any SMARTS, including recursive (`[$(...)]`). Large
-  target sets are chunked internally and GPU memory is released between chunks,
-  so a single call scales to any number of targets without exhausting the device
-  (the throughput above is for the simple-SMARTS, all-pairs case).
+- **Substructure** handles any SMARTS, including recursive (`[$(...)]`). The
+  throughput above is for non-recursive queries (which run in large GPU chunks).
+  Recursive queries allocate GBs of per-target scratch, so they are chunked tightly
+  and GPU memory is released between chunks — slower, but a single call scales to
+  any number of targets without exhausting the device.
 
 ```bash
 python3 tools/bench_features.py         # the table above, GPU vs RDKit 1-core / 12-thread
