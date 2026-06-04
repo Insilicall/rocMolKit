@@ -59,9 +59,32 @@ rocMolKit runs all of it on the GPU.
   core-core repulsion is now PM6's pairwise PWCCT (real PM6), so HoF matches
   PM6_SP across all sp elements. Remaining: Br/I (qn 4/5) need the higher-qn sp
   overlap formulas.
-- **Phase 3 — d-orbitals.** `PM6_D` (22-integral local frame + Wigner-D
-  rotation) for P/S/Cl/Br/I, then the PM6-D3H4 post-SCF corrections. Other
-  methods (AM1/PM3/RM1) reuse the skeleton.
+- **Phase 3 — d-orbitals (`PM6_D`)** for P/S/Cl/Br/I, then PM6-D3H4. Strategy
+  (see below). Other methods (AM1/PM3/RM1) reuse the skeleton.
+
+## Phase 3 strategy — d-orbitals
+
+The d-orbital overlap is the gate. Two findings shape the plan:
+
+1. **The oracle is in hand.** PYSEQM's `diatom_overlap_matrixD` (LANL, BSD-3),
+   vendored in mlxmolkit as a pure-NumPy port, runs here and produces the
+   reference d-overlap for any pair. `tools/semiempirical/gen_doverlap_golden.py`
+   freezes it into `data/golden_doverlap.json` — the par-by-par validation anchor.
+2. **The analytic shortcut does NOT work.** A from-scratch route
+   (mlxmolkit's `overlap_d_local` + a Wigner-D rotation) was tested against the
+   oracle: the sp block matches but the **d-block is entirely different** (e.g.
+   S-H d-column `[0,0,0.1445,0,0]` from the oracle vs `[-0.121,0,0,0.209,0]`
+   analytic). The exact d-orbital frame convention lives in the PYSEQM code, so
+   the port must reproduce `diatom_overlap_matrixD`, not the analytic fallback.
+
+So Phase 3 ports `diatom_overlap_matrixD` to **scalar** C++. Its ~5000 NumPy lines
+are *vectorized* (per-pair `np.where` masks over every qn/orbital case); the
+scalar form collapses those to `if/else` and is far shorter (~800-1000 lines). The
+rest mirrors the sp pipeline: d two-center integrals (`d_two_center.py`,
+`tetci_yh.py` — YH/YX/YY, with F0SD/G2SD), the 9×9 one-/two-center Fock
+contribution (`fock_d.py`), 9-orbital basis, then the shared-math GPU port. Each
+stage validated par-by-par against the oracle before the next — the same
+discipline as Phases 1-2. Br/I (qn 4/5) fall out once the d-overlap covers qn≥4.
 - **Open-shell / odd-electron** molecules (currently rejected).
 - **Integration:** gtest coverage under `tests/`, a public C++/Python entry
   point, and a formal throughput comparison harness. (Already builds in-tree.)
