@@ -16,28 +16,50 @@ measured here; mlxmolkit numbers are from its published README. **Hardware
 differs** — this is not a same-machine benchmark, so read it as "each port on
 the accelerator it targets", not a hardware shoot-out.
 
-| Workload | **rocMolKit** (AMD RX 9060 XT) | mlxmolkit (Apple Metal) | RDKit CPU (12 threads, same host) |
-|---|---|---|---|
-| **ETKDG generation** (DG + ETK) | **~6,200** (N=1000–3000, k=4) | ~2,000–2,600 (N=1000–10000, k=10) | ~870 |
-| **MMFF94 optimize** (fresh conformers) | **~29,000–43,000** (k=4–10) | ~8,700–12,000 (1k–10k confs) | ~1,200 |
+Throughput scales strongly with molecule size (MMFF is O(n²) in the non-bonded
+terms), so numbers are reported **by molecule size**. All rocMolKit numbers are
+at **100% success** and RDKit-validated (generated conformers fall in the same
+MMFF energy basins as RDKit: median ΔE = 0.00 kcal/mol, 52/60 drug-like within
+1 kcal/mol of RDKit's best conformer).
 
-- rocMolKit is **~2.5–3x** faster than mlxmolkit on ETKDG generation and
-  **~2.4–3.6x** faster on MMFF optimization, including the high-conformers-per-
-  molecule regime mlxmolkit benchmarks.
+| Workload | **rocMolKit** small (~12 atoms) | **rocMolKit** drug-like (~30 atoms) | RDKit CPU (12 threads, same host) |
+|---|---|---|---|
+| **ETKDG generation** (DG + ETK) | **~29,000** | **~4,900** | ~865 |
+| **MMFF94 optimize** (fresh conformers) | **~31,500** | **~4,900** | ~907 |
+
+vs RDKit on drug-like (same machine): **~12–13x** single-core, **~5.4–5.7x**
+12-thread.
+
+**vs the Apple-Silicon sibling ports** (their published numbers; hardware differs —
+Apple M3 Max ~14 TFLOPS vs RX 9060 XT ~25.6 TFLOPS FP32). Both ports validate
+against RDKit, so "RDKit-quality conformers/s" is the shared unit:
+
+| same molecule size | rocMolKit | mlxmolkit | rocMolKit lead |
+|---|---|---|---|
+| ETKDG gen, drug-like, k=10 | ~4,900 | 2,625 (guillaume-osmo) | **~1.9x** |
+| full pipeline (+MMFF), k=10 | ~2,450 | 1,473 (guillaume-osmo) | **~1.7x** |
+| MMFF optimize, ~12–14 atoms | ~31,500 | ~12,000 (shivampatel10) | **~2.6x** |
+
 - nvMolKit (the original CUDA library) publishes no comparable throughput
   table; it targets datacenter GPUs (H100/A100), so it is omitted rather than
-  compared across very different hardware.
+  compared across very different hardware. Note rocMolKit's per-molecule
+  minimizer runs in **FP32**, ahead of upstream nvMolKit's FP64 path.
 
 **Caveats (read these):**
 - mlxmolkit ran on Apple Silicon (~14 TFLOPS FP32) vs the RX 9060 XT
   (~25.6 TFLOPS FP32) — different hardware. The comparison is port-vs-port on
   each one's target accelerator.
+- The two published mlxmolkit forks report on different molecule sets:
+  guillaume-osmo benchmarks the full DG→ETK→MMFF pipeline on drug-like
+  molecules; shivampatel10 benchmarks MMFF optimization on the ~14-atom MMFF94
+  validation set. Compare each at its matched size, as above.
 - Measure MMFF on **fresh** conformers optimized **once** (`tools/mmff_fresh.py`),
-  not the `tools/mmff_bench.py` "warm median", which re-optimizes already-
-  converged geometries — an unrealistic workload whose timings are misleading
-  at high k.
-- rocMolKit ETKDG reports ~88–96% generation success vs mlxmolkit's ~99.7%
-  reported convergence; these metrics are defined differently and are not a
+  not a "warm median" that re-optimizes already-converged geometries — an
+  unrealistic workload whose timings are misleading at high k.
+- rocMolKit ETKDG now reports **100% generation success** (the earlier ~88–96%
+  was a since-fixed bug where a broken hipcub primitive silently dropped the
+  largest molecules' batch); mlxmolkit reports ~99.7% convergence — these
+  metrics are defined differently and are not a
   like-for-like quality comparison.
 
 ## Root cause of the historical slowness — the line-search bug
@@ -51,12 +73,11 @@ value to the shared `lineSearchConverged` from all 32 lanes, so the other lanes'
 thread 0 only (commit on this branch) dropped the line search to ~2-3 iterations
 per step:
 
-| Workload | before fix | after fix |
-|---|---|---|
-| ETKDG generation, N=1000 k=4 | ~228 conf/s (≈865 historically) | **~6,200 conf/s** |
-| MMFF optimize, k=8 fresh (high conformers/mol) | ~300 conf/s | **~29,000 conf/s** |
-
-Success rate and MMFF94 energies are unchanged — this is a pure efficiency fix.
+This was an early efficiency fix. The current, authoritative throughput (at
+**100% success**, after the separate hipcub/BATCHED correctness fix) is in the
+[cross-port table](#cross-port-comparison) above: ETKDG ~4,900 conf/s (drug-like)
+/ ~29,000 (small); MMFF ~4,900 (drug-like) / ~31,500 (small). MMFF94 energies
+match RDKit's basins (median ΔE = 0.00 kcal/mol).
 The separate `hipFreeAsync` stream-sync fix (a HIP-7.0 use-after-free) removed an
 intermittent GPU memory fault at N≥~900; the two fixes are independent.
 

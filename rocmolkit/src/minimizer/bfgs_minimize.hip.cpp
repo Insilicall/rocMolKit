@@ -1,4 +1,5 @@
 #include "hip/hip_runtime.h"
+#include <cstdlib>
 // SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -39,6 +40,12 @@ BfgsBackend resolveBackend(BfgsBackend backend, const std::vector<int>& atomStar
   if (backend != BfgsBackend::HYBRID) {
     return backend;
   }
+  // Size-based routing: PER_MOLECULE (FP32, low-overhead) for small systems,
+  // BATCHED (FP64) for large ones. The BATCHED path was previously dead on
+  // ROCm/gfx1200 because hipcub::DeviceSelect::Flagged returns 0 there, so the
+  // minimizer exited before doing any work and the whole batch failed the
+  // post-minimization energy check. With that replaced by atomic compaction
+  // kernels (see compactAndCountConverged) BATCHED converges correctly again.
   for (size_t i = 0; i + 1 < atomStartsHost.size(); ++i) {
     if (atomStartsHost[i + 1] - atomStartsHost[i] > kHybridBackendAtomThreshold) {
       return BfgsBackend::BATCHED;
@@ -737,17 +744,38 @@ bool checkConvergence(const std::vector<int>&     activeMolIds,
 
 }  // namespace
 
+// hipcub::DeviceReduce::TransformReduce and DeviceSelect::Flagged return 0 on
+// gfx1200/ROCm 7.x (verified: 500 flagged systems -> reported 0), which made the
+// BATCHED minimizer exit before doing any work (compactAndCountConverged returned
+// numSystems on iteration 0) and converge nothing. These two atomic-based kernels
+// replace the broken device-wide primitives; they are wavefront-size agnostic.
+namespace {
+__global__ void bfgsCompactActiveKernel(const int      numSystems,
+                                        const int16_t* statuses,
+                                        const int*     allIndices,
+                                        int*           activeIndices,
+                                        int*           counter) {
+  const int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < numSystems && statuses[i] != 0) {
+    const int pos     = atomicAdd(counter, 1);
+    activeIndices[pos] = allIndices[i];
+  }
+}
+
+__global__ void bfgsCountNotMinusTwoKernel(const int n, const int16_t* status, int* counter) {
+  const int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < n && status[i] != -2) {
+    atomicAdd(counter, 1);
+  }
+}
+}  // namespace
+
 int BfgsBatchMinimizer::lineSearchCountFinished() const {
-  size_t temp_storage_bytes = countTempStorage_.size();
-  hipcub::DeviceReduce::TransformReduce(countTempStorage_.data(),
-                                     temp_storage_bytes,
-                                     lineSearchStatus_.data(),
-                                     countFinished_.data(),
-                                     lineSearchStatus_.size(),
-                                     cubSum(),
-                                     NotEqualToMinusTwoFunctor(),
-                                     0,
-                                     stream_);
+  const int n = static_cast<int>(lineSearchStatus_.size());
+  countFinished_.set(0);
+  const int blocks = (n + 127) / 128;
+  bfgsCountNotMinusTwoKernel<<<blocks, 128, 0, stream_>>>(n, lineSearchStatus_.data(), countFinished_.data());
+  cudaCheckError(hipGetLastError());
   int& finishedHost = loopStatusHost_[0];
   countFinished_.get(finishedHost);
   hipStreamSynchronize(stream_);
@@ -756,22 +784,15 @@ int BfgsBatchMinimizer::lineSearchCountFinished() const {
 
 int BfgsBatchMinimizer::compactAndCountConverged() const {
   const ScopedNvtxRange bfgsCompactAndCountConverged("BfgsBatchMinimizer::compactAndCountConverged");
-  size_t                temp_storage_bytes = countTempStorage_.size();
-
-  cudaCheckError(hipcub::DeviceSelect::Flagged(countTempStorage_.data(),
-                                            temp_storage_bytes,
-                                            allSystemIndices_.data(),
-                                            statuses_.data(),
-                                            activeSystemIndices_.data(),
-                                            countFinished_.data(),
-                                            statuses_.size(),
-                                            stream_));
-  // std::vector<int> allHost(numSystems_);
-  // std::vector<int> allCompact(numSystems_);
-  // std::vector<int16_t> statusHost(numSystems_);
-  // statuses_.copyToHost(statusHost);
-  // allSystemIndices_.copyToHost(allHost);
-  // activeSystemIndices_.copyToHost(allCompact);
+  const int             n = static_cast<int>(statuses_.size());
+  countFinished_.set(0);
+  const int blocks = (n + 127) / 128;
+  bfgsCompactActiveKernel<<<blocks, 128, 0, stream_>>>(n,
+                                                       statuses_.data(),
+                                                       allSystemIndices_.data(),
+                                                       activeSystemIndices_.data(),
+                                                       countFinished_.data());
+  cudaCheckError(hipGetLastError());
   int& unfinishedHost = loopStatusHost_[0];
   countFinished_.get(unfinishedHost);
   hipStreamSynchronize(stream_);
