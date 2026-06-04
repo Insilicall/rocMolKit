@@ -29,10 +29,10 @@ data = [
     ("Tanimoto similarity", 658),
     ("TFD", 137),
     ("Butina clustering", 48),
-    ("MMFF94 optimization", 14),
     ("Substructure", 12),
     ("Morgan fingerprints", 7),
     ("ETKDG generation", 6),
+    ("MMFF94 optimization", 5),
 ]
 data.sort(key=lambda t: t[1])
 labels = [d[0] for d in data]

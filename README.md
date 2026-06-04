@@ -5,7 +5,7 @@
 
 **GPU-accelerated conformer generation and force-field optimization for RDKit, on AMD GPUs** — via HIP/ROCm.
 
-HIP/ROCm port of [nvMolKit](https://github.com/NVIDIA-Digital-Bio/nvMolKit) (NVIDIA CUDA, Apache 2.0) — same API surface, AMD backend. On a **consumer** Radeon RX 9060 XT it runs ETKDG conformer generation and MMFF94 optimization **faster than the published Apple-Silicon sibling port ([mlxmolkit](https://github.com/guillaume-osmo/mlxmolkit))** and an order of magnitude faster than multi-threaded RDKit on CPU.
+HIP/ROCm port of [nvMolKit](https://github.com/NVIDIA-Digital-Bio/nvMolKit) (NVIDIA CUDA, Apache 2.0) — same API surface, AMD backend. On a **consumer** Radeon RX 9060 XT it runs ETKDG conformer generation and MMFF94 optimization **~5–6× faster than 12-thread RDKit** (and ~12–13× vs single-core), at 100% success and RDKit-validated geometry — out-leading the published Apple-Silicon sibling ports ([guillaume-osmo](https://github.com/guillaume-osmo/mlxmolkit), [shivampatel10](https://github.com/shivampatel10/mlxmolkit)) in conformers/s on the same molecule sizes.
 
 > **Status: beta.** All core modules are ported to HIP and validated against
 > RDKit on AMD RDNA4 / gfx1200: **ETKDG** generation and **MMFF94** optimization
@@ -20,18 +20,41 @@ HIP/ROCm port of [nvMolKit](https://github.com/NVIDIA-Digital-Bio/nvMolKit) (NVI
 
 ![rocMolKit GPU speedup over multi-threaded RDKit](docs/assets/rocmolkit_speedup.png)
 
-Conformers per second (higher is better), measured on an **AMD Radeon RX 9060 XT** (Navi 44, gfx1200, RDNA4, 32 CUs) + Ryzen 5 7600, ROCm 7.2.3, dataset `tests/data/druglike_100.smi`.
+Measured on an **AMD Radeon RX 9060 XT** (Navi 44, gfx1200, RDNA4, 32 CUs) +
+Ryzen 5 7600, ROCm 7.2.3. **All numbers are at 100% success and
+RDKit-validated**: the generated conformers fall in the *same* MMFF energy
+basins as RDKit (median ΔE = 0.00 kcal/mol; 52/60 drug-like molecules within
+1 kcal/mol of RDKit's best conformer). It is not speed producing garbage — it is
+speed producing the same result RDKit produces.
 
-| Workload | **rocMolKit**<br>(RX 9060 XT) | RDKit CPU<br>(1 core) | RDKit CPU<br>(12 threads) | mlxmolkit<br>(Apple Metal, published) |
-|---|---|---|---|---|
-| **ETKDG generation** (DG + ETK) | **~6,200** | ~554 | ~1,136 | ~2,000–2,600 |
-| **MMFF94 optimization** | **~29,000–43,000** | ~379 | ~2,076 | ~8,700–12,000 |
+Throughput scales strongly with molecule size (MMFF is O(n²) in the non-bonded
+terms), so we report both regimes — conformers per second, higher is better:
 
-- ETKDG: **~11× faster than single-core RDKit**, **~5.5× faster than 12-thread RDKit**.
-- MMFF94: **~75–110× faster than single-core**, **~14–21× faster than 12-thread**.
-- **~2.5–3× faster than mlxmolkit** on both workloads, including the high-conformers-per-molecule regime.
+| Workload | small molecules (~12 atoms) | drug-like (~30 atoms, +H) |
+|---|---|---|
+| **ETKDG generation** (DG + ETK) | **~29,000** | **~4,900** |
+| **MMFF94 optimization** (fresh) | **~31,500** | **~4,900** |
 
-> Hardware differs across ports — mlxmolkit numbers are from its published README on Apple Silicon (~14 TFLOPS FP32) vs the RX 9060 XT (~25.6 TFLOPS FP32). Read it as "each port on the accelerator it targets," not a same-machine shoot-out. Full methodology, caveats, and the root-cause write-up are in [docs/PERFORMANCE_HIP.md](docs/PERFORMANCE_HIP.md).
+### vs RDKit — same machine, same molecules (the clean comparison)
+
+| drug-like | rocMolKit | RDKit 1-core | RDKit 12-thread |
+|---|---|---|---|
+| ETKDG generation | **~4,900** | 395 (**12×**) | 865 (**5.7×**) |
+| MMFF94 optimize | **~4,900** | 375 (**13×**) | 907 (**5.4×**) |
+
+### vs the Apple-Silicon sibling ports (their published numbers; different hardware)
+
+Both ports validate against RDKit, so "RDKit-quality conformers/s" is the shared,
+fair unit. Hardware differs (Apple M3 Max ~14 TFLOPS FP32 vs RX 9060 XT
+~25.6 TFLOPS FP32) — read it as "each port on the accelerator it targets."
+
+| same molecule size | rocMolKit | mlxmolkit | rocMolKit lead |
+|---|---|---|---|
+| ETKDG gen, drug-like, k=10 | ~4,900 | 2,625 ([guillaume-osmo](https://github.com/guillaume-osmo/mlxmolkit)) | **~1.9×** |
+| full pipeline (+MMFF), k=10 | ~2,450 | 1,473 (guillaume-osmo) | **~1.7×** |
+| MMFF optimize, ~12–14 atoms | ~31,500 | ~12,000 ([shivampatel10](https://github.com/shivampatel10/mlxmolkit)) | **~2.6×** |
+
+Full methodology and the root-cause write-ups are in [docs/PERFORMANCE_HIP.md](docs/PERFORMANCE_HIP.md).
 
 Reproduce:
 
