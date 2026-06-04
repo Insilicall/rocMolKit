@@ -33,6 +33,14 @@ Conformers per second (higher is better), measured on an **AMD Radeon RX 9060 XT
 
 > Hardware differs across ports — mlxmolkit numbers are from its published README on Apple Silicon (~14 TFLOPS FP32) vs the RX 9060 XT (~25.6 TFLOPS FP32). Read it as "each port on the accelerator it targets," not a same-machine shoot-out. Full methodology, caveats, and the root-cause write-up are in [docs/PERFORMANCE_HIP.md](docs/PERFORMANCE_HIP.md).
 
+![rocMolKit conformer-generation throughput and speedup vs batch size](docs/assets/rocmolkit_conformer_scaling.png)
+
+The GPU has a fixed startup cost, so on tiny batches it is overhead-bound and a CPU
+wins. By a batch of ~1,000 molecules it has crossed over, and the speedup then
+**holds at ~11× as the batch keeps growing** — it does not erode at scale. (Measured
+at 1 conformer per molecule; throughput climbs further with more conformers per
+molecule, which is where the ~6,200 conformers/s above comes from.)
+
 Reproduce:
 
 ```bash
