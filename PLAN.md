@@ -210,12 +210,53 @@ Without this, the port "compiles but is junk". Plan:
 6. ✅ Docker images published to ghcr.io
 7. ✅ GitHub Release v0.1.0-alpha
 
-## 10. Next steps
+## 10. Status & remaining-feature plan (updated 2026-06-03)
 
-1. ⏳ Set up self-hosted ROCm runner with an actual AMD GPU and flip `rocm-runner` job from `if: false`.
-2. ⏳ Phase 3: validate ETKDG numerical parity vs RDKit on SPICE-100.
-3. ⏳ Phase 4: validate MMFF94 numerical parity.
-4. ⏳ Phases 5–8: tune for AMD architectures, port the 8 excluded modules (see [ISSUES.md](ISSUES.md)), enable remaining bindings.
+**Functional + validated on AMD RDNA4 (gfx1200):** ETKDG generation, MMFF94
+optimization (both now *faster than mlxmolkit and 12-thread RDKit* — see
+[docs/PERFORMANCE_HIP.md](docs/PERFORMANCE_HIP.md)), UFF, batched forcefield,
+conformer RMSD, array helpers.
+
+**Remaining modules.** Each is scaffolded (CUDA source + a test suite already
+exist) but **disabled in CMake** behind a specific HIP-port blocker (documented
+inline in `rocmolkit/CMakeLists.txt`). The plan below ports them in dependency
+order; **every phase is "done" only when its existing test suite passes on
+gfx1200**, then its `_<Module>.so` binding is added back to
+`ROCMOLKIT_PHASE2_BINDINGS` in `rocmolkit/nvmolkit/CMakeLists.txt`.
+
+| Phase | Module | Blocker to remove | Verify with | Depends on |
+|---|---|---|---|---|
+| F1 | **Fingerprints (Morgan)** | `cooperative_groups::block_tile_memory` (NVIDIA-only) + `cuda::std::span` template deduction | `test_morgan_fingerprint`, `test_morgan_fingerprint_ref` | — |
+| F2 | **Similarity (Tanimoto/Cosine)** | PTX inline asm (BMMA tensor-core matmul + async copy) in `macros_ptx.hip.h` | `test_similarity` | F1 |
+| F3 | **Butina clustering** | CUDA Graphs Conditional nodes (no hipGraph conditional) | `test_butina` | F1, F2 |
+| F4 | **TFD** | depends on butina (kernels in `src/tfd/` are already written) | `test_tfd{,_cpu,_gpu,_kernels}` | F3 |
+| F5 | **Substructure** | `cudaSharedmemCarveoutMaxShared` → `hipFuncAttributePreferredSharedMemoryCarveout` (value 100) | `test_substruct_{algos,integration,label_integration,search}` | — (independent) |
+
+Notes / per-phase work:
+
+- **F1 Fingerprints** — replace `block_tile_memory` with an explicit `__shared__`
+  scratch buffer; pin the `cuda::std::span` element types so deduction works.
+  Re-enable `morgan_fingerprint_kernels.hip.cpp` + `morgan_fingerprint*.cpp`.
+- **F2 Similarity** — the bitwise Tanimoto does not need tensor cores; replace
+  the BMMA/async-copy PTX path with a plain `__popcll` popcount loop (or rocWMMA
+  on RDNA4) and drop the async-copy fast path.
+- **F3 Butina** — replace the conditional-graph cluster loop with a host-driven
+  iteration (or a plain hipGraph without conditional nodes). Needs the F1+F2
+  similarity matrix.
+- **F4 TFD** — mostly a re-enable once F3 lands; the GPU/CPU kernels exist.
+- **F5 Substructure** — the blocker is a one-attribute translation; the rest of
+  `src/substruct/` (executor, preprocessor, kernels, search; largest binding at
+  342 lines) then needs an end-to-end build + the four substruct tests. Can be
+  done in parallel with F1–F4.
+- **Prereq** — `symmetric_eigensolver` (`cuda::std::abs` shim) only matters if a
+  clustering path needs PCA/eigendecomposition; defer until F3 needs it.
+
+Infra, in parallel:
+
+1. ⏳ Self-hosted ROCm runner with a real AMD GPU; flip the `rocm-runner` CI job
+   from `if: false` so the test gates above run on every release.
+2. ⏳ Rebuild + publish the devel/slim images after each phase so the new
+   bindings ship (the current image predates these modules).
 
 ---
 
