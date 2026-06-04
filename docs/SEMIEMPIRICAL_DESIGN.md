@@ -1,8 +1,9 @@
 # Semi-empirical SCF on AMD (HIP/ROCm) — design & roadmap
 
-Status: **Phase 1 CPU reference complete** (branch `feature/pm6-semiempirical`).
-New feature, not a port of nvMolKit — nvMolKit has no quantum chemistry. We build
-an NDDO semi-empirical SCF engine from scratch in HIP.
+Status: **Phase 1 complete — full SCF runs 100% on the GPU**, bit-exact to
+PYSEQM (branch `feature/pm6-semiempirical`). New feature, not a port of nvMolKit —
+nvMolKit has no quantum chemistry. We build an NDDO semi-empirical SCF engine from
+scratch in HIP.
 
 ## Progress
 
@@ -21,27 +22,45 @@ in-tree into `rocmolkit_core`:
 | 6 Mulliken charges | `scf.cpp` | Δq = 0.00 |
 | 6b Nuclear rep. + HoF | `scf.cpp`, `pm6_params.cpp` | ΔHoF = 0.00 kcal/mol |
 
-Next: **Stage 7 — the HIP/GPU port** (below), then Phase 2/3 (d-orbitals, D3H4).
+### GPU port (Stage 7) — done
 
-## GPU architecture (Stage 7)
+The whole SCF now runs on the device, one thread per molecule, validated on the
+AMD Radeon RX 9060 XT (gfx1200/RDNA4) against the same PYSEQM golden:
 
-The Phase-1 CPU code is the validated reference; the GPU path must reproduce it.
-Matrices are small per molecule (nBasis ~ 6-30 for sp drug fragments), so the
-throughput win is **batching**: one thread block per molecule, the whole SCF in
-shared memory. Plan:
+| Stage | Module | GPU result |
+| ----- | ------ | ---------- |
+| 7a Shared device math | `*_device.h` (`__host__ __device__`) | CPU re-validated bit-exact |
+| 7  Two-center integrals kernel | `two_center_kernels.hip.cpp` | GPU==CPU, Δ~1e-15 |
+| 7b Fock-build kernel | `fock_kernels.hip.cpp` | GPU==CPU, Δ=5e-14 |
+| 7c Full SCF on device | `scf_kernels.hip.cpp`, `scf_device.h` | bit-exact PYSEQM, Δq=4e-7 |
+| 7d H_core on device (100% GPU) | `overlap_device.h`, `core_hamiltonian_device.h` | bit-exact PYSEQM, Δq=4e-7 |
 
-1. **Device-callable math.** Lift the integral math (`computeMultipoleParams`,
-   `twoCenterLocal/Molecular`, the overlap A/B integrals) into `__host__
-   __device__` headers so the same code feeds the CPU reference and the kernels —
-   keeping the bit-exact guarantee.
-2. **Batched Fock + integrals kernel.** One block per molecule builds H_core and
-   each SCF cycle's Fock in shared memory; validate against the CPU `buildFock`.
-3. **Diagonalization.** Per-cycle symmetric eigensolve — reuse
-   `src/symmetric_eigensolver.hip.cpp` (already in the tree) or a block-local
-   Jacobi for the small matrices; rocSOLVER for larger batched solves.
-4. **Density + DIIS on device**, convergence test on device, charges + HoF
-   reduction. Then measure throughput vs the Metal-hybrid reference, which keeps
-   everything but the Fock build on the CPU.
+The key idea: a single `__host__ __device__` codebase feeds both the CPU
+reference (validated against PYSEQM) and the HIP kernels, so the bit-exact
+guarantee extends to the GPU by construction. The entire pipeline — overlap,
+two-center integrals, H_core, Fock, per-cycle diagonalization (block-local
+Jacobi), Pulay DIIS, density, Mulliken charges — runs on the device; only the
+parameter gather and data marshalling stay on the host. A 24000-molecule batch
+converges 24000/24000 at ~3,900 mol/s on the RX 9060 XT.
+
+This is the differentiator: the Apple/Metal reference (mlxmolkit) offloads only
+the Fock build and keeps the SCF loop + diagonalization + integrals on the CPU;
+rocMolKit runs all of it on the GPU.
+
+## What's left
+
+- **Throughput optimization.** ~3,900 mol/s for small sp molecules. The
+  one-thread-per-molecule layout and the H-heavy (HX) device recursion (currently
+  needing a 64 KB stack) are the obvious targets; de-recursing the HX case and a
+  one-block-per-molecule layout with shared memory should help.
+- **Heat of formation on the GPU.** The SCF + charges are on-device; HoF
+  (nuclear repulsion + eisol/eheat) is still a host call — mechanical to lift.
+- **Phase 2/3 — element coverage.** sp-heavy (P/S/Cl/Br/I as `PM6_SP`), then
+  d-orbitals (`PM6_D`: 22-integral local frame + Wigner-D rotation), then the
+  PM6-D3H4 post-SCF corrections. Other methods (AM1/PM3/RM1) reuse the skeleton.
+- **Open-shell / odd-electron** molecules (currently rejected).
+- **Integration:** gtest coverage under `tests/`, a public C++/Python entry
+  point, and a formal throughput comparison harness. (Already builds in-tree.)
 
 ## Goal
 
