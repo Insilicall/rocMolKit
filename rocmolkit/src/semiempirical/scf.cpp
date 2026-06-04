@@ -50,13 +50,19 @@ bool jacobiEigen(std::vector<double>& A, int n, std::vector<double>& eval,
   evec.assign(static_cast<size_t>(n) * n, 0.0);
   for (int i = 0; i < n; ++i) evec[i * n + i] = 1.0;
 
+  // Converge relative to the (rotation-invariant) Frobenius norm: an absolute
+  // off-diagonal threshold is unreachable for larger matrices with large entries.
+  double frob2 = 0.0;
+  for (int i = 0; i < n * n; ++i) frob2 += A[i] * A[i];
+  const double offTol = 1e-26 * (frob2 > 0.0 ? frob2 : 1.0);
+
   const int maxSweeps = 60 + 4 * n;  // scale with size for stiff/clustered cases
   bool converged = false;
   for (int sweep = 0; sweep < maxSweeps; ++sweep) {
     double off = 0.0;
     for (int p = 0; p < n; ++p)
       for (int q = p + 1; q < n; ++q) off += A[p * n + q] * A[p * n + q];
-    if (off < 1e-28) {
+    if (off < offTol) {
       converged = true;
       break;
     }

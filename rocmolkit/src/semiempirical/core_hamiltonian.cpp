@@ -74,7 +74,9 @@ int spBasisSize(int nAtoms, const int* atoms) {
   int n = 0;
   for (int a = 0; a < nAtoms; ++a) {
     if (pm6ParamsForZ(atoms[a]) == nullptr) return 0;
-    if (principalQn(atoms[a]) >= 3) return 0;  // d-bearing: not yet supported
+    // PM6_SP treats P/S/Cl (qn=3) as sp. qn>=4 (Br, I) needs sp overlap formulas
+    // not yet ported; d-orbitals (PM6_D) are a later phase.
+    if (principalQn(atoms[a]) >= 4) return 0;
     const int c = spCount(atoms[a]);
     if (c == 0) return 0;
     n += c;

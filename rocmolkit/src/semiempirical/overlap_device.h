@@ -133,7 +133,10 @@ NVMOLKIT_HD inline int diatomOverlapSpDev(const AtomIntParams& pA, const double 
   if (pA.qn == 1 && pB.qn == 1) jcall = 2;
   else if (pA.qn == 2 && pB.qn == 1) jcall = 3;
   else if (pA.qn == 2 && pB.qn == 2) jcall = 4;
-  else {
+  else if (pA.qn == 3 && pB.qn == 1) jcall = 431;
+  else if (pA.qn == 3 && pB.qn == 2) jcall = 5;
+  else if (pA.qn == 3 && pB.qn == 3) jcall = 6;
+  else {  // qn >= 4 (Br, I): the sp overlap formulas are not yet ported
     for (int i = 0; i < nA * nB; ++i) outBlock[i] = 0.0;
     return nA * nB;
   }
@@ -164,7 +167,7 @@ NVMOLKIT_HD inline int diatomOverlapSpDev(const AtomIntParams& pA, const double 
       S211 = std::pow(zsB, 1.5) * std::pow(zpA, 2.5) * std::pow(Rb, 4)
              * (A211[2] * B211[0] - B211[2] * A211[0] + A211[3] * B211[1] - B211[3] * A211[1])
              / 8.0;
-  } else {
+  } else if (jcall == 4) {
     S111 = std::pow(zsA * zsB, 2.5) * std::pow(Rb, 5)
            * (A111[4] * B111[0] + B111[4] * A111[0] - 2.0 * A111[2] * B111[2]) / 48.0;
     if (nA > 1 && nB > 1) {
@@ -179,6 +182,61 @@ NVMOLKIT_HD inline int diatomOverlapSpDev(const AtomIntParams& pA, const double 
       S222 = 0.5 * w * (A22[4] * (B22[0] - B22[2]) - B22[4] * (A22[0] - A22[2])
                         - A22[2] * B22[0] + B22[2] * A22[0]);
     }
+  } else if (jcall == 431) {  // heavy qn=3 + H
+    const double sqrt10 = std::sqrt(10.0), sqrt30 = std::sqrt(30.0);
+    S111 = std::pow(zsB, 1.5) * std::pow(zsA, 3.5) * std::pow(Rb, 5)
+           * (A111[4] * B111[0] + 2.0 * B111[1] * A111[3] - 2.0 * A111[1] * B111[3]
+              - B111[4] * A111[0]) / (sqrt10 * 24.0);
+    if (nA > 1)
+      S211 = std::pow(zsB, 1.5) * std::pow(zpA, 3.5) * std::pow(Rb, 5)
+             * (A211[3] * (B211[0] + B211[2]) - A211[1] * (B211[4] + B211[2])
+                + B211[1] * (A211[2] + A211[4]) - B211[3] * (A211[2] + A211[0])) / (8.0 * sqrt30);
+  } else if (jcall == 5) {  // qn=3 - qn=2
+    const double sqrt10 = std::sqrt(10.0), sqrt30 = std::sqrt(30.0);
+    S111 = std::pow(zsB, 2.5) * std::pow(zsA, 3.5) * std::pow(Rb, 6)
+           * (A111[5] * B111[0] + B111[1] * A111[4] - 2.0 * B111[2] * A111[3]
+              - 2.0 * A111[2] * B111[3] + B111[4] * A111[1] + B111[5] * A111[0]) / (sqrt30 * 48.0);
+    if (nA > 1 && nB > 1) {
+      S211 = std::pow(zsB, 2.5) * std::pow(zpA, 3.5) * std::pow(Rb, 6)
+             * (A211[4] * B211[0] + B211[1] * A211[5] - 2.0 * B211[3] * A211[3]
+                - 2.0 * A211[2] * B211[2] + A211[1] * B211[5] + A211[0] * B211[4]) / (48.0 * sqrt10);
+      S121 = std::pow(zpB, 2.5) * std::pow(zsA, 3.5) * std::pow(Rb, 6)
+             * ((A121[4] * B121[0] - A121[5] * B121[1]) + 2.0 * (A121[3] * B121[1] - A121[4] * B121[2])
+                - 2.0 * (A121[1] * B121[3] - A121[2] * B121[4])
+                - (A121[0] * B121[4] - A121[1] * B121[5])) / (48.0 * sqrt10);
+      S221 = std::pow(zpB, 2.5) * std::pow(zpA, 3.5) * std::pow(Rb, 6)
+             * ((A22[3] * B22[0] - A22[5] * B22[2]) + (A22[2] * B22[1] - A22[4] * B22[3])
+                - (A22[1] * B22[2] - A22[3] * B22[4]) - (A22[0] * B22[3] - A22[2] * B22[5]))
+             / (16.0 * sqrt30);
+      S222 = std::pow(zpB, 2.5) * std::pow(zpA, 3.5) * std::pow(Rb, 6)
+             * ((A22[5] - A22[3]) * (B22[0] - B22[2]) + (A22[4] - A22[2]) * (B22[1] - B22[3])
+                - (A22[3] - A22[1]) * (B22[2] - B22[4]) - (A22[2] - A22[0]) * (B22[3] - B22[5]))
+             / (32.0 * sqrt30);
+    }
+  } else {  // jcall == 6: qn=3 - qn=3
+    S111 = std::pow(zsA * zsB, 3.5) * std::pow(Rb, 7)
+           * (A111[6] * B111[0] - 3.0 * B111[2] * A111[4] + 3.0 * A111[2] * B111[4]
+              - A111[0] * B111[6]) / 1440.0;
+    if (nA > 1 && nB > 1) {
+      S211 = std::pow(zsB * zpA, 3.5) * std::pow(Rb, 7)
+             * ((A211[5] * B211[0] + A211[6] * B211[1]) + (-A211[4] * B211[1] - A211[5] * B211[2])
+                - 2.0 * (A211[3] * B211[2] + A211[4] * B211[3])
+                - 2.0 * (-A211[2] * B211[3] - A211[3] * B211[4])
+                + (A211[1] * B211[4] + A211[2] * B211[5])
+                + (-A211[0] * B211[5] - A211[1] * B211[6])) / (480.0 * sqrt3);
+      S121 = std::pow(zpB * zsA, 3.5) * std::pow(Rb, 7)
+             * ((A121[5] * B121[0] - A121[6] * B121[1]) + (A121[4] * B121[1] - A121[5] * B121[2])
+                - 2.0 * (A121[3] * B121[2] - A121[4] * B121[3])
+                - 2.0 * (A121[2] * B121[3] - A121[3] * B121[4])
+                + (A121[1] * B121[4] - A121[2] * B121[5])
+                + (A121[0] * B121[5] - A121[1] * B121[6])) / (480.0 * sqrt3);
+      S221 = std::pow(zpB * zpA, 3.5) * std::pow(Rb, 7)
+             * ((A22[4] * B22[0] - A22[6] * B22[2]) - 2.0 * (A22[2] * B22[2] - A22[4] * B22[4])
+                + (A22[0] * B22[4] - A22[2] * B22[6])) / 480.0;
+      S222 = std::pow(zpB * zpA, 3.5) * std::pow(Rb, 7)
+             * ((A22[6] - A22[4]) * (B22[0] - B22[2]) - 2.0 * (A22[4] - A22[2]) * (B22[2] - B22[4])
+                + (A22[2] - A22[0]) * (B22[4] - B22[6])) / 960.0;
+    }
   }
 
   const double v[3] = {Rvec[0] / R, Rvec[1] / R, Rvec[2] / R};
@@ -190,10 +248,10 @@ NVMOLKIT_HD inline int diatomOverlapSpDev(const AtomIntParams& pA, const double 
 
   for (int i = 0; i < nA * nB; ++i) outBlock[i] = 0.0;
   outBlock[0] = S111;
-  if (jcall == 3) {
+  if (jcall == 3 || jcall == 431) {
     if (nA > 1)
       for (int k = 0; k < 3; ++k) outBlock[(k + 1) * nB + 0] = S211 * r0[k];
-  } else if (jcall == 4) {
+  } else if (jcall == 4 || jcall == 5 || jcall == 6) {
     if (nA > 1 && nB > 1) {
       for (int k = 0; k < 3; ++k) {
         outBlock[(k + 1) * nB + 0] = S211 * r0[k];
