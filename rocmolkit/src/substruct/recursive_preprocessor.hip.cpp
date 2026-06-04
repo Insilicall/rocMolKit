@@ -229,7 +229,6 @@ void RecursivePatternPreprocessor::preprocessMiniBatch(
 
       const size_t patternEnd            = std::min(patternStart + patternsPerSubBatch, numPatterns);
       const size_t numPatternsInSubBatch = patternEnd - patternStart;
-      const size_t numBlocksInSubBatch   = numTargetsInMiniBatch * numPatternsInSubBatch;
 
       ScopedNvtxRange prepareRange("GPU: Upload pattern entries");
       const int       bufferIdx = scratch.acquireBufferIndex();
@@ -240,72 +239,85 @@ void RecursivePatternPreprocessor::preprocessMiniBatch(
       }
       prepareRange.pop();
 
-      const int    buffersPerBlock = gsiBuffersPerBlock;
-      const size_t overflowNeeded  = numBlocksInSubBatch * buffersPerBlock * kOverflowEntriesPerBuffer;
-
-      if (scratch.overflow.size() < overflowNeeded) {
-        scratch.overflow.resize(static_cast<size_t>(overflowNeeded * 1.5));
-      }
-
-      const size_t labelMatrixNeeded = numBlocksInSubBatch * kLabelMatrixWords;
-      if (scratch.labelMatrixBuffer.size() < labelMatrixNeeded) {
-        scratch.labelMatrixBuffer.resize(static_cast<size_t>(labelMatrixNeeded * 1.5));
-      }
+      const int buffersPerBlock = gsiBuffersPerBlock;
 
       if (scratch.patternEntries.size() < numPatternsInSubBatch) {
         scratch.patternEntries.resize(static_cast<size_t>(numPatternsInSubBatch * 1.5));
       }
-
       scratch.patternEntries.copyFromHost(scratch.patternsAtDepthHost[bufferIdx].data(), numPatternsInSubBatch);
       scratch.recordCopy(bufferIdx, scratch.patternEntries.stream());
 
       const uint32_t* recursiveBitsForLabel = (currentDepth > 0) ? miniBatchResults.recursiveMatchBits() : nullptr;
 
-      std::optional<ZeroBuffersSpec> zeroBuffers;
-      if (isFirstLabelKernel) {
-        zeroBuffers = ZeroBuffersSpec{miniBatchResults.recursiveMatchBits(),
-                                      miniBatchSize * miniBatchResults.maxTargetAtoms(),
-                                      miniBatchResults.overflowFlags(),
-                                      miniBatchSize};
-      }
-      isFirstLabelKernel = false;
+      // Process targets in bounded chunks. numBlocks = targets * patterns, and
+      // the overflow / label-matrix scratch is sized from numBlocks; the buffers
+      // are reuse-grown (resized up, freed only when the search ends), so a large
+      // target count otherwise grows the peak to tens of GB and OOMs the GPU.
+      // Chunking caps the peak at kMaxTargetsPerPaint * patterns blocks. The
+      // paint kernels map blockIdx -> (firstTargetIdx + blockIdx / numPatterns),
+      // so a chunk is just a firstTarget offset plus a smaller block count; the
+      // scratch is reused across chunks (launches are stream-ordered).
+      constexpr int kMaxTargetsPerPaint = 512;
+      for (int tStart = 0; tStart < numTargetsInMiniBatch; tStart += kMaxTargetsPerPaint) {
+        const int    numTargetsInChunk   = std::min(kMaxTargetsPerPaint, numTargetsInMiniBatch - tStart);
+        const size_t numBlocksInSubBatch = static_cast<size_t>(numTargetsInChunk) * numPatternsInSubBatch;
+        const int    chunkFirstTarget    = firstTargetInMiniBatch + tStart;
 
-      launchLabelMatrixPaintKernel(paintConfig,
+        const size_t overflowNeeded = numBlocksInSubBatch * buffersPerBlock * kOverflowEntriesPerBuffer;
+        if (scratch.overflow.size() < overflowNeeded) {
+          scratch.overflow.resize(static_cast<size_t>(overflowNeeded * 1.5));
+        }
+        const size_t labelMatrixNeeded = numBlocksInSubBatch * kLabelMatrixWords;
+        if (scratch.labelMatrixBuffer.size() < labelMatrixNeeded) {
+          scratch.labelMatrixBuffer.resize(static_cast<size_t>(labelMatrixNeeded * 1.5));
+        }
+
+        std::optional<ZeroBuffersSpec> zeroBuffers;
+        if (isFirstLabelKernel) {
+          zeroBuffers = ZeroBuffersSpec{miniBatchResults.recursiveMatchBits(),
+                                        miniBatchSize * miniBatchResults.maxTargetAtoms(),
+                                        miniBatchResults.overflowFlags(),
+                                        miniBatchSize};
+        }
+        isFirstLabelKernel = false;
+
+        launchLabelMatrixPaintKernel(paintConfig,
+                                     targetsDevice.view<MoleculeType::Target>(),
+                                     leafSubpatterns_.view(),
+                                     scratch.patternEntries.data(),
+                                     static_cast<int>(numPatternsInSubBatch),
+                                     numBlocksInSubBatch,
+                                     numQueries,
+                                     miniBatchPairOffset,
+                                     miniBatchSize,
+                                     scratch.labelMatrixBuffer.data(),
+                                     chunkFirstTarget,
+                                     recursiveBitsForLabel,
+                                     miniBatchResults.maxTargetAtoms(),
+                                     zeroBuffers,
+                                     stream);
+
+        launchSubstructPaintKernel(paintConfig,
+                                   algorithm,
                                    targetsDevice.view<MoleculeType::Target>(),
                                    leafSubpatterns_.view(),
                                    scratch.patternEntries.data(),
                                    static_cast<int>(numPatternsInSubBatch),
                                    numBlocksInSubBatch,
+                                   miniBatchResults.recursiveMatchBits(),
+                                   miniBatchResults.maxTargetAtoms(),
                                    numQueries,
+                                   0,
+                                   0,
                                    miniBatchPairOffset,
                                    miniBatchSize,
+                                   scratch.overflow.data(),
+                                   scratch.overflow.data(),
+                                   kOverflowEntriesPerBuffer,
                                    scratch.labelMatrixBuffer.data(),
-                                   firstTargetInMiniBatch,
-                                   recursiveBitsForLabel,
-                                   miniBatchResults.maxTargetAtoms(),
-                                   zeroBuffers,
+                                   chunkFirstTarget,
                                    stream);
-
-      launchSubstructPaintKernel(paintConfig,
-                                 algorithm,
-                                 targetsDevice.view<MoleculeType::Target>(),
-                                 leafSubpatterns_.view(),
-                                 scratch.patternEntries.data(),
-                                 static_cast<int>(numPatternsInSubBatch),
-                                 numBlocksInSubBatch,
-                                 miniBatchResults.recursiveMatchBits(),
-                                 miniBatchResults.maxTargetAtoms(),
-                                 numQueries,
-                                 0,
-                                 0,
-                                 miniBatchPairOffset,
-                                 miniBatchSize,
-                                 scratch.overflow.data(),
-                                 scratch.overflow.data(),
-                                 kOverflowEntriesPerBuffer,
-                                 scratch.labelMatrixBuffer.data(),
-                                 firstTargetInMiniBatch,
-                                 stream);
+      }
     }
 
     if (currentDepth < numDepthEvents && depthEvents != nullptr) {
