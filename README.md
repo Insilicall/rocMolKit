@@ -20,12 +20,13 @@ HIP/ROCm port of [nvMolKit](https://github.com/NVIDIA-Digital-Bio/nvMolKit) (NVI
 
 Conformers per second (higher is better), measured on an **AMD Radeon RX 9060 XT** (Navi 44, gfx1200, RDNA4, 32 CUs) + Ryzen 5 7600, ROCm 7.2.3, dataset `tests/data/druglike_100.smi`.
 
-| Workload | **rocMolKit**<br>(RX 9060 XT) | RDKit CPU<br>(12 threads, same host) | mlxmolkit<br>(Apple Metal, published) |
-|---|---|---|---|
-| **ETKDG generation** (DG + ETK) | **~6,200** | ~870 | ~2,000–2,600 |
-| **MMFF94 optimization** | **~29,000–43,000** | ~1,200 | ~8,700–12,000 |
+| Workload | **rocMolKit**<br>(RX 9060 XT) | RDKit CPU<br>(1 core) | RDKit CPU<br>(12 threads) | mlxmolkit<br>(Apple Metal, published) |
+|---|---|---|---|---|
+| **ETKDG generation** (DG + ETK) | **~6,200** | ~554 | ~1,136 | ~2,000–2,600 |
+| **MMFF94 optimization** | **~29,000–43,000** | ~379 | ~2,076 | ~8,700–12,000 |
 
-- **~7× faster than 12-thread RDKit** on ETKDG generation, **~25–35×** on MMFF94 optimization.
+- ETKDG: **~11× faster than single-core RDKit**, **~5.5× faster than 12-thread RDKit**.
+- MMFF94: **~75–110× faster than single-core**, **~14–21× faster than 12-thread**.
 - **~2.5–3× faster than mlxmolkit** on both workloads, including the high-conformers-per-molecule regime.
 
 > Hardware differs across ports — mlxmolkit numbers are from its published README on Apple Silicon (~14 TFLOPS FP32) vs the RX 9060 XT (~25.6 TFLOPS FP32). Read it as "each port on the accelerator it targets," not a same-machine shoot-out. Full methodology, caveats, and the root-cause write-up are in [docs/PERFORMANCE_HIP.md](docs/PERFORMANCE_HIP.md).
@@ -35,6 +36,33 @@ Reproduce:
 ```bash
 python3 tools/etkdg_bench.py 1000 4     # ETKDG generation, N=1000 molecules × k=4 conformers
 python3 tools/mmff_fresh.py  1000 4     # MMFF94 optimization, fresh conformers
+```
+
+### Building blocks (fingerprints, similarity, substructure, TFD, clustering)
+
+GPU vs RDKit CPU on the same host, measured at scale where the GPU saturates
+(throughput grows with batch size while the CPU stays flat). Speedups are GPU
+vs single-core / vs 12-thread RDKit.
+
+| Operation | Scale | **rocMolKit (GPU)** | RDKit (1 core) | RDKit (12 threads) | Speedup |
+|---|---|---|---|---|---|
+| **Morgan fingerprints** | 500k mols | **1.5M mol/s** | 96k | 216k | **16× / 7×** |
+| **Tanimoto similarity** | 10k × 10k | **10B pair/s** | 16M | 15M | **645× / 658×** |
+| **Substructure** | 50k × 29 | **4.7M pair/s** | 1.2M | 393k | **3.9× / 12×** |
+| **TFD** | 1000 mols × 10 conf | **8.4M pair/s** | 68k | 61k | **123× / 137×** |
+| **Butina clustering** | 8k mols | **274k mol/s** | 5.6k | 5.6k | **49× / 48×** |
+
+- The O(N²) operations (similarity, clustering) leave multi-threaded RDKit
+  furthest behind; RDKit's `BulkTanimotoSimilarity` / `GetTFDMatrix` / Butina are
+  effectively single-threaded (the 1-core and 12-thread columns match), so the
+  GPU lead widens with N.
+- **Substructure** handles any SMARTS, including recursive (`[$(...)]`). Large
+  target sets are chunked internally and GPU memory is released between chunks,
+  so a single call scales to any number of targets without exhausting the device
+  (the throughput above is for the simple-SMARTS, all-pairs case).
+
+```bash
+python3 tools/bench_features.py         # the table above, GPU vs RDKit 1-core / 12-thread
 ```
 
 ## Quickstart
