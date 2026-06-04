@@ -4,7 +4,50 @@ All notable changes to rocMolKit will be documented here.
 
 ## [unreleased]
 
+## [v0.4.0] — 2026-06-04
+
+First **beta**: every module in the porting plan is now ported to HIP/RDNA4 and
+validated against RDKit on a gfx1200 GPU. Joins the already-shipping ETKDG,
+MMFF94, UFF, batched forcefield and conformer RMSD.
+
+### Added
+- **Morgan fingerprints on GPU (F1)** — bit-exact vs RDKit `MorganGenerator`.
+  128-atom tile rewritten to block-level cooperation for AMD wave64;
+  `cuda::std::span` CTAD replaced with a `__host__ __device__` helper. Module
+  `_Fingerprints`. Validator `tools/fp_validate.py`.
+- **Tanimoto/Cosine similarity on GPU (F2)** — bit-exact vs
+  `DataStructs.BulkTanimotoSimilarity` (max|Δ|=0 over 10k pairs). NVIDIA binary
+  tensor-core (BMMA) PTX guarded out on AMD; the `__popc` popcount fallback
+  runs and is correct on wave64. Module `_DataStructs`. Validator
+  `tools/sim_validate.py`.
+- **Substructure search on GPU (F5)** — 840/840 matches vs RDKit
+  `HasSubstructMatch`. Module `_substructure`. Validator `tools/ss_validate.py`.
+- **Butina clustering on GPU (F3)** — matches RDKit `Butina.ClusterData`
+  exactly at low cutoffs; at high cutoffs differs only by valid parallel
+  tie-breaks (every GPU cluster is ball-valid). Module `_clustering`. Validator
+  `tools/butina_validate.py`.
+- **Torsion Fingerprint Deviation on GPU (F4)** — matches RDKit `GetTFDMatrix`
+  to float32 precision (worst max|Δ|=4e-4). Module `_TFD`. Validator
+  `tools/tfd_validate.py`.
+- **GPU integration test suite** `tests/test_gpu_features.py` — the four feature
+  validators wired into pytest as `gpu`-marked tests. Run with
+  `pytest tests/ --rocm`; skipped (and `importorskip`-guarded) otherwise.
+- **`tools/validate_gpu.sh`**: single-command post-reboot validation.
+  Refuses to run if it detects the leaked-VRAM state (>200 MB held with
+  no `/dev/kfd` holders), then runs the sweep against the devel image.
+
 ### Fixed
+- **Butina wave64 correctness** — `pruneNeighborlistKernel` mixed a 32-lane
+  cooperative-groups tile with a default-width `hipcub::WarpReduce`, which is
+  64-wide on AMD and merged two tiles' neighbor counts, collapsing unrelated
+  points into one giant cluster. Rewritten with a wave-agnostic shared-memory
+  compaction (no hipcub warp primitives).
+- **Butina renumber corruption** — `hipcub::DeviceRadixSort::SortPairs` returned
+  a garbled permutation on gfx1200, corrupting the old→new id remap (points
+  ended up with negative ids). Replaced with a stable host argsort in
+  `renumberClustersBySize`.
+- **Conditional-graph clustering loop** — the Butina conditional-WHILE CUDA
+  Graph nodes (no HIP equivalent) became host-driven do-while loops.
 - **Dockerfile.slim runtime imports**: published v0.3.2-alpha-slim
   image cannot `import rocmolkit._embedMolecules`. Two packaging gaps:
   (1) `LD_LIBRARY_PATH` was `/opt/rocm/lib` only — missing
@@ -17,6 +60,12 @@ All notable changes to rocMolKit will be documented here.
   import ..."` smoke test that fails the build (and CI) on regression.
 
 ### Changed
+- **Status: alpha → beta.** README banner and roadmap updated; nothing in the
+  porting plan is disabled anymore.
+- **CI `rocm-runner` job** now builds the devel image and runs
+  `pytest tests/ --rocm` (was a non-configuring `ctest` path). Gated on the
+  repo variable `ROCM_RUNNER_ONLINE` instead of `if: false`, so it skips cleanly
+  until a `[self-hosted, rocm]` runner is registered.
 - **`tools/benchmark.py` rewritten**: drops the `--n`-only mode in favour
   of an `(N, k)` sweep that exercises both GPU parallelism axes. CPU
   baseline now uses RDKit's multi-threaded `EmbedMultipleConfs` —
@@ -24,11 +73,8 @@ All notable changes to rocMolKit will be documented here.
   alongside. GPU paths always pass `BatchHardwareOptions(gpuIds=[0])`
   to pin the discrete device. Each phase is SIGALRM-bounded so a stuck
   GPU does not wedge the whole run.
-
-### Added
-- **`tools/validate_gpu.sh`**: single-command post-reboot validation.
-  Refuses to run if it detects the leaked-VRAM state (>200 MB held with
-  no `/dev/kfd` holders), then runs the sweep against the devel image.
+- **Version** bumped to 0.4.0; `pyproject.toml` realigned (was a stale 0.1.0 /
+  "Pre-Alpha") to match `rocmolkit.__version__` and the beta classifier.
 
 ## [v0.3.2-alpha] — 2026-05-14
 
