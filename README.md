@@ -148,19 +148,8 @@ ROCMOLKIT_NO_PULL=1 bash tools/test_image.sh   # reuse the local image
 Public CI (`.github/workflows/ci.yml`) runs on PR open / reopen / ready — **not**
 on every push to an open PR — plus tag pushes and manual dispatch. It builds
 `rocmolkit_core`, the bindings, and the devel/slim images, and runs the non-GPU
-tests. The GPU suite runs in the `rocm-runner` job, gated behind a **self-hosted
-runner**:
-
-1. Register a runner on a ROCm machine with the labels `self-hosted,rocm`
-   (Settings → Actions → Runners → New self-hosted runner). It needs Docker with
-   GPU passthrough (`--device=/dev/kfd --device=/dev/dri`).
-2. Set the repo variable `ROCM_RUNNER_ONLINE=true` (Settings → Secrets and
-   variables → Actions → Variables). The job stays skipped until then, so PRs
-   never queue waiting on an absent runner. Flip it back to disable.
-
-Once enabled, every gating CI run builds the devel image from source (so it
-ships **all** current bindings) and runs `pytest tests/ --rocm` against RDKit on
-the GPU.
+tests. The GPU suite needs an AMD GPU, so it is run on demand on a ROCm machine —
+see [Testing](#testing) above.
 
 ### Publishing images
 
@@ -187,9 +176,7 @@ for the architecture and the optimization history.
 
 Core modules are ported and validated (ETKDG, MMFF94, UFF, batched forcefield,
 conformer RMSD, fingerprints, similarity, Butina clustering, substructure, TFD).
-Next: a self-hosted ROCm CI runner to gate the upstream test suites on real
-hardware, and refreshed devel/slim images shipping the new bindings. See
-[PLAN.md](PLAN.md).
+See [PLAN.md](PLAN.md).
 
 ## License
 
