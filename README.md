@@ -3,7 +3,7 @@
 [![ci](https://github.com/Insilicall/rocMolKit/actions/workflows/ci.yml/badge.svg)](https://github.com/Insilicall/rocMolKit/actions/workflows/ci.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
-**GPU-accelerated conformer generation and force-field optimization for RDKit, on AMD GPUs** — via HIP/ROCm.
+**A high-performance, GPU-accelerated library for everyday computational-chemistry work on AMD GPUs** — conformer generation, force-field geometry optimization, fingerprints, molecular similarity, clustering, substructure search and torsion-fingerprint deviation, via HIP/ROCm. Drop-in for RDKit workflows.
 
 HIP/ROCm port of [nvMolKit](https://github.com/NVIDIA-Digital-Bio/nvMolKit) (NVIDIA CUDA, Apache 2.0) — same API surface, AMD backend. On a **consumer** Radeon RX 9060 XT it runs ETKDG conformer generation and MMFF94 optimization **faster than the published Apple-Silicon sibling port ([mlxmolkit](https://github.com/guillaume-osmo/mlxmolkit))** and an order of magnitude faster than multi-threaded RDKit on CPU.
 
