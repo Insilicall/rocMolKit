@@ -227,7 +227,7 @@ gfx1200**, then its `_<Module>.so` binding is added back to
 | Phase | Module | Blocker to remove | Verify with | Depends on |
 |---|---|---|---|---|
 | F1 | ✅ **Fingerprints (Morgan)** — **done** (bit-exact vs RDKit MorganGenerator, 103/103 incl. 70–110-atom molecules). 128-atom tile rewritten to block-level cooperation (AMD wave64); `cuda::std::span` CTAD replaced with a `__host__ __device__` helper; non-trivial `__shared__` backed by a raw buffer. Caveat: the 64-atom warp-sort still mismaps on wave64, so 32–127-atom molecules route through the (correct) 128-atom kernel — `tools/fp_validate.py`. | `cooperative_groups` tile>wavefront + `cuda::std::span` deduction | `test_morgan_fingerprint` | — |
-| F2 | **Similarity (Tanimoto/Cosine)** | PTX inline asm (BMMA tensor-core matmul + async copy) in `macros_ptx.hip.h` | `test_similarity` | F1 |
+| F2 | ✅ **Similarity (Tanimoto/Cosine)** — **done** (bit-exact vs RDKit BulkTanimotoSimilarity, 10000/10000 pairs `max\|Δ\|=0`; cosine self-sim diag==1 + symmetric — `tools/sim_validate.py`). NVIDIA BMMA tensor-core PTX (`mma.sync…b1…popc`) guarded out on AMD; `supportsTensorOps()` returns false so the `__popc` fallback runs (correct on wave64). | PTX inline asm (BMMA tensor-core matmul + async copy) in `macros_ptx.hip.h` | `test_similarity` | F1 |
 | F3 | **Butina clustering** | CUDA Graphs Conditional nodes (no hipGraph conditional) | `test_butina` | F1, F2 |
 | F4 | **TFD** | depends on butina (kernels in `src/tfd/` are already written) | `test_tfd{,_cpu,_gpu,_kernels}` | F3 |
 | F5 | ✅ **Substructure — done** (840/840 pairs match RDKit HasSubstructMatch via tools/ss_validate.py) | `cudaSharedmemCarveoutMaxShared` → `hipFuncAttributePreferredSharedMemoryCarveout` (value 100) | `test_substruct_{algos,integration,label_integration,search}` | — (independent) |
@@ -237,9 +237,10 @@ Notes / per-phase work:
 - **F1 Fingerprints** — replace `block_tile_memory` with an explicit `__shared__`
   scratch buffer; pin the `cuda::std::span` element types so deduction works.
   Re-enable `morgan_fingerprint_kernels.hip.cpp` + `morgan_fingerprint*.cpp`.
-- **F2 Similarity** — the bitwise Tanimoto does not need tensor cores; replace
-  the BMMA/async-copy PTX path with a plain `__popcll` popcount loop (or rocWMMA
-  on RDNA4) and drop the async-copy fast path.
+- **F2 Similarity** — ✅ done. The bitwise Tanimoto does not need tensor cores:
+  the BMMA/async-copy PTX in `macros_ptx.hip.h` is `#if`-guarded to NVIDIA, with
+  AMD stubs that only need to compile (`supportsTensorOps()` is false on AMD, so
+  the existing `__popc` popcount path runs and matches RDKit exactly).
 - **F3 Butina** — replace the conditional-graph cluster loop with a host-driven
   iteration (or a plain hipGraph without conditional nodes). Needs the F1+F2
   similarity matrix.

@@ -31,6 +31,12 @@ namespace {
 //! Detects if we can use BMMA tensor operations for the given device compute capability,
 //! taking into account compile-time targets.
 bool supportsTensorOps(const int major, const int minor) {
+#if defined(__HIP_PLATFORM_AMD__)
+  // AMD has no binary tensor-core (BMMA) equivalent; always take the __popc path.
+  (void)major;
+  (void)minor;
+  return false;
+#else
   // BMMA m16n8k256 .b1 {.and,.xor}.popc is supported on sm_80+ per PTX ISA, including Blackwell.
   // We explicitly support Ampere/Ada (8.x), Hopper (9.0), and Blackwell sm_100 / sm_120.
   if (major != 8 && major != 9 && major != 10 && major != 12) {
@@ -64,6 +70,7 @@ bool supportsTensorOps(const int major, const int minor) {
     return true;
   }
   return false;
+#endif
 }
 
 //! Cast a device vector to a span of a type smaller or equal to self.

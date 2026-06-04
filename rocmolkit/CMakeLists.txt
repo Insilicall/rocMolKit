@@ -67,8 +67,9 @@ list(FILTER ROCMOLKIT_CPP_SOURCES EXCLUDE REGEX "/bfgs_hessian_stub\\.cpp$")
 # F1: Morgan fingerprints re-enabled (block_tile_memory + cuda::std::span shims).
 # list(FILTER ROCMOLKIT_HIP_SOURCES EXCLUDE REGEX "/morgan_fingerprint_kernels\\.hip\\.cpp$")
 # list(FILTER ROCMOLKIT_CPP_SOURCES EXCLUDE REGEX "/morgan_fingerprint(_gpu|_common)?\\.cpp$")
-list(FILTER ROCMOLKIT_HIP_SOURCES EXCLUDE REGEX "/similarity_kernels\\.hip\\.cpp$")
-list(FILTER ROCMOLKIT_CPP_SOURCES EXCLUDE REGEX "/similarity\\.cpp$")
+# F2: similarity re-enabled
+# list(FILTER ROCMOLKIT_HIP_SOURCES EXCLUDE REGEX "/similarity_kernels\\.hip\\.cpp$")
+# list(FILTER ROCMOLKIT_CPP_SOURCES EXCLUDE REGEX "/similarity\\.cpp$")
 # list(FILTER ROCMOLKIT_HIP_SOURCES EXCLUDE REGEX "/symmetric_eigensolver\\.hip\\.cpp$")
 list(FILTER ROCMOLKIT_CPP_SOURCES EXCLUDE REGEX "/(tfd|testutils)/")
 list(FILTER ROCMOLKIT_CPP_SOURCES EXCLUDE REGEX "/(butina|tfd)\\.cpp$")
