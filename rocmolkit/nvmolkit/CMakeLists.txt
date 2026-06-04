@@ -23,6 +23,7 @@ set(ROCMOLKIT_PHASE2_BINDINGS
     batchedForcefield
     conformerRmsd
     arrayHelpers
+    Fingerprints   # F1: Morgan fingerprints (module _Fingerprints, source fingerprints.cpp)
 )
 
 # Each name corresponds to a `_<NameCamelCase>.so` plus `<source>.cpp`.
@@ -32,6 +33,8 @@ foreach(_binding IN LISTS ROCMOLKIT_PHASE2_BINDINGS)
     # arrayHelpers (matches the BOOST_PYTHON_MODULE name in array_helpers.cpp).
     if(_binding STREQUAL "arrayHelpers")
         set(_src "${CMAKE_CURRENT_SOURCE_DIR}/array_helpers.cpp")
+    elseif(_binding STREQUAL "Fingerprints")
+        set(_src "${CMAKE_CURRENT_SOURCE_DIR}/fingerprints.cpp")
     else()
         set(_src "${CMAKE_CURRENT_SOURCE_DIR}/${_binding}.cpp")
     endif()
