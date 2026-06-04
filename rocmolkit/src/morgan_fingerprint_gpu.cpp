@@ -259,9 +259,12 @@ AsyncDeviceVector<FlatBitVect<fpSize>> computeFingerprintsCuImpl(const std::vect
     const auto& mol = *mols[i];
     if (mol.getNumAtoms() < 32 && mol.getNumBonds() < 32) {
       work32.push_back(i);
-    } else if (mol.getNumAtoms() < 64 && mol.getNumBonds() < 64) {
-      work64.push_back(i);
     } else if (mol.getNumAtoms() < 128 && mol.getNumBonds() < 128) {
+      // 32-127 atoms all go through the 128-atom (block-level) kernel. The
+      // dedicated 64-atom kernel uses a 32-wide-warp WarpMergeSort that does not
+      // map correctly onto the AMD wave64 (neighbourhood dedup breaks, leaving
+      // extra fingerprint bits); the block-level path is validated bit-exact vs
+      // RDKit. work64 stays empty until the 64-atom sort is ported. TODO(F1).
       work128.push_back(i);
     } else {
       workLarge.push_back(i);

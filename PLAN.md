@@ -226,7 +226,7 @@ gfx1200**, then its `_<Module>.so` binding is added back to
 
 | Phase | Module | Blocker to remove | Verify with | Depends on |
 |---|---|---|---|---|
-| F1 | **Fingerprints (Morgan)** | `cooperative_groups::block_tile_memory` (NVIDIA-only) + `cuda::std::span` template deduction | `test_morgan_fingerprint`, `test_morgan_fingerprint_ref` | — |
+| F1 | ✅ **Fingerprints (Morgan)** — **done** (bit-exact vs RDKit MorganGenerator, 103/103 incl. 70–110-atom molecules). 128-atom tile rewritten to block-level cooperation (AMD wave64); `cuda::std::span` CTAD replaced with a `__host__ __device__` helper; non-trivial `__shared__` backed by a raw buffer. Caveat: the 64-atom warp-sort still mismaps on wave64, so 32–127-atom molecules route through the (correct) 128-atom kernel — `tools/fp_validate.py`. | `cooperative_groups` tile>wavefront + `cuda::std::span` deduction | `test_morgan_fingerprint` | — |
 | F2 | **Similarity (Tanimoto/Cosine)** | PTX inline asm (BMMA tensor-core matmul + async copy) in `macros_ptx.hip.h` | `test_similarity` | F1 |
 | F3 | **Butina clustering** | CUDA Graphs Conditional nodes (no hipGraph conditional) | `test_butina` | F1, F2 |
 | F4 | **TFD** | depends on butina (kernels in `src/tfd/` are already written) | `test_tfd{,_cpu,_gpu,_kernels}` | F3 |

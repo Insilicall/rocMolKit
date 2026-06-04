@@ -27,6 +27,38 @@ namespace cg = cooperative_groups;
 #include "flat_bit_vect.h"
 #include "morgan_fingerprint_kernels.h"
 
+// `cuda::std::span` aliases the host std::span, whose CTAD deduction guides are
+// host-only and therefore unusable from a __global__/__device__ context (the
+// upstream code builds spans inside kernels via CTAD). Deduce the element type
+// from the pointer through a __host__ __device__ function template instead —
+// function-template argument deduction works on device, unlike class CTAD — and
+// construct with the explicit-type span constructor.
+template <typename T>
+__host__ __device__ inline cuda::std::span<T> makeSpan(T* ptr, std::size_t count) {
+  return cuda::std::span<T>(ptr, count);
+}
+
+// AMD `tiled_partition` is capped at the wavefront size (<=64 lanes). The
+// 128-atom path needs one cooperative group per molecule spanning the whole
+// 128-thread block (two wavefronts), which a tile cannot express. Wrap the block
+// in a tile-compatible adapter for that case so the kernel body keeps using a
+// single `tile` interface (only thread_rank / meta_group_rank / sync are used).
+struct BlockAsTile {
+  cooperative_groups::thread_block block;
+  __device__ int                   thread_rank() const { return static_cast<int>(block.thread_rank()); }
+  __device__ int                   meta_group_rank() const { return 0; }
+  __device__ void                  sync() const { block.sync(); }
+};
+
+template <std::size_t maxAtoms>
+__device__ inline auto makeMoleculeTile(cooperative_groups::thread_block& block) {
+  if constexpr (maxAtoms <= 64) {
+    return cooperative_groups::tiled_partition<maxAtoms>(block);
+  } else {
+    return BlockAsTile{block};
+  }
+}
+
 namespace nvMolKit {
 
 namespace {
@@ -176,7 +208,9 @@ __global__ void morganFingerprintKernelBatch(const cuda::std::span<std::uint32_t
   // larger than a warp.
   __shared__ cg::block_tile_memory<maxAtoms> shared;
   cg::thread_block                           block = this_thread_block(shared);
-  auto                                       tile  = cg::tiled_partition<maxAtoms>(block);
+  // One cooperative group per molecule. For <=64 atoms a wavefront-sized tile;
+  // for 128 the whole block (AMD tiles cannot exceed the wavefront).
+  auto tile = makeMoleculeTile<maxAtoms>(block);
 
   // Each block is split into tiles of size maxAtoms. Each tile processes one molecule.
   // TODO: For maxAtoms == 32 (one warp), consider warp-level shuffles and reductions for additional speedups.
@@ -234,7 +268,12 @@ __global__ void morganFingerprintKernelBatch(const cuda::std::span<std::uint32_t
   __shared__ int           sortOrderings[kBlockSize];                             // kBlockSize ints
 
   __shared__ FlatBitVect<fpSize> localUpdateAccumulator[tilesPerBlock];  // one per tile
-  __shared__ AccumTuple          sharedAccums[kBlockSize];               // one per thread, used for tile sort
+  // AccumTuple (a cuda::std::tuple) has a non-trivial default constructor, which
+  // HIP forbids for __shared__ variables. Back it with a raw, correctly-aligned
+  // shared buffer; every slot is written before it is read, so no construction is
+  // needed.
+  __shared__ alignas(AccumTuple) unsigned char sharedAccumsStorage[kBlockSize * sizeof(AccumTuple)];
+  AccumTuple* sharedAccums = reinterpret_cast<AccumTuple*>(sharedAccumsStorage);
 
   const int tileOffset = tileId * tileSliceSize;
   const int sharedIdx  = tileOffset + atomIdx;
@@ -283,7 +322,7 @@ __global__ void morganFingerprintKernelBatch(const cuda::std::span<std::uint32_t
       const int numberOfBondsThisAtom =
         populateThisRoundNeighborhoods<maxAtoms>(roundAtomNeighborhoodsArray[sharedIdx],
                                                  neighborhoodInvariants,
-                                                 cuda::std::span(atomNeighborhoodsArray + tileOffset, tileSliceSize),
+                                                 makeSpan(atomNeighborhoodsArray + tileOffset, tileSliceSize),
                                                  bondInvariantsThisMol,
                                                  atomBondIndices,
                                                  atomBondOtherAtomIndices,
@@ -333,6 +372,10 @@ __global__ void morganFingerprintKernelBatch(const cuda::std::span<std::uint32_t
       sharedAccums[sharedIdx] = accumSeq[0];
       block.sync();
     } else if constexpr (maxAtoms == 64) {
+      // NOTE: this 32-wide-warp / 2-items-per-lane sort does not map correctly
+      // onto the AMD wave64 (neighbourhood dedup breaks). The dispatcher routes
+      // 32-127 atom molecules to the 128-atom block-level kernel instead, so this
+      // path is currently unreached; left as-is for a future wave64 port. TODO(F1).
       __shared__ typename hipcub::WarpMergeSort<AccumTuple, 2, 32>::TempStorage warp_temp_64[tilesPerBlock];
       // First warp in the tile sorts the 64 items with 2 items per lane
       if (tile.thread_rank() < 32) {
@@ -386,8 +429,8 @@ __global__ void morganFingerprintKernelBatch(const cuda::std::span<std::uint32_t
 
     bool foundInThisRound = findMatchingNeighborhood<maxAtoms>(
       thisSortedNeighborhood,
-      cuda::std::span(roundAtomNeighborhoodsArray + tileOffset, nAtomsInMolecule),  // full original-indexed view
-      cuda::std::span(sortOrderings + tileOffset, atomIdx));  // only check earlier sorted positions
+      makeSpan(roundAtomNeighborhoodsArray + tileOffset, nAtomsInMolecule),  // full original-indexed view
+      makeSpan(sortOrderings + tileOffset, atomIdx));  // only check earlier sorted positions
 
     tile.sync();
     if (activeThread && foundInThisRound) {
@@ -399,8 +442,8 @@ __global__ void morganFingerprintKernelBatch(const cuda::std::span<std::uint32_t
     for (int prevRadius = 0; activeThread && prevRadius < envAndNeighborhoodOffset; prevRadius++) {
       if (findMatchingNeighborhood<maxAtoms>(
             thisSortedNeighborhood,
-            cuda::std::span(allSeenNeighborhoodsThisMol.subspan(prevRadius * maxAtoms, nAtomsInMolecule)),
-            cuda::std::span(sortOrderings + tileOffset, nAtomsInMolecule))) {
+            allSeenNeighborhoodsThisMol.subspan(prevRadius * maxAtoms, nAtomsInMolecule),
+            makeSpan(sortOrderings + tileOffset, nAtomsInMolecule))) {
         setDeadAtom(deadAtomsArray, tileOffset + static_cast<int>(origIndex), true);
 
         foundInPrevious = true;
