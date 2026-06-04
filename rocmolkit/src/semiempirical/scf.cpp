@@ -428,8 +428,13 @@ bool heatOfFormationKcal(int nAtoms, const int* atoms, const double* coords, dou
   const double eNuc = nuclearRepulsionEv(nAtoms, atoms, coords);
   double eisol = 0.0, eheat = 0.0;
   for (int a = 0; a < nAtoms; ++a) {
-    eisol += pm6Eisol(atoms[a]);
-    eheat += pm6Eheat(atoms[a]);
+    const double ei = pm6Eisol(atoms[a]);
+    const double eh = pm6Eheat(atoms[a]);
+    // Every HoF-supported element has nonzero eisol and eheat, so a zero is the
+    // unsupported sentinel: fail rather than fold a missing term into the sum.
+    if (ei == 0.0 || eh == 0.0) return false;
+    eisol += ei;
+    eheat += eh;
   }
   const double eBinding = (res.electronicEv + eNuc) - eisol;  // eV
   *hofKcal = eBinding * kEvToKcal + eheat;

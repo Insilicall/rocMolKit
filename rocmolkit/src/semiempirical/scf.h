@@ -53,7 +53,9 @@ bool mullikenCharges(int nAtoms, const int* atoms, const double* coords, double*
 
 // PM6_D core-core (nuclear) repulsion energy in eV (AM1-style: (ss|ss) Coulomb
 // with the per-element exponential + Gaussian corrections and the N-H/O-H
-// special case). atoms/coords as in scfSp.
+// special case). atoms/coords as in scfSp. Pairs with an unparameterized atom
+// are skipped (the heatOfFormationKcal path never passes one — its spBasisSize
+// gate rejects them first).
 double nuclearRepulsionEv(int nAtoms, const int* atoms, const double* coords);
 
 // Heat of formation in kcal/mol: (E_elec + E_nuc - sum eisol) * eV->kcal + sum
