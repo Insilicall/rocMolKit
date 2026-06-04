@@ -47,6 +47,15 @@ bool twoCenterMolecular(int zA, const double coordA[3],
                         int zB, const double coordB[3],
                         double* w, double* e1b, double* e2a);
 
+// GPU batch: compute the molecular-frame two-center integrals (w/e1b/e2a) for
+// nPairs atom pairs on the device. Inputs/outputs are host pointers; the entry
+// handles allocation and transfer. zA/zB are atomic numbers (length nPairs);
+// coordA/coordB are nPairs*3 (Angstrom). w is nPairs*256, e1b/e2a are nPairs*16.
+// Defined in two_center_kernels.hip.cpp. Returns false on an unsupported element.
+bool twoCenterMolecularBatchGpu(int nPairs, const int* zA, const double* coordA,
+                                const int* zB, const double* coordB,
+                                double* w, double* e1b, double* e2a);
+
 }  // namespace semiempirical
 }  // namespace nvMolKit
 
