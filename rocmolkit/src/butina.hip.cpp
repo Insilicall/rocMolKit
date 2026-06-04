@@ -18,6 +18,10 @@
 
 #include <hipcub/hipcub.hpp>
 
+#include <algorithm>
+#include <numeric>
+#include <vector>
+
 #include "butina.h"
 #include "cub_helpers.hip.h"
 #include "host_vector.h"
@@ -317,17 +321,6 @@ __global__ void countClusterSizesKernel(const cuda::std::span<const int> cluster
   }
 }
 
-//! Build the remapping array from sorted cluster IDs. After sorting by (-size, originalId),
-//! the position in the sorted array is the new cluster ID.
-__global__ void createNewIndexMapping(const cuda::std::span<const int> sortedOriginalIds,
-                                      const cuda::std::span<int>       remap) {
-  const int numClusters = static_cast<int>(sortedOriginalIds.size());
-  for (int newId = blockIdx.x * blockDim.x + threadIdx.x; newId < numClusters; newId += blockDim.x * gridDim.x) {
-    const int originalId = sortedOriginalIds[newId];
-    remap[originalId]    = newId;
-  }
-}
-
 //! Apply the remapping to all cluster assignments.
 __global__ void applyNewIndices(const cuda::std::span<int> clusters, const cuda::std::span<const int> remap) {
   const int numPoints = static_cast<int>(clusters.size());
@@ -345,17 +338,6 @@ __global__ void remapCentroidsKernel(const cuda::std::span<const int> sortedOrig
   if (idx < numClusters) {
     const int originalId   = sortedOriginalIds[idx];
     remappedCentroids[idx] = centroids[originalId];
-  }
-}
-
-//! Setup sort keys for cluster renumbering: keys[i] = -sizes[i] (for descending), ids[i] = i
-__global__ void setupSortKeysKernel(const cuda::std::span<const int> sizes,
-                                    const cuda::std::span<int>       keys,
-                                    const cuda::std::span<int>       ids) {
-  const int numClusters = static_cast<int>(sizes.size());
-  for (int idx = blockIdx.x * blockDim.x + threadIdx.x; idx < numClusters; idx += blockDim.x * gridDim.x) {
-    keys[idx] = -sizes[idx];
-    ids[idx]  = idx;
   }
 }
 
@@ -378,10 +360,6 @@ void renumberClustersBySize(const cuda::std::span<int> clusters,
   const int numPoints = static_cast<int>(clusters.size());
 
   AsyncDeviceVector<int> clusterSizes(numClusters, stream);
-  AsyncDeviceVector<int> sortKeys(numClusters, stream);
-  AsyncDeviceVector<int> originalIds(numClusters, stream);
-  AsyncDeviceVector<int> sortedOriginalIds(numClusters, stream);
-
   clusterSizes.zero();
 
   constexpr int blockSize         = 256;
@@ -391,52 +369,45 @@ void renumberClustersBySize(const cuda::std::span<int> clusters,
   countClusterSizesKernel<<<numBlocksRenumber, blockSize, 0, stream>>>(clusters, toSpan(clusterSizes));
   cudaCheckError(hipGetLastError());
 
-  // Prepare sort keys: negative size for descending order
-  setupSortKeysKernel<<<numBlocksRenumber, blockSize, 0, stream>>>(toSpan(clusterSizes),
-                                                                   toSpan(sortKeys),
-                                                                   toSpan(originalIds));
-  cudaCheckError(hipGetLastError());
+  // Argsort cluster ids by descending size on the host. numClusters is small
+  // (<= numPoints) and this runs once, at the very end. A device-wide
+  // hipcub::DeviceRadixSort::SortPairs proved unreliable here for these inputs
+  // (returned a garbled permutation, corrupting the remap), and a stable host
+  // sort is trivially correct. Stable order ties-breaks by original id, matching
+  // the previous (negative-size, original-id) key design.
+  std::vector<int> sizes(numClusters);
+  cudaCheckError(
+    hipMemcpyAsync(sizes.data(), clusterSizes.data(), numClusters * sizeof(int), hipMemcpyDefault, stream));
+  cudaCheckError(hipStreamSynchronize(stream));
 
-  // Sort by (negative size, original id) to get descending size order with stable tiebreak
-  // Reuse clusterSizes as sortedKeys output (we never read the sorted keys)
-  std::size_t sortTempBytes = 0;
-  hipcub::DeviceRadixSort::SortPairs(nullptr,
-                                  sortTempBytes,
-                                  sortKeys.data(),
-                                  clusterSizes.data(),
-                                  originalIds.data(),
-                                  sortedOriginalIds.data(),
-                                  numClusters,
-                                  0,
-                                  sizeof(int) * 8,
-                                  stream);
-  const AsyncDeviceVector<uint8_t> sortTemp(sortTempBytes, stream);
-  hipcub::DeviceRadixSort::SortPairs(sortTemp.data(),
-                                  sortTempBytes,
-                                  sortKeys.data(),
-                                  clusterSizes.data(),
-                                  originalIds.data(),
-                                  sortedOriginalIds.data(),
-                                  numClusters,
-                                  0,
-                                  sizeof(int) * 8,
-                                  stream);
-  cudaCheckError(hipGetLastError());
+  std::vector<int> sortedOriginalIds(numClusters);
+  std::iota(sortedOriginalIds.begin(), sortedOriginalIds.end(), 0);
+  std::stable_sort(sortedOriginalIds.begin(), sortedOriginalIds.end(), [&](int a, int b) {
+    return sizes[a] > sizes[b];
+  });
 
-  // Build remap: remap[originalId] = newId
-  // Reuse sortKeys as remap (sortKeys is unused after the sort)
-  const auto remap = toSpan(sortKeys);
-  createNewIndexMapping<<<numBlocksRenumber, blockSize, 0, stream>>>(toSpan(sortedOriginalIds), remap);
-  cudaCheckError(hipGetLastError());
+  std::vector<int> remap(numClusters);
+  for (int newId = 0; newId < numClusters; ++newId) {
+    remap[sortedOriginalIds[newId]] = newId;
+  }
+
+  AsyncDeviceVector<int> remapDev(numClusters, stream);
+  cudaCheckError(hipMemcpyAsync(remapDev.data(), remap.data(), numClusters * sizeof(int), hipMemcpyDefault, stream));
 
   // Apply new indices to all points
   const int numBlocks = (numPoints + blockSize - 1) / blockSize;
-  applyNewIndices<<<numBlocks, blockSize, 0, stream>>>(clusters, remap);
+  applyNewIndices<<<numBlocks, blockSize, 0, stream>>>(clusters, toSpan(remapDev));
   cudaCheckError(hipGetLastError());
 
   if (!centroids.empty()) {
+    AsyncDeviceVector<int> sortedOriginalIdsDev(numClusters, stream);
+    cudaCheckError(hipMemcpyAsync(sortedOriginalIdsDev.data(),
+                                  sortedOriginalIds.data(),
+                                  numClusters * sizeof(int),
+                                  hipMemcpyDefault,
+                                  stream));
     AsyncDeviceVector<int> remappedCentroids(numClusters, stream);
-    remapCentroidsKernel<<<numBlocksRenumber, blockSize, 0, stream>>>(toSpan(sortedOriginalIds),
+    remapCentroidsKernel<<<numBlocksRenumber, blockSize, 0, stream>>>(toSpan(sortedOriginalIdsDev),
                                                                       centroids,
                                                                       toSpan(remappedCentroids));
     cudaCheckError(hipGetLastError());
@@ -446,6 +417,10 @@ void renumberClustersBySize(const cuda::std::span<int> clusters,
                                    hipMemcpyDeviceToDevice,
                                    stream));
   }
+
+  // Host buffers (remap, sortedOriginalIds) feed async H2D copies above; the
+  // caller syncs after we return, but these locals would be gone by then.
+  cudaCheckError(hipStreamSynchronize(stream));
 }
 
 }  // namespace
@@ -555,23 +530,28 @@ class ArgMaxRunner {
 /**
  * @brief Prune neighborlists by removing assigned neighbors and reordering.
  */
+// One 32-thread cooperative-groups tile processes one point. The original used
+// hipcub::WarpMergeSort + WarpReduce to compact and count, but those warp-level
+// primitives assume the physical wavefront width: on AMD wave64 a default
+// hipcub::WarpReduce sums 64 lanes (two of our 32-lane tiles), corrupting the
+// neighbor counts and merging unrelated points into one giant cluster. The
+// compaction does not need a sort — the valid neighbors only need to occupy the
+// first newCount slots, in any order — so we compact in shared memory with a
+// per-tile atomic counter. This is wave-size agnostic (a 32-tile is valid on
+// both wave32 and wave64) and uses no hipcub warp primitives.
 template <int NeighborlistMaxSize>
 __global__ void pruneNeighborlistKernel(const cuda::std::span<int> clusters,
                                         const cuda::std::span<int> clusterSizes,
                                         const cuda::std::span<int> neighborList) {
-  constexpr int kWarpSize       = 32;
-  constexpr int kItemsPerThread = (NeighborlistMaxSize + kWarpSize - 1) / kWarpSize;
+  constexpr int kTileSize      = 32;
+  constexpr int kWarpsPerBlock = 4;
   static_assert(NeighborlistMaxSize <= 128, "NeighborlistMaxSize must be <= 128");
   static_assert(NeighborlistMaxSize % 8 == 0, "NeighborlistMaxSize must be multiple of 8");
 
-  using WarpMergeSort = hipcub::WarpMergeSort<int, kItemsPerThread, kWarpSize, int>;
-  using WarpReduce    = hipcub::WarpReduce<int>;
+  __shared__ int compacted[kWarpsPerBlock][NeighborlistMaxSize];
+  __shared__ int validCount[kWarpsPerBlock];
 
-  constexpr int                                  kWarpsPerBlock = 4;
-  __shared__ typename WarpMergeSort::TempStorage sortStorage[kWarpsPerBlock];
-  __shared__ WarpReduce::TempStorage reduceStorage[kWarpsPerBlock];
-
-  const auto tile     = cg::tiled_partition<kWarpSize>(cg::this_thread_block());
+  const auto tile     = cg::tiled_partition<kTileSize>(cg::this_thread_block());
   const int  tid      = tile.thread_rank();
   const int  warpId   = tile.meta_group_rank();
   const int  pointIdx = blockIdx.x * kWarpsPerBlock + warpId;
@@ -579,55 +559,36 @@ __global__ void pruneNeighborlistKernel(const cuda::std::span<int> clusters,
   if (pointIdx >= static_cast<int>(clusters.size())) {
     return;
   }
-
   if (clusters[pointIdx] >= 0) {
     clusterSizes[pointIdx] = 0;
     return;
   }
 
   const int currentSize = clusterSizes[pointIdx];
-  const int baseOffset  = pointIdx * NeighborlistMaxSize;
-
-  // Each thread loads kItemsPerThread neighbors in blocked arrangement
-  int keys[kItemsPerThread];
-  int values[kItemsPerThread];
-
-  for (int item = 0; item < kItemsPerThread; ++item) {
-    const int globalIdx = tid * kItemsPerThread + item;
-    if (globalIdx < NeighborlistMaxSize) {
-      values[item]     = neighborList[baseOffset + globalIdx];
-      const bool valid = (globalIdx < currentSize) && (values[item] >= 0) && (clusters[values[item]] < 0);
-      keys[item]       = valid ? 0 : 1;  // 0 = valid (sort first), 1 = invalid (sort last)
-    } else {
-      values[item] = -1;
-      keys[item]   = 1;
-    }
-  }
-
-  // Sort by key ascending: valid neighbors (key=0) come first
-  WarpMergeSort(sortStorage[warpId]).Sort(keys, values, cubLess{});
-
-  // Count valid entries across all items in this thread
-  int localValidCount = 0;
-  for (int item = 0; item < kItemsPerThread; ++item) {
-    const int globalIdx = tid * kItemsPerThread + item;
-    if (globalIdx < NeighborlistMaxSize && keys[item] == 0) {
-      ++localValidCount;
-    }
-  }
-
-  int newCount = WarpReduce(reduceStorage[warpId]).Sum(localValidCount);
-  newCount     = tile.shfl(newCount, 0);
+  const int baseOffset   = pointIdx * NeighborlistMaxSize;
 
   if (tid == 0) {
-    clusterSizes[pointIdx] = newCount;
+    validCount[warpId] = 0;
   }
+  tile.sync();
 
-  for (int item = 0; item < kItemsPerThread; ++item) {
-    const int globalIdx = tid * kItemsPerThread + item;
-    if (globalIdx < NeighborlistMaxSize) {
-      neighborList[baseOffset + globalIdx] = (globalIdx < newCount) ? values[item] : -1;
+  // Compact still-unassigned neighbors to the front (order among them is irrelevant).
+  for (int i = tid; i < NeighborlistMaxSize; i += kTileSize) {
+    const int neighbor = neighborList[baseOffset + i];
+    const bool valid   = (i < currentSize) && (neighbor >= 0) && (clusters[neighbor] < 0);
+    if (valid) {
+      const int pos             = atomicAdd(&validCount[warpId], 1);
+      compacted[warpId][pos]    = neighbor;
     }
+  }
+  tile.sync();
+
+  const int newCount = validCount[warpId];
+  for (int i = tid; i < NeighborlistMaxSize; i += kTileSize) {
+    neighborList[baseOffset + i] = (i < newCount) ? compacted[warpId][i] : -1;
+  }
+  if (tid == 0) {
+    clusterSizes[pointIdx] = newCount;
   }
 }
 
@@ -647,13 +608,6 @@ template <typename T> void setAll(const cuda::std::span<T>& vec, const T& value,
   const size_t  numBlocks = (numElements + blockSize - 1) / blockSize;
   setAllKernel<<<numBlocks, blockSize, 0, stream>>>(numElements, value, vec.data());
   cudaCheckError(hipGetLastError());
-}
-
-//! Kernel to check loop condition and set the conditional handle for CUDA Graph WHILE node.
-//! This runs at the END of each loop iteration to determine if the next iteration should execute.
-__global__ void checkLoopConditionKernel(cudaGraphConditionalHandle handle, const int* maxValue, int threshold) {
-  // Continue looping if maxValue >= threshold
-  cudaGraphSetConditional(handle, (*maxValue >= threshold) ? 1 : 0);
 }
 
 //! Inner loop iteration for Butina clustering.
@@ -727,50 +681,26 @@ void innerButinaLoopWithPruning(const int                  numPoints,
                          static_cast<int>(clusterSizesSpan.size()));
 }
 
-//! CUDA Graph wrapper for the inner Butina loop using conditional WHILE node.
-//! The GPU decides when to exit the loop - no CPU synchronization needed per iteration.
-class ButinaInnerLoopGraph {
- public:
-  ButinaInnerLoopGraph(int                                  numPoints,
-                       const cuda::std::span<const uint8_t> hitMatrix,
-                       const cuda::std::span<int>           clusters,
-                       const cuda::std::span<int>           clusterSizesSpan,
-                       const cuda::std::span<int>           centroids,
-                       int*                                 maxIndexPtr,
-                       int*                                 maxValuePtr,
-                       int*                                 clusterIdxPtr,
-                       int                                  threshold,
-                       ArgMaxRunner&                        argMaxRunner) {
-    // Create the parent graph
-    cudaCheckError(hipGraphCreate(&graph_, 0));
-
-    // Create conditional handle with default value = 1 (enter loop at least once, do-while semantics)
-    cudaCheckError(cudaGraphConditionalHandleCreate(&handle_, graph_, 1, cudaGraphCondAssignDefault));
-
-    // Create the conditional WHILE node
-    hipGraphNodeParams cParams = {};
-    cParams.type                = hipGraphNodeTypeConditional;
-    cParams.conditional.handle  = handle_;
-    cParams.conditional.type    = cudaGraphCondTypeWhile;
-    cParams.conditional.size    = 1;
-    hipGraphNode_t conditionalNode;
-#if CUDART_VERSION >= 13000
-    cudaCheckError(hipGraphAddNode(&conditionalNode, graph_, nullptr, nullptr, 0, &cParams));
-#else
-    cudaCheckError(hipGraphAddNode(&conditionalNode, graph_, nullptr, 0, &cParams));
-#endif
-
-    // Get the body graph to populate
-    hipGraph_t bodyGraph = cParams.conditional.phGraph_out[0];
-
-    // Use stream capture to populate the body graph (easier than explicit API)
-    hipStream_t captureStream;
-    cudaCheckError(hipStreamCreate(&captureStream));
-
-    cudaCheckError(
-      hipStreamBeginCaptureToGraph(captureStream, bodyGraph, nullptr, nullptr, 0, hipStreamCaptureModeRelaxed));
-
-    // Capture the inner loop kernel sequence
+//! Host-driven replacement for the conditional-WHILE CUDA Graph node, which
+//! HIP/ROCm does not support. Runs the inner Butina loop body on the stream,
+//! copies the resulting maxValue back to the host, and decides on the CPU
+//! whether to iterate again. Do-while semantics: the body always runs at least
+//! once (matching the graph's default conditional handle = 1). The per-iteration
+//! sync is the documented tradeoff; iteration count equals the number of large
+//! clusters, which is small.
+void runInnerButinaLoopHost(const int                            numPoints,
+                            const cuda::std::span<const uint8_t> hitMatrix,
+                            const cuda::std::span<int>           clusters,
+                            const cuda::std::span<int>           clusterSizesSpan,
+                            const cuda::std::span<int>           centroids,
+                            int*                                 maxIndexPtr,
+                            int*                                 maxValuePtr,
+                            int*                                 clusterIdxPtr,
+                            const int                            threshold,
+                            int*                                 hostMaxValue,
+                            ArgMaxRunner&                        argMaxRunner,
+                            hipStream_t                          stream) {
+  do {
     innerButinaLoop(numPoints,
                     hitMatrix,
                     clusters,
@@ -780,79 +710,28 @@ class ButinaInnerLoopGraph {
                     maxValuePtr,
                     clusterIdxPtr,
                     argMaxRunner,
-                    captureStream);
+                    stream);
+    cudaCheckError(hipMemcpyAsync(hostMaxValue, maxValuePtr, sizeof(int), hipMemcpyDefault, stream));
+    cudaCheckError(hipStreamSynchronize(stream));
+  } while (*hostMaxValue >= threshold);
+}
 
-    // Check condition for next iteration (sets handle)
-    checkLoopConditionKernel<<<1, 1, 0, captureStream>>>(handle_, maxValuePtr, threshold);
-
-    cudaCheckError(hipStreamEndCapture(captureStream, nullptr));
-    cudaCheckError(hipStreamDestroy(captureStream));
-
-    // Instantiate the graph
-    cudaCheckError(hipGraphInstantiate(&graphExec_, graph_, nullptr, nullptr, 0));
-  }
-
-  ~ButinaInnerLoopGraph() {
-    if (graphExec_) {
-      hipGraphExecDestroy(graphExec_);
-    }
-    if (graph_) {
-      hipGraphDestroy(graph_);
-    }
-  }
-
-  //! Launch the graph - GPU executes all iterations until condition fails
-  void launch(hipStream_t stream) { cudaCheckError(hipGraphLaunch(graphExec_, stream)); }
-
- private:
-  hipGraph_t                graph_     = nullptr;
-  hipGraphExec_t            graphExec_ = nullptr;
-  cudaGraphConditionalHandle handle_    = {};
-};
-
-//! CUDA Graph wrapper for the pruning loop using conditional WHILE node.
-//! This handles small clusters with neighborlist-based assignment and pruning.
-template <int NeighborlistMaxSize> class ButinaPruningLoopGraph {
- public:
-  ButinaPruningLoopGraph(int                        numPoints,
-                         const cuda::std::span<int> clusters,
-                         const cuda::std::span<int> clusterSizesSpan,
-                         const cuda::std::span<int> neighborListSpan,
-                         const cuda::std::span<int> centroids,
-                         int*                       maxIndexPtr,
-                         int*                       maxValuePtr,
-                         int*                       clusterIdxPtr,
-                         ArgMaxRunner&              argMaxRunner) {
-    // Create the parent graph
-    cudaCheckError(hipGraphCreate(&graph_, 0));
-
-    // Create conditional handle with default value = 1 (enter loop at least once, do-while semantics)
-    cudaCheckError(cudaGraphConditionalHandleCreate(&handle_, graph_, 1, cudaGraphCondAssignDefault));
-
-    // Create the conditional WHILE node
-    hipGraphNodeParams cParams = {};
-    cParams.type                = hipGraphNodeTypeConditional;
-    cParams.conditional.handle  = handle_;
-    cParams.conditional.type    = cudaGraphCondTypeWhile;
-    cParams.conditional.size    = 1;
-    hipGraphNode_t conditionalNode;
-#if CUDART_VERSION >= 13000
-    cudaCheckError(hipGraphAddNode(&conditionalNode, graph_, nullptr, nullptr, 0, &cParams));
-#else
-    cudaCheckError(hipGraphAddNode(&conditionalNode, graph_, nullptr, 0, &cParams));
-#endif
-
-    // Get the body graph to populate
-    hipGraph_t bodyGraph = cParams.conditional.phGraph_out[0];
-
-    // Use stream capture to populate the body graph
-    hipStream_t captureStream;
-    cudaCheckError(hipStreamCreate(&captureStream));
-
-    cudaCheckError(
-      hipStreamBeginCaptureToGraph(captureStream, bodyGraph, nullptr, nullptr, 0, hipStreamCaptureModeRelaxed));
-
-    // Capture the pruning loop kernel sequence
+//! Host-driven replacement for the pruning conditional-WHILE CUDA Graph node.
+//! Same do-while semantics as runInnerButinaLoopHost; continues while the
+//! largest remaining cluster is still big enough to assign (>= kMinLoopSizeForAssignment).
+template <int NeighborlistMaxSize>
+void runPruningButinaLoopHost(const int                  numPoints,
+                              const cuda::std::span<int> clusters,
+                              const cuda::std::span<int> clusterSizesSpan,
+                              const cuda::std::span<int> neighborListSpan,
+                              const cuda::std::span<int> centroids,
+                              int*                       maxIndexPtr,
+                              int*                       maxValuePtr,
+                              int*                       clusterIdxPtr,
+                              int*                       hostMaxValue,
+                              ArgMaxRunner&              argMaxRunner,
+                              hipStream_t                stream) {
+  do {
     innerButinaLoopWithPruning<NeighborlistMaxSize>(numPoints,
                                                     clusters,
                                                     clusterSizesSpan,
@@ -862,35 +741,11 @@ template <int NeighborlistMaxSize> class ButinaPruningLoopGraph {
                                                     clusterIdxPtr,
                                                     neighborListSpan,
                                                     argMaxRunner,
-                                                    captureStream);
-
-    // Check condition for next iteration (sets handle)
-    checkLoopConditionKernel<<<1, 1, 0, captureStream>>>(handle_, maxValuePtr, kMinLoopSizeForAssignment);
-
-    cudaCheckError(hipStreamEndCapture(captureStream, nullptr));
-    cudaCheckError(hipStreamDestroy(captureStream));
-
-    // Instantiate the graph
-    cudaCheckError(hipGraphInstantiate(&graphExec_, graph_, nullptr, nullptr, 0));
-  }
-
-  ~ButinaPruningLoopGraph() {
-    if (graphExec_) {
-      hipGraphExecDestroy(graphExec_);
-    }
-    if (graph_) {
-      hipGraphDestroy(graph_);
-    }
-  }
-
-  //! Launch the graph - GPU executes all iterations until condition fails
-  void launch(hipStream_t stream) { cudaCheckError(hipGraphLaunch(graphExec_, stream)); }
-
- private:
-  hipGraph_t                graph_     = nullptr;
-  hipGraphExec_t            graphExec_ = nullptr;
-  cudaGraphConditionalHandle handle_    = {};
-};
+                                                    stream);
+    cudaCheckError(hipMemcpyAsync(hostMaxValue, maxValuePtr, sizeof(int), hipMemcpyDefault, stream));
+    cudaCheckError(hipStreamSynchronize(stream));
+  } while (*hostMaxValue >= kMinLoopSizeForAssignment);
+}
 
 /**
  * @brief Build the initial neighborlist and cluster sizes from the hit matrix.
@@ -946,33 +801,26 @@ template <int NeighborlistMaxSize>
   // If a neighborlist is up to N, then the cluster is up to N+1 (including the central point).
   constexpr int clusterSizeWithMaxNeighborlist = NeighborlistMaxSize + 1;
 
-  // Use CUDA Graph with conditional WHILE node for fully GPU-side loop control.
-  // The GPU decides when to exit - no CPU synchronization needed per iteration.
+  // Host-driven loop control (HIP/ROCm has no conditional-WHILE graph node).
+  // The CPU reads maxValue back each iteration and decides when to exit.
   {
-    ScopedNvtxRange      buildRange("Build inner loop graph with WHILE node");
-    ButinaInnerLoopGraph innerLoopGraph(static_cast<int>(numPoints),
-                                        hitMatrix,
-                                        clusters,
-                                        clusterSizesSpan,
-                                        centroids,
-                                        maxIndex.data(),
-                                        maxValue.data(),
-                                        clusterIdx.data(),
-                                        clusterSizeWithMaxNeighborlist,
-                                        argMaxRunner);
-    buildRange.pop();
-
-    // Launch once - GPU executes all iterations until maxValue < threshold
-    const ScopedNvtxRange loopRange("Large cluster Butina Loop (conditional WHILE graph)");
-    innerLoopGraph.launch(stream);
-    cudaCheckError(hipStreamSynchronize(stream));
-
-    // Copy final maxValue to host for subsequent pruning loop
-    cudaCheckError(hipMemcpyAsync(maxCluster.data(), maxValue.data(), sizeof(int), hipMemcpyDefault, stream));
-    cudaCheckError(hipStreamSynchronize(stream));
+    const ScopedNvtxRange loopRange("Large cluster Butina Loop (host-driven)");
+    runInnerButinaLoopHost(static_cast<int>(numPoints),
+                           hitMatrix,
+                           clusters,
+                           clusterSizesSpan,
+                           centroids,
+                           maxIndex.data(),
+                           maxValue.data(),
+                           clusterIdx.data(),
+                           clusterSizeWithMaxNeighborlist,
+                           maxCluster.data(),
+                           argMaxRunner,
+                           stream);
+    // maxCluster[0] already holds the final maxValue from the loop's last read.
   }
 
-  // Build neighborlist once, then prune dynamically using CUDA Graph with conditional WHILE node
+  // Build neighborlist once, then prune dynamically using a host-driven loop
   if (maxCluster[0] >= kMinLoopSizeForAssignment) {
     buildInitialNeighborlist<NeighborlistMaxSize>(numPoints,
                                                   hitMatrix,
@@ -985,23 +833,19 @@ template <int NeighborlistMaxSize>
     argMaxRunner(clusterSizesSpan.data(), maxValue.data(), maxIndex.data(), static_cast<int>(clusterSizesSpan.size()));
     cudaCheckError(hipStreamSynchronize(stream));
 
-    // Use CUDA Graph with conditional WHILE node for fully GPU-side pruning loop control
-    ScopedNvtxRange                             buildRange("Build pruning loop graph with WHILE node");
-    ButinaPruningLoopGraph<NeighborlistMaxSize> pruningLoopGraph(numPoints,
-                                                                 clusters,
-                                                                 clusterSizesSpan,
-                                                                 neighborListSpan,
-                                                                 centroids,
-                                                                 maxIndex.data(),
-                                                                 maxValue.data(),
-                                                                 clusterIdx.data(),
-                                                                 argMaxRunner);
-    buildRange.pop();
-
-    // Launch once - GPU executes all iterations until maxValue < kMinLoopSizeForAssignment
-    const ScopedNvtxRange loopRange("Small cluster Butina Loop with pruning (conditional WHILE graph)");
-    pruningLoopGraph.launch(stream);
-    cudaCheckError(hipStreamSynchronize(stream));
+    // Host-driven pruning loop (HIP/ROCm has no conditional-WHILE graph node).
+    const ScopedNvtxRange loopRange("Small cluster Butina Loop with pruning (host-driven)");
+    runPruningButinaLoopHost<NeighborlistMaxSize>(numPoints,
+                                                  clusters,
+                                                  clusterSizesSpan,
+                                                  neighborListSpan,
+                                                  centroids,
+                                                  maxIndex.data(),
+                                                  maxValue.data(),
+                                                  clusterIdx.data(),
+                                                  maxCluster.data(),
+                                                  argMaxRunner,
+                                                  stream);
   }
 
   assignSingletonIdsKernel<<<1, kSingletonBlockSize, 0, stream>>>(clusters, centroids, clusterIdx.data());

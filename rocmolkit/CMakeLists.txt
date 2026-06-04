@@ -48,15 +48,15 @@ file(GLOB_RECURSE ROCMOLKIT_CPP_SOURCES CONFIGURE_DEPENDS
 list(REMOVE_ITEM ROCMOLKIT_CPP_SOURCES ${ROCMOLKIT_HIP_SOURCES})
 
 # Excluir módulos que usam features sem equivalente direto em ROCm:
-#   butina:                     CUDA Graphs Conditional (sem hipGraph equivalente)
-#   tfd:                        depende de butina
+#   tfd:                        depende de butina (F4)
 #   substruct:                  cudaSharedmemCarveoutMaxShared não-traduzido
 #   bfgs_hessian:               cooperative_groups/reduce.h (NVIDIA libcudacxx)
 #   bfgs_minimize:              hipcub::DeviceReduce::TransformReduce (não em hipcub 6.2)
 #   morgan_fingerprint_kernels: cooperative_groups::block_tile_memory (NVIDIA only)
 #   similarity_kernels:         PTX inline asm (BMMA, async copy) em macros_ptx.hip.h
 #   symmetric_eigensolver:      cuda::std::abs em contexto onde shim não resolve (Phase 4 reescrita)
-list(FILTER ROCMOLKIT_HIP_SOURCES EXCLUDE REGEX "/(butina|tfd)\\.hip\\.cpp$")
+# F3: butina re-enabled (conditional-WHILE graph -> host-driven loop).
+list(FILTER ROCMOLKIT_HIP_SOURCES EXCLUDE REGEX "/tfd\\.hip\\.cpp$")
 list(FILTER ROCMOLKIT_HIP_SOURCES EXCLUDE REGEX "/tfd/")
 # bfgs_hessian re-included after providing rocmolkit/cg_reduce_shim.h.
 # # bfgs_hessian re-included.
@@ -72,7 +72,7 @@ list(FILTER ROCMOLKIT_CPP_SOURCES EXCLUDE REGEX "/bfgs_hessian_stub\\.cpp$")
 # list(FILTER ROCMOLKIT_CPP_SOURCES EXCLUDE REGEX "/similarity\\.cpp$")
 # list(FILTER ROCMOLKIT_HIP_SOURCES EXCLUDE REGEX "/symmetric_eigensolver\\.hip\\.cpp$")
 list(FILTER ROCMOLKIT_CPP_SOURCES EXCLUDE REGEX "/(tfd|testutils)/")
-list(FILTER ROCMOLKIT_CPP_SOURCES EXCLUDE REGEX "/(butina|tfd)\\.cpp$")
+list(FILTER ROCMOLKIT_CPP_SOURCES EXCLUDE REGEX "/tfd\\.cpp$")
 list(FILTER ROCMOLKIT_HIP_SOURCES EXCLUDE REGEX "/testutils/")
 
 # Generate versions.h from RDKit version (drives RDKIT_NEW_FLAG_API constexpr).
