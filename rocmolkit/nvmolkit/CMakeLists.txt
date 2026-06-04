@@ -25,6 +25,7 @@ set(ROCMOLKIT_PHASE2_BINDINGS
     arrayHelpers
     Fingerprints   # F1: Morgan fingerprints (module _Fingerprints, source fingerprints.cpp)
     substructure   # F5: substructure search (module _substructure, source substructure.cpp)
+    DataStructs    # F2: Tanimoto/Cosine similarity (module _DataStructs, source DataStructs.cpp)
 )
 
 # Each name corresponds to a `_<NameCamelCase>.so` plus `<source>.cpp`.

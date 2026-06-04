@@ -40,7 +40,11 @@ namespace nvMolKit {
  *
  **/
 __forceinline__ __device__ void get_lane(int& lane_id) {
+#if defined(__HIP_PLATFORM_NVIDIA__) || defined(__NVCC__)
   asm("mov.s32 %0, %%laneid;" : "=r"(lane_id));
+#else
+  lane_id = __builtin_amdgcn_mbcnt_hi(~0u, __builtin_amdgcn_mbcnt_lo(~0u, 0u));  // AMD: lane within wavefront
+#endif
 }
 
 /**
@@ -150,11 +154,18 @@ __forceinline__ __device__ void bmma_xor_m16n8k256(uint32_t& RD0,
                                                    uint32_t& RC3
 
 ) {
+#if defined(__HIP_PLATFORM_NVIDIA__) || defined(__NVCC__)
   asm volatile(
     "mma.sync.aligned.m16n8k256.row.col.s32.b1.b1.s32.xor.popc {%0,%1,%2,%3}, "
     "{%4,%5,%6,%7}, {%8,%9}, {%10,%11,%12,%13};\n"
     : "=r"(RD0), "=r"(RD1), "=r"(RD2), "=r"(RD3)
     : "r"(RA0), "r"(RA1), "r"(RA2), "r"(RA3), "r"(RB0), "r"(RB1), "r"(RC0), "r"(RC1), "r"(RC2), "r"(RC3));
+#else
+  // No binary tensor-core (BMMA) on AMD; this path is never taken at runtime
+  // (supportsTensorOps() is false), it only needs to compile.
+  (void)RA0; (void)RA1; (void)RA2; (void)RA3; (void)RB0; (void)RB1;
+  RD0 = RC0; RD1 = RC1; RD2 = RC2; RD3 = RC3;
+#endif
 }
 
 /**
@@ -203,11 +214,16 @@ __forceinline__ __device__ void bmma_and_m16n8k256(uint32_t& RD0,
                                                    uint32_t& RC1,
                                                    uint32_t& RC2,
                                                    uint32_t& RC3) {
+#if defined(__HIP_PLATFORM_NVIDIA__) || defined(__NVCC__)
   asm volatile(
     "mma.sync.aligned.m16n8k256.row.col.s32.b1.b1.s32.and.popc {%0,%1,%2,%3}, "
     "{%4,%5,%6,%7}, {%8,%9}, {%10,%11,%12,%13};\n"
     : "=r"(RD0), "=r"(RD1), "=r"(RD2), "=r"(RD3)
     : "r"(RA0), "r"(RA1), "r"(RA2), "r"(RA3), "r"(RB0), "r"(RB1), "r"(RC0), "r"(RC1), "r"(RC2), "r"(RC3));
+#else
+  (void)RA0; (void)RA1; (void)RA2; (void)RA3; (void)RB0; (void)RB1;
+  RD0 = RC0; RD1 = RC1; RD2 = RC2; RD3 = RC3;  // AMD stub; never executed (no BMMA)
+#endif
 }
 
 }  // namespace nvMolKit
