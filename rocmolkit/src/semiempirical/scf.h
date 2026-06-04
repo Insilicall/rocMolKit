@@ -32,10 +32,15 @@ struct ScfResult {
 // orthonormal under ZDO, so each cycle is a plain symmetric eigenproblem.
 //
 // atoms: Z array (length nAtoms); coords: nAtoms*3 row-major (Angstrom).
-// On success writes the converged density (nBasis*nBasis row-major) and the
-// final orbital eigenvalues (nBasis, ascending, eV), fills *out, and returns
-// nBasis. Returns 0 if the molecule is unsupported (d-bearing or unparameterized
-// atom) or has an odd electron count (open shell, not handled here).
+// Writes the density (nBasis*nBasis row-major) and final orbital eigenvalues
+// (nBasis, ascending, eV), fills *out, and returns nBasis. Returns 0 — leaving
+// density/eigenvalues/out untouched — if the molecule is unsupported (d-bearing
+// or unparameterized atom) or has an odd electron count (open shell).
+//
+// IMPORTANT: a non-zero return does NOT guarantee convergence. The density is
+// only trustworthy when out->converged is true; callers MUST check it (a result
+// that hit maxIter, or a failed diagonalization, returns nBasis with
+// out->converged == false).
 int scfSp(int nAtoms, const int* atoms, const double* coords,
           double* density, double* eigenvalues, ScfResult* out,
           int maxIter = 200, double convTol = 1e-8);

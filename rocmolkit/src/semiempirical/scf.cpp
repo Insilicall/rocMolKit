@@ -42,19 +42,26 @@ inline int wIdx(int mu, int nu, int lam, int sig) {
   return ((mu * 4 + nu) * 4 + lam) * 4 + sig;
 }
 
-// Cyclic Jacobi eigensolver for a symmetric n x n matrix (n small). Writes
-// ascending eigenvalues into eval and the corresponding eigenvectors into the
-// columns of evec (row-major n x n). A is overwritten.
-void jacobiEigen(std::vector<double>& A, int n, std::vector<double>& eval,
+// Cyclic Jacobi eigensolver for a symmetric n x n matrix. Writes ascending
+// eigenvalues into eval and the corresponding eigenvectors into the columns of
+// evec (row-major n x n). A is overwritten. Returns false if the off-diagonal
+// norm did not fall below threshold within the sweep budget (caller must treat
+// the result as untrustworthy).
+bool jacobiEigen(std::vector<double>& A, int n, std::vector<double>& eval,
                  std::vector<double>& evec) {
-  evec.assign(n * n, 0.0);
+  evec.assign(static_cast<size_t>(n) * n, 0.0);
   for (int i = 0; i < n; ++i) evec[i * n + i] = 1.0;
 
-  for (int sweep = 0; sweep < 100; ++sweep) {
+  const int maxSweeps = 60 + 4 * n;  // scale with size for stiff/clustered cases
+  bool converged = false;
+  for (int sweep = 0; sweep < maxSweeps; ++sweep) {
     double off = 0.0;
     for (int p = 0; p < n; ++p)
       for (int q = p + 1; q < n; ++q) off += A[p * n + q] * A[p * n + q];
-    if (off < 1e-30) break;
+    if (off < 1e-28) {
+      converged = true;
+      break;
+    }
 
     for (int p = 0; p < n; ++p) {
       for (int q = p + 1; q < n; ++q) {
@@ -89,12 +96,13 @@ void jacobiEigen(std::vector<double>& A, int n, std::vector<double>& eval,
   std::sort(order.begin(), order.end(), [&](int a, int b) { return diag[a] < diag[b]; });
 
   eval.assign(n, 0.0);
-  std::vector<double> v(n * n, 0.0);
+  std::vector<double> v(static_cast<size_t>(n) * n, 0.0);
   for (int j = 0; j < n; ++j) {
     eval[j] = diag[order[j]];
     for (int i = 0; i < n; ++i) v[i * n + j] = evec[i * n + order[j]];
   }
   evec.swap(v);
+  return converged;
 }
 
 // Density from the lowest nOcc orbitals: P = 2 * sum_k C[:,k] C[:,k]^T.
@@ -226,12 +234,13 @@ int scfSp(int nAtoms, const int* atoms, const double* coords,
     off += norb[a];
   }
 
-  std::vector<double> H(nBasis * nBasis);
+  const size_t n2 = static_cast<size_t>(nBasis) * nBasis;
+  std::vector<double> H(n2);
   if (buildCoreHamiltonianSp(nAtoms, atoms, coords, H.data()) == 0) return 0;
 
   // Initial density from the H_core eigenvectors.
   std::vector<double> A = H, eval, C, P;
-  jacobiEigen(A, nBasis, eval, C);
+  bool diagOk = jacobiEigen(A, nBasis, eval, C);
   buildDensity(C, nBasis, nOcc, P);
 
   std::vector<std::vector<double>> diisF, diisE;
@@ -245,7 +254,7 @@ int scfSp(int nAtoms, const int* atoms, const double* coords,
     buildFock(H, P, nBasis, nAtoms, atoms, coords, start, norb, F);
 
     if (iteration >= 2) {
-      std::vector<double> e(nBasis * nBasis, 0.0);  // e = F*P - P*F
+      std::vector<double> e(n2, 0.0);  // e = F*P - P*F
       for (int i = 0; i < nBasis; ++i)
         for (int j = 0; j < nBasis; ++j) {
           double fp = 0.0, pf = 0.0;
@@ -279,21 +288,29 @@ int scfSp(int nAtoms, const int* atoms, const double* coords,
         if (solveLinear(B, rhs, m, c)) {
           std::fill(F.begin(), F.end(), 0.0);
           for (int i = 0; i < nd; ++i)
-            for (int t = 0; t < nBasis * nBasis; ++t) F[t] += c[i] * diisF[i][t];
+            for (size_t t = 0; t < n2; ++t) F[t] += c[i] * diisF[i][t];
+          // The extrapolated F is symmetric in exact arithmetic; force it so the
+          // eigensolver never sees rounding-induced asymmetry.
+          for (int i = 0; i < nBasis; ++i)
+            for (int j = i + 1; j < nBasis; ++j) {
+              const double avg = 0.5 * (F[i * nBasis + j] + F[j * nBasis + i]);
+              F[i * nBasis + j] = avg;
+              F[j * nBasis + i] = avg;
+            }
         }
       }
     }
 
     A = F;
-    jacobiEigen(A, nBasis, eval, C);
+    diagOk = jacobiEigen(A, nBasis, eval, C) && diagOk;
     buildDensity(C, nBasis, nOcc, Pnew);
 
     double ss = 0.0;
-    for (int t = 0; t < nBasis * nBasis; ++t) {
+    for (size_t t = 0; t < n2; ++t) {
       const double d = Pnew[t] - P[t];
       ss += d * d;
     }
-    delta = std::sqrt(ss / (nBasis * nBasis));
+    delta = std::sqrt(ss / static_cast<double>(n2));
     if (delta < convTol) {
       P = Pnew;
       converged = true;
@@ -305,15 +322,19 @@ int scfSp(int nAtoms, const int* atoms, const double* coords,
     else if (delta > 0.1) mix = 0.4;
     else if (delta > 0.01) mix = 0.5;
     else mix = 0.8;
-    for (int t = 0; t < nBasis * nBasis; ++t) P[t] = mix * Pnew[t] + (1.0 - mix) * P[t];
+    for (size_t t = 0; t < n2; ++t) P[t] = mix * Pnew[t] + (1.0 - mix) * P[t];
   }
+
+  // A failed diagonalization makes the result untrustworthy, regardless of the
+  // density-change test.
+  if (!diagOk) converged = false;
 
   // Final Fock + electronic energy with the converged density.
   buildFock(H, P, nBasis, nAtoms, atoms, coords, start, norb, F);
   double eElec = 0.0;
-  for (int t = 0; t < nBasis * nBasis; ++t) eElec += 0.5 * P[t] * (H[t] + F[t]);
+  for (size_t t = 0; t < n2; ++t) eElec += 0.5 * P[t] * (H[t] + F[t]);
 
-  for (int t = 0; t < nBasis * nBasis; ++t) density[t] = P[t];
+  for (size_t t = 0; t < n2; ++t) density[t] = P[t];
   for (int i = 0; i < nBasis; ++i) eigenvalues[i] = eval[i];
   if (out != nullptr) {
     out->nBasis = nBasis;
@@ -328,11 +349,12 @@ bool mullikenCharges(int nAtoms, const int* atoms, const double* coords, double*
   const int nBasis = spBasisSize(nAtoms, atoms);
   if (nBasis == 0) return false;
 
-  std::vector<double> density(nBasis * nBasis), eval(nBasis);
+  std::vector<double> density(static_cast<size_t>(nBasis) * nBasis), eval(nBasis);
   ScfResult res;
   if (scfSp(nAtoms, atoms, coords, density.data(), eval.data(), &res) == 0) {
     return false;
   }
+  if (!res.converged) return false;  // never report charges from an unconverged SCF
 
   for (int a = 0, off = 0; a < nAtoms; ++a) {
     const int c = spCount(atoms[a]);
