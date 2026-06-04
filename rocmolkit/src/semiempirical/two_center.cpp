@@ -136,6 +136,10 @@ int twoCenterLocal(int zA, int zB, double R_ang, double* ri, double* core,
   const int nA = spCount(zA);
   const int nB = spCount(zB);
   if (nA == 0 || nB == 0) return 0;
+  // Enforce the documented precondition: for a heavy-H pair the heavy atom must
+  // be A. H-heavy ordering is resolved one level up by twoCenterMolecular's swap
+  // recursion, so reaching here with H first is a caller error, not XX.
+  if (nA == 1 && nB > 1) return 0;
 
   const double R = R_ang * kAngToBohr;
   double daA, qaA, rho0A, rho1A, rho2A, daB, qaB, rho0B, rho1B, rho2B;
