@@ -99,6 +99,68 @@ cmake -S . -B build -GNinja -DGPU_TARGETS=gfx1200
 cmake --build build
 ```
 
+## Testing
+
+Two layers. The smoke/safe tests are pure Python and need no GPU; the feature
+tests are marked `gpu` and validate the GPU result against RDKit on hardware.
+
+```bash
+# No GPU: import + package self-consistency (what public CI runs)
+pytest tests/ -m "not gpu"
+
+# On a ROCm machine: also run the GPU feature suite (fingerprints, similarity,
+# Butina clustering, TFD — each compared bit/precision-exact against RDKit)
+pytest tests/ --rocm
+```
+
+`tests/test_gpu_features.py` is the integration suite; each test `importorskip`s
+its binding, so anything not built is skipped rather than failing. The same
+checks also exist as standalone scripts under `tools/` (`fp_validate.py`,
+`sim_validate.py`, `butina_validate.py`, `tfd_validate.py`) for ad-hoc runs.
+
+Run them inside the dev image (GPU passthrough + writable `/tmp` for comgr's
+JIT blit kernels):
+
+```bash
+docker run --rm \
+    --device=/dev/kfd --device=/dev/dri \
+    --group-add video --group-add render --security-opt seccomp=unconfined \
+    -e HIP_VISIBLE_DEVICES=0 -v "$PWD":/work -w /work \
+    ghcr.io/insilicall/rocmolkit:devel \
+    python3 -m pytest tests/ --rocm -v
+```
+
+## Continuous integration
+
+Public CI (`.github/workflows/ci.yml`) runs on PR open / reopen / ready — **not**
+on every push to an open PR — plus tag pushes and manual dispatch. It builds
+`rocmolkit_core`, the bindings, and the devel/slim images, and runs the non-GPU
+tests. The GPU suite runs in the `rocm-runner` job, gated behind a **self-hosted
+runner**:
+
+1. Register a runner on a ROCm machine with the labels `self-hosted,rocm`
+   (Settings → Actions → Runners → New self-hosted runner). It needs Docker with
+   GPU passthrough (`--device=/dev/kfd --device=/dev/dri`).
+2. Set the repo variable `ROCM_RUNNER_ONLINE=true` (Settings → Secrets and
+   variables → Actions → Variables). The job stays skipped until then, so PRs
+   never queue waiting on an absent runner. Flip it back to disable.
+
+Once enabled, every gating CI run builds the devel image from source (so it
+ships **all** current bindings) and runs `pytest tests/ --rocm` against RDKit on
+the GPU.
+
+### Publishing images
+
+`.github/workflows/docker.yml` builds and pushes `ghcr.io/insilicall/rocmolkit:{devel,slim}`
+on `v*` tag pushes. To refresh them with the latest bindings, tag a release
+(`git tag vX.Y.Z && git push --tags`). To publish by hand:
+
+```bash
+docker build -f docker/Dockerfile.devel -t ghcr.io/insilicall/rocmolkit:devel .
+echo "$GHCR_TOKEN" | docker login ghcr.io -u <user> --password-stdin
+docker push ghcr.io/insilicall/rocmolkit:devel
+```
+
 ## How it works
 
 rocMolKit runs the full ETKDG pipeline (DistGeom 4D → ETK 3D → chirality/stereo
