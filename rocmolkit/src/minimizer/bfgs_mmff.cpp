@@ -131,6 +131,12 @@ MMFFMinimizeResult MMFFMinimizeMoleculesConfs(std::vector<RDKit::ROMol*>&       
   // the per-thread device context), but declared here so it survives across batches.
   std::vector<std::unordered_map<RDKit::ROMol*, CachedMoleculeData>> threadCaches(ctx.numThreads);
   std::vector<ThreadLocalBuffers>           threadBuffers(ctx.numThreads);
+  // Persistent per-thread BFGS minimizer: like the cache above, constructing it inside the batch
+  // loop reallocated all of its device buffers (Hessian, line-search scratch, ...) every batch,
+  // and the per-batch alloc/free hammered the shared mem-pool mutex while the GPU waited. The
+  // ETKDG path already reuses one minimizer per thread; mirror that here. Built lazily inside the
+  // parallel region (needs the per-thread device context) and reused across batches.
+  std::vector<std::unique_ptr<nvMolKit::BfgsBatchMinimizer>> threadMinimizers(ctx.numThreads);
   std::vector<detail::DeviceCoordCollector> deviceCollectors(deviceOutput ? ctx.numThreads : 0);
   if (deviceOutput) {
     for (int threadId = 0; threadId < ctx.numThreads; ++threadId) {
@@ -161,6 +167,7 @@ MMFFMinimizeResult MMFFMinimizeMoleculesConfs(std::vector<RDKit::ROMol*>&       
                                                                                               deviceInputIndex,   \
                                                                                               backend,            \
                                                                                               threadCaches,       \
+                                                                                              threadMinimizers,   \
                                                                                               exceptionHandler)
   for (size_t batchStart = 0; batchStart < totalConformers; batchStart += effectiveBatchSize) {
     try {
@@ -225,7 +232,11 @@ MMFFMinimizeResult MMFFMinimizeMoleculesConfs(std::vector<RDKit::ROMol*>&       
       buffers.ensureCapacity(systemHost.positions.size(), batchConformers.size());
       std::copy(systemHost.positions.begin(), systemHost.positions.end(), buffers.initialPositions.begin());
 
-      nvMolKit::BfgsBatchMinimizer bfgsMinimizer(/*dataDim=*/3, nvMolKit::DebugLevel::NONE, true, streamPtr, backend);
+      if (!threadMinimizers[threadId]) {
+        threadMinimizers[threadId] =
+          std::make_unique<nvMolKit::BfgsBatchMinimizer>(/*dataDim=*/3, nvMolKit::DebugLevel::NONE, true, streamPtr, backend);
+      }
+      nvMolKit::BfgsBatchMinimizer& bfgsMinimizer    = *threadMinimizers[threadId];
       const auto                   effectiveBackend = bfgsMinimizer.resolveBackend(systemHost.indices.atomStarts);
       setupBatchRange.pop();
 
