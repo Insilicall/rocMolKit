@@ -51,12 +51,40 @@ FULL_MATRIX = {"H2O", "CH4", "NH3", "HF"}
 
 
 def _load_oracle(mlx_path: str):
-    """Import mlxmolkit's rm1.scf with MLX stubbed (pure-NumPy native path)."""
+    """Import mlxmolkit's rm1 oracle with MLX stubbed (pure-NumPy native path).
+
+    Returns (scf, get_params, overlap_d_molecular_frame).
+    """
     for name in ("mlx", "mlx.core"):
         sys.modules[name] = types.ModuleType(name)
     sys.modules["mlx"].core = sys.modules["mlx.core"]
     sys.path.insert(0, mlx_path)
-    return importlib.import_module("rm1.scf")
+    scf = importlib.import_module("rm1.scf")
+    methods = importlib.import_module("rm1.methods")
+    overlap_d = importlib.import_module("rm1.overlap_d")
+    return scf, methods.get_params, overlap_d.overlap_d_molecular_frame
+
+
+def _overlap_matrix(z_list, coords, params, overlap_fn):
+    """Full molecular overlap S (n_basis x n_basis): identity on the diagonal
+    atom blocks (ZDO), overlap_d_molecular_frame on the off-diagonal pairs."""
+    starts, off = [], 0
+    for z in z_list:
+        starts.append(off)
+        off += N_ORBITAL[z]
+    n = off
+    S = np.eye(n)
+    for i, zi in enumerate(z_list):
+        for j, zj in enumerate(z_list):
+            if j <= i:
+                continue
+            block = overlap_fn(params[zi], params[zj],
+                               np.array(coords[i], float), np.array(coords[j], float))
+            block = np.asarray(block)[:N_ORBITAL[zi], :N_ORBITAL[zj]]
+            si, sj = starts[i], starts[j]
+            S[si:si + N_ORBITAL[zi], sj:sj + N_ORBITAL[zj]] = block
+            S[sj:sj + N_ORBITAL[zj], si:si + N_ORBITAL[zi]] = block.T
+    return S
 
 
 def _load_golden():
@@ -79,7 +107,8 @@ def main() -> None:
     mlx_path = os.environ.get("MLXMOLKIT")
     if not mlx_path or not Path(mlx_path).is_dir():
         sys.exit("set MLXMOLKIT to the cloned mlxmolkit package dir (see module docstring)")
-    scf = _load_oracle(mlx_path)
+    scf, get_params, overlap_fn = _load_oracle(mlx_path)
+    params = get_params("PM6_D")
 
     out: dict[str, object] = {
         "_provenance": "mlxmolkit native PM6_D (MIT) -> PYSEQM numpy port (BSD-3, LANL); "
@@ -108,6 +137,8 @@ def main() -> None:
         }
         if name in FULL_MATRIX:
             entry["density"] = [[round(float(v), 8) for v in row] for row in density]
+            S = _overlap_matrix(z, coords, params, overlap_fn)
+            entry["overlap"] = [[round(float(v), 8) for v in row] for row in S]
         out["molecules"][name] = entry
         print(f"{name:7} {tier:4} max|dq|={dq:.5f}")
 
