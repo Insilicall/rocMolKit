@@ -4,6 +4,33 @@ All notable changes to rocMolKit will be documented here.
 
 ## [unreleased]
 
+## [v0.4.2] — 2026-06-04
+
+### Fixed
+- **Substructure search wedged the GPU at scale.** A single
+  `countSubstructMatches` / `hasSubstructMatch` / `getSubstructMatches` call with
+  more than ~3-4k targets — especially with recursive SMARTS (`[$(...)]`) —
+  drove the async-allocation pool past 6 GB and locked up the device (recursive
+  at 4k hung indefinitely). Root cause: the per-search GPU working set (recursive
+  paint scratch + the pool that retains freed blocks) grew with the targets
+  handled in one search and was only released when the search ended. Now the
+  three entry points process targets in chunks of 1024 — each chunk an
+  independent search writing into its own target slice — and between chunks they
+  `hipDeviceSynchronize` + `hipMemPoolTrimTo(pool, 0)` to return the memory to
+  the device. Peak VRAM is one chunk regardless of total target count, so a
+  single call scales to any size and any SMARTS. Results are identical to one big
+  call (bit-exact vs RDKit at 20k-50k targets). Recursive SMARTS at 50k targets
+  now run in ~3 s with zero mismatches; simple-SMARTS throughput is unchanged.
+  The recursive paint also bounds its own block count as a second line of defence.
+
+### Added
+- **Building-blocks performance table** in the README (under the conformer
+  benchmarks): Morgan fingerprints, Tanimoto similarity, substructure, TFD and
+  Butina clustering, GPU vs RDKit single-core and 12-thread on the same host.
+  Similarity 645x/658x, TFD 123x/137x, Butina 49x/48x, fingerprints 16x/7x,
+  substructure 3.9x/12x. A `RDKit (1 core)` column was also added to the conformer
+  table. Scripts: `tools/bench_features.py`, `tools/conformer_cpu_bench.py`.
+
 ## [v0.4.1] — 2026-06-04
 
 Packaging hotfix: the v0.4.0 `slim` image never imported (its build-time smoke
