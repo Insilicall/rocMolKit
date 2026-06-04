@@ -48,16 +48,9 @@ file(GLOB_RECURSE ROCMOLKIT_CPP_SOURCES CONFIGURE_DEPENDS
 list(REMOVE_ITEM ROCMOLKIT_CPP_SOURCES ${ROCMOLKIT_HIP_SOURCES})
 
 # Excluir módulos que usam features sem equivalente direto em ROCm:
-#   tfd:                        depende de butina (F4)
-#   substruct:                  cudaSharedmemCarveoutMaxShared não-traduzido
-#   bfgs_hessian:               cooperative_groups/reduce.h (NVIDIA libcudacxx)
-#   bfgs_minimize:              hipcub::DeviceReduce::TransformReduce (não em hipcub 6.2)
-#   morgan_fingerprint_kernels: cooperative_groups::block_tile_memory (NVIDIA only)
-#   similarity_kernels:         PTX inline asm (BMMA, async copy) em macros_ptx.hip.h
 #   symmetric_eigensolver:      cuda::std::abs em contexto onde shim não resolve (Phase 4 reescrita)
 # F3: butina re-enabled (conditional-WHILE graph -> host-driven loop).
-list(FILTER ROCMOLKIT_HIP_SOURCES EXCLUDE REGEX "/tfd\\.hip\\.cpp$")
-list(FILTER ROCMOLKIT_HIP_SOURCES EXCLUDE REGEX "/tfd/")
+# F4: tfd re-enabled (depends on butina; block-per-molecule kernels, no CUDA-isms).
 # bfgs_hessian re-included after providing rocmolkit/cg_reduce_shim.h.
 # # bfgs_hessian re-included.
 # list(FILTER ROCMOLKIT_HIP_SOURCES EXCLUDE REGEX "/bfgs_hessian\\.hip\\.cpp$")
@@ -71,8 +64,7 @@ list(FILTER ROCMOLKIT_CPP_SOURCES EXCLUDE REGEX "/bfgs_hessian_stub\\.cpp$")
 # list(FILTER ROCMOLKIT_HIP_SOURCES EXCLUDE REGEX "/similarity_kernels\\.hip\\.cpp$")
 # list(FILTER ROCMOLKIT_CPP_SOURCES EXCLUDE REGEX "/similarity\\.cpp$")
 # list(FILTER ROCMOLKIT_HIP_SOURCES EXCLUDE REGEX "/symmetric_eigensolver\\.hip\\.cpp$")
-list(FILTER ROCMOLKIT_CPP_SOURCES EXCLUDE REGEX "/(tfd|testutils)/")
-list(FILTER ROCMOLKIT_CPP_SOURCES EXCLUDE REGEX "/tfd\\.cpp$")
+list(FILTER ROCMOLKIT_CPP_SOURCES EXCLUDE REGEX "/testutils/")
 list(FILTER ROCMOLKIT_HIP_SOURCES EXCLUDE REGEX "/testutils/")
 
 # Generate versions.h from RDKit version (drives RDKIT_NEW_FLAG_API constexpr).
@@ -108,6 +100,7 @@ if(ROCMOLKIT_HIP_SOURCES AND CMAKE_HIP_COMPILER AND hip_FOUND)
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/minimizer>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/data_structures>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/substruct>  # F5
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/tfd>  # F4
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/rdkit_extensions>
         $<INSTALL_INTERFACE:include>
     )
