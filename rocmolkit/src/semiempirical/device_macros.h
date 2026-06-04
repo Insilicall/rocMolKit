@@ -36,6 +36,11 @@ struct AtomIntParams {
   double gss, gsp, gpp, gp2, hsp;  // one-center two-electron integrals
   double uss, upp;                 // one-center one-electron core integrals
   double betaS, betaP;             // resonance (two-center one-electron) params
+  double alpha;                    // core-core exponent (nuclear repulsion)
+  double gaussK[4], gaussL[4], gaussM[4];  // AM1/PM3-style core-core Gaussians
+  double eisol;                    // isolated-atom electronic energy (eV)
+  double eheat;                    // atomic heat of formation (kcal/mol)
+  int z;         // atomic number (for the N-H/O-H core-core special case)
   int qn;        // principal quantum number of the valence shell
   int valence;   // core charge (valence electrons)
   int nOrb;      // sp orbital count: 1 (H/He) or 4

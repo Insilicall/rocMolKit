@@ -55,6 +55,15 @@ bool gatherAtomIntParams(int z, AtomIntParams& o) {
   o.upp = p->Upp;
   o.betaS = p->beta_s;
   o.betaP = p->beta_p;
+  o.alpha = p->alpha;
+  for (int k = 0; k < 4; ++k) {
+    o.gaussK[k] = p->gaussianK[k];
+    o.gaussL[k] = p->gaussianL[k];
+    o.gaussM[k] = p->gaussianM[k];
+  }
+  o.eisol = pm6Eisol(z);
+  o.eheat = pm6Eheat(z);
+  o.z = z;
   o.qn = principalQn(z);
   o.valence = pm6ValenceElectrons(z);
   o.nOrb = spCount(z);

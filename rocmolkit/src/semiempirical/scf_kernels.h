@@ -25,13 +25,15 @@ namespace semiempirical {
 //   atomsAll            : atomic numbers, length sum(nAtoms)
 //   coordsAll           : 3*sum(nAtoms) (Angstrom)
 //   chargesAll (out)    : per-atom Mulliken charge, length sum(nAtoms)
+//   hofAll (out)        : per-molecule heat of formation (kcal/mol), length nMol;
+//                         may be nullptr to skip.
 //   convergedAll (out)  : 1/0 per molecule (length nMol)
-// The core Hamiltonian is built host-side and uploaded; the SCF loop (Fock,
-// diagonalization, density, mixing) runs entirely on the device. Returns false
-// on an unsupported element or odd-electron (open-shell) molecule.
+// The entire SCF — H_core, Fock, diagonalization, density, charges, and heat of
+// formation — runs on the device. Returns false on an unsupported element or
+// odd-electron (open-shell) molecule.
 bool scfBatchGpu(int nMol, const int* molNAtoms, const int* molNBasis,
                  const int* atomsAll, const double* coordsAll,
-                 double* chargesAll, int* convergedAll,
+                 double* chargesAll, double* hofAll, int* convergedAll,
                  int maxIter = 500, double convTol = 1e-8);
 
 }  // namespace semiempirical

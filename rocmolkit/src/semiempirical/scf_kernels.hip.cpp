@@ -25,7 +25,7 @@
 
 #include "core_hamiltonian.h"          // gatherAtomIntParams
 #include "core_hamiltonian_device.h"   // buildCoreHamiltonianDev
-#include "pm6_params.h"
+#include "energy_device.h"             // nuclearRepulsionDev, heatOfFormationKcalDev
 #include "scf_device.h"
 #include "scf_kernels.h"
 #include "two_center_device.h"
@@ -39,7 +39,7 @@ __global__ void scfBatchKernel(int nMol, const AtomIntParams* ap, const int* sta
                                const int* norb, const double* coords, const int* atomOff,
                                const int* nAtomsArr, const int* nBasisArr, const int* nOccArr,
                                const long* scratchOff, double* scratch, double* chargesOut,
-                               int* convOut, int maxIter, double convTol) {
+                               int* convOut, double* hofOut, int maxIter, double convTol) {
   const int m = blockIdx.x * blockDim.x + threadIdx.x;
   if (m >= nMol) return;
   const int nB = nBasisArr[m], na = nAtomsArr[m], ao = atomOff[m];
@@ -60,9 +60,10 @@ __global__ void scfBatchKernel(int nMol, const AtomIntParams* ap, const int* sta
   buildCoreHamiltonianDev(nB, na, &ap[ao], &start[ao], &norb[ao], &coords[3 * ao], H);
 
   int conv = 0, niter = 0;
+  double eElec = 0.0;
   scfLoopDev(nB, na, &ap[ao], &start[ao], &norb[ao], &coords[3 * ao], H, nOccArr[m],
              maxIter, convTol, density, eval, F, eigA, C, Pnew, ecom, diisF, diisE,
-             &conv, &niter);
+             &conv, &niter, &eElec);
   convOut[m] = conv;
   for (int a = 0; a < na; ++a) {
     const int s = start[ao + a];
@@ -73,13 +74,17 @@ __global__ void scfBatchKernel(int nMol, const AtomIntParams* ap, const int* sta
     }
     chargesOut[ao + a] = static_cast<double>(ap[ao + a].valence) - pop;
   }
+  // Heat of formation on-device: E_nuc (core-core) + binding -> kcal/mol.
+  const double eNuc = nuclearRepulsionDev(na, &ap[ao], &coords[3 * ao]);
+  hofOut[m] = heatOfFormationKcalDev(eElec, eNuc, na, &ap[ao]);
 }
 
 }  // namespace
 
 bool scfBatchGpu(int nMol, const int* molNAtoms, const int* molNBasis,
                  const int* atomsAll, const double* coordsAll,
-                 double* chargesAll, int* convergedAll, int maxIter, double convTol) {
+                 double* chargesAll, double* hofAll, int* convergedAll,
+                 int maxIter, double convTol) {
   if (nMol <= 0) return true;
 
   std::vector<int> atomOff(nMol), nOcc(nMol);
@@ -117,7 +122,7 @@ bool scfBatchGpu(int nMol, const int* molNAtoms, const int* molNBasis,
   int *dStart = nullptr, *dNorb = nullptr, *dAtomOff = nullptr, *dNAtoms = nullptr,
       *dNBasis = nullptr, *dNOcc = nullptr, *dConv = nullptr;
   long* dScratchOff = nullptr;
-  double *dCoords = nullptr, *dScratch = nullptr, *dCharges = nullptr;
+  double *dCoords = nullptr, *dScratch = nullptr, *dCharges = nullptr, *dHof = nullptr;
   bool ok = true;
   auto need = [&](hipError_t e) { if (e != hipSuccess) ok = false; };
 
@@ -133,6 +138,7 @@ bool scfBatchGpu(int nMol, const int* molNAtoms, const int* molNBasis,
   need(hipMalloc(&dCoords, sizeof(double) * 3 * totAtoms));
   need(hipMalloc(&dScratch, sizeof(double) * totScratch));
   need(hipMalloc(&dCharges, sizeof(double) * totAtoms));
+  need(hipMalloc(&dHof, sizeof(double) * nMol));
 
   if (ok) {
     hipMemcpy(dAp, ap.data(), sizeof(AtomIntParams) * totAtoms, hipMemcpyHostToDevice);
@@ -154,17 +160,18 @@ bool scfBatchGpu(int nMol, const int* molNAtoms, const int* molNBasis,
     const int grid = (nMol + block - 1) / block;
     scfBatchKernel<<<grid, block>>>(nMol, dAp, dStart, dNorb, dCoords, dAtomOff, dNAtoms,
                                     dNBasis, dNOcc, dScratchOff, dScratch, dCharges,
-                                    dConv, maxIter, convTol);
+                                    dConv, dHof, maxIter, convTol);
     if (hipDeviceSynchronize() != hipSuccess) ok = false;
   }
   if (ok) {
     hipMemcpy(chargesAll, dCharges, sizeof(double) * totAtoms, hipMemcpyDeviceToHost);
     hipMemcpy(convergedAll, dConv, sizeof(int) * nMol, hipMemcpyDeviceToHost);
+    if (hofAll != nullptr) hipMemcpy(hofAll, dHof, sizeof(double) * nMol, hipMemcpyDeviceToHost);
   }
 
   hipFree(dAp); hipFree(dStart); hipFree(dNorb); hipFree(dAtomOff); hipFree(dNAtoms);
   hipFree(dNBasis); hipFree(dNOcc); hipFree(dConv); hipFree(dScratchOff);
-  hipFree(dCoords); hipFree(dScratch); hipFree(dCharges);
+  hipFree(dCoords); hipFree(dScratch); hipFree(dCharges); hipFree(dHof);
   return ok;
 }
 

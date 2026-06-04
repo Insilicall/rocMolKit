@@ -25,10 +25,9 @@
 #include <vector>
 
 #include "core_hamiltonian.h"
+#include "energy_device.h"
 #include "fock_device.h"
-#include "overlap.h"  // principalQn
 #include "pm6_params.h"
-#include "two_center.h"
 #include "two_center_device.h"  // AtomIntParams
 
 namespace nvMolKit {
@@ -312,74 +311,31 @@ bool mullikenCharges(int nAtoms, const int* atoms, const double* coords, double*
 }
 
 double nuclearRepulsionEv(int nAtoms, const int* atoms, const double* coords) {
-  constexpr double kEV = 27.21;
-  constexpr double kAngToBohr = 1.0 / 0.529167;
-  double eNuc = 0.0;
-  for (int i = 0; i < nAtoms; ++i) {
-    const Pm6ElementParams* pA = pm6ParamsForZ(atoms[i]);
-    if (pA == nullptr) continue;
-    for (int j = i + 1; j < nAtoms; ++j) {
-      const Pm6ElementParams* pB = pm6ParamsForZ(atoms[j]);
-      if (pB == nullptr) continue;
-      const double dx = coords[3 * i] - coords[3 * j];
-      const double dy = coords[3 * i + 1] - coords[3 * j + 1];
-      const double dz = coords[3 * i + 2] - coords[3 * j + 2];
-      const double R = std::sqrt(dx * dx + dy * dy + dz * dz);  // Angstrom
-      const double Rb = R * kAngToBohr;
-
-      const double rho0A = (pA->gss > 0.0) ? 0.5 * kEV / pA->gss : 0.0;
-      const double rho0B = (pB->gss > 0.0) ? 0.5 * kEV / pB->gss : 0.0;
-      const double aee = (rho0A + rho0B) * (rho0A + rho0B);
-      const double ssss = kEV / std::sqrt(Rb * Rb + aee);
-
-      const double ZA = static_cast<double>(pm6ValenceElectrons(atoms[i]));
-      const double ZB = static_cast<double>(pm6ValenceElectrons(atoms[j]));
-      const double t1 = ZA * ZB * ssss;
-
-      const bool nhohA = (atoms[i] == 7 || atoms[i] == 8) && atoms[j] == 1;
-      const bool nhohB = (atoms[j] == 7 || atoms[j] == 8) && atoms[i] == 1;
-      double t2 = std::exp(-pA->alpha * R);
-      if (nhohA) t2 *= R;
-      double t3 = std::exp(-pB->alpha * R);
-      if (nhohB) t3 *= R;
-
-      const double t4 = ZA * ZB / R;
-      double t5 = 0.0, t6 = 0.0;
-      for (int k = 0; k < 4; ++k) {
-        if (pA->gaussianK[k] != 0.0)
-          t5 += pA->gaussianK[k] * std::exp(-pA->gaussianL[k] * (R - pA->gaussianM[k]) * (R - pA->gaussianM[k]));
-        if (pB->gaussianK[k] != 0.0)
-          t6 += pB->gaussianK[k] * std::exp(-pB->gaussianL[k] * (R - pB->gaussianM[k]) * (R - pB->gaussianM[k]));
-      }
-      eNuc += t1 * (1.0 + t2 + t3) + t4 * (t5 + t6);
-    }
-  }
-  return eNuc;
+  std::vector<AtomIntParams> ap(nAtoms);
+  for (int a = 0; a < nAtoms; ++a)
+    if (!gatherAtomIntParams(atoms[a], ap[a])) return 0.0;
+  return nuclearRepulsionDev(nAtoms, ap.data(), coords);
 }
 
 bool heatOfFormationKcal(int nAtoms, const int* atoms, const double* coords, double* hofKcal) {
-  constexpr double kEvToKcal = 23.061;
   const int nBasis = spBasisSize(nAtoms, atoms);
   if (nBasis == 0) return false;
+
+  std::vector<AtomIntParams> ap(nAtoms);
+  for (int a = 0; a < nAtoms; ++a) {
+    if (!gatherAtomIntParams(atoms[a], ap[a])) return false;
+    // Every HoF-supported element has nonzero eisol/eheat; a zero is the
+    // unsupported sentinel.
+    if (ap[a].eisol == 0.0 || ap[a].eheat == 0.0) return false;
+  }
 
   std::vector<double> density(static_cast<size_t>(nBasis) * nBasis), eval(nBasis);
   ScfResult res;
   if (scfSp(nAtoms, atoms, coords, density.data(), eval.data(), &res) == 0) return false;
   if (!res.converged) return false;
 
-  const double eNuc = nuclearRepulsionEv(nAtoms, atoms, coords);
-  double eisol = 0.0, eheat = 0.0;
-  for (int a = 0; a < nAtoms; ++a) {
-    const double ei = pm6Eisol(atoms[a]);
-    const double eh = pm6Eheat(atoms[a]);
-    // Every HoF-supported element has nonzero eisol and eheat, so a zero is the
-    // unsupported sentinel: fail rather than fold a missing term into the sum.
-    if (ei == 0.0 || eh == 0.0) return false;
-    eisol += ei;
-    eheat += eh;
-  }
-  const double eBinding = (res.electronicEv + eNuc) - eisol;  // eV
-  *hofKcal = eBinding * kEvToKcal + eheat;
+  const double eNuc = nuclearRepulsionDev(nAtoms, ap.data(), coords);
+  *hofKcal = heatOfFormationKcalDev(res.electronicEv, eNuc, nAtoms, ap.data());
   return true;
 }
 

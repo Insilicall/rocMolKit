@@ -149,7 +149,7 @@ NVMOLKIT_HD inline void scfLoopDev(int nBasis, int nAtoms, const AtomIntParams* 
                                    const double* H, int nOcc, int maxIter, double convTol,
                                    double* density, double* eval, double* F, double* eigA,
                                    double* C, double* Pnew, double* ecom, double* diisF,
-                                   double* diisE, int* conv, int* niter) {
+                                   double* diisE, int* conv, int* niter, double* eElec) {
   const int n2 = nBasis * nBasis;
 
   for (int i = 0; i < n2; ++i) eigA[i] = H[i];
@@ -244,6 +244,12 @@ NVMOLKIT_HD inline void scfLoopDev(int nBasis, int nAtoms, const AtomIntParams* 
   }
   *conv = converged ? 1 : 0;
   *niter = it + 1;
+
+  // Final Fock + electronic energy E_elec = 0.5 sum(P .* (H + F)).
+  buildFockDev(nBasis, nAtoms, ap, start, norb, coords, H, density, F);
+  double e = 0.0;
+  for (int i = 0; i < n2; ++i) e += 0.5 * density[i] * (H[i] + F[i]);
+  *eElec = e;
 }
 
 }  // namespace semiempirical
