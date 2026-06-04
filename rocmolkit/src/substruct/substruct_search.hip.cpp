@@ -1116,7 +1116,36 @@ void getSubstructMatches(const std::vector<const RDKit::ROMol*>& targets,
                          SubstructAlgorithm                      algorithm,
                          hipStream_t                            stream,
                          const SubstructSearchConfig&            config) {
-  getSubstructMatchesImpl(targets, queries, results, algorithm, stream, config, nullptr, nullptr);
+  const int numTargets = static_cast<int>(targets.size());
+  const int numQueries = static_cast<int>(queries.size());
+
+  // Chunk targets to bound GPU memory — see countSubstructMatches for the why.
+  constexpr int kMaxTargetsPerSearch = 1024;
+  if (numTargets <= kMaxTargetsPerSearch) {
+    getSubstructMatchesImpl(targets, queries, results, algorithm, stream, config, nullptr, nullptr);
+    return;
+  }
+
+  results.resize(numTargets, numQueries);
+  results.matches.clear();
+  const int deviceId = config.gpuIds.empty() ? 0 : config.gpuIds.front();
+  for (int tStart = 0; tStart < numTargets; tStart += kMaxTargetsPerSearch) {
+    const int tEnd = std::min(tStart + kMaxTargetsPerSearch, numTargets);
+    const std::vector<const RDKit::ROMol*> chunkTargets(targets.begin() + tStart, targets.begin() + tEnd);
+    SubstructSearchResults                 chunkResults;
+    getSubstructMatchesImpl(chunkTargets, queries, chunkResults, algorithm, stream, config, nullptr, nullptr);
+    // Pair keys are target*numQueries+query; shift the chunk's local target
+    // range back to global by adding tStart*numQueries.
+    const int64_t offset = static_cast<int64_t>(tStart) * numQueries;
+    for (auto& [localPair, matchVec] : chunkResults.matches) {
+      results.matches[localPair + offset] = std::move(matchVec);
+    }
+    cudaCheckError(hipDeviceSynchronize());
+    hipMemPool_t pool = nullptr;
+    if (hipDeviceGetDefaultMemPool(&pool, deviceId) == hipSuccess && pool != nullptr) {
+      hipMemPoolTrimTo(pool, 0);
+    }
+  }
 }
 
 void countSubstructMatches(const std::vector<const RDKit::ROMol*>& targets,
@@ -1129,12 +1158,47 @@ void countSubstructMatches(const std::vector<const RDKit::ROMol*>& targets,
   const int numQueries = static_cast<int>(queries.size());
 
   counts.assign(static_cast<size_t>(numTargets) * numQueries, 0);
+  if (numTargets == 0 || numQueries == 0) {
+    return;
+  }
 
-  SubstructSearchResults matchResults;
-  SubstructSearchConfig  countConfig = config;
-  countConfig.maxMatches             = 0;
+  SubstructSearchConfig countConfig = config;
+  countConfig.maxMatches            = 0;
 
-  getSubstructMatchesImpl(targets, queries, matchResults, algorithm, stream, countConfig, nullptr, &counts);
+  // Bound the targets processed per search. The recursive-SMARTS scratch and the
+  // async-allocation pool grow with the per-call target count and OOM/wedge the
+  // GPU past a few thousand targets. Each chunk runs as an independent search
+  // (fresh executors free that state between chunks) and writes into its own
+  // target slice, so results are identical to one big call but memory stays
+  // bounded. Chunks are sequential — the GPU is already saturated within one.
+  constexpr int kMaxTargetsPerSearch = 1024;
+  if (numTargets <= kMaxTargetsPerSearch) {
+    SubstructSearchResults matchResults;
+    getSubstructMatchesImpl(targets, queries, matchResults, algorithm, stream, countConfig, nullptr, &counts);
+    return;
+  }
+
+  const int deviceId = config.gpuIds.empty() ? 0 : config.gpuIds.front();
+  for (int tStart = 0; tStart < numTargets; tStart += kMaxTargetsPerSearch) {
+    const int tEnd = std::min(tStart + kMaxTargetsPerSearch, numTargets);
+    const std::vector<const RDKit::ROMol*> chunkTargets(targets.begin() + tStart, targets.begin() + tEnd);
+    std::vector<int>                       chunkCounts(static_cast<size_t>(tEnd - tStart) * numQueries, 0);
+    SubstructSearchResults                 matchResults;
+    getSubstructMatchesImpl(chunkTargets, queries, matchResults, algorithm, stream, countConfig, nullptr, &chunkCounts);
+    std::copy(chunkCounts.begin(), chunkCounts.end(), counts.begin() + static_cast<size_t>(tStart) * numQueries);
+
+    // Hardening: each chunk's recursive scratch can peak at several GB. The
+    // async-alloc pool keeps that memory after the chunk's executors are freed,
+    // so without releasing it back to the device between chunks the pool grows
+    // chunk-over-chunk and eventually OOMs/wedges the GPU. Sync (so all frees are
+    // visible) then trim the pool to nothing. Bounds VRAM to one chunk's peak
+    // for any target count.
+    cudaCheckError(hipDeviceSynchronize());
+    hipMemPool_t pool = nullptr;
+    if (hipDeviceGetDefaultMemPool(&pool, deviceId) == hipSuccess && pool != nullptr) {
+      hipMemPoolTrimTo(pool, 0);
+    }
+  }
 }
 
 void hasSubstructMatch(const std::vector<const RDKit::ROMol*>& targets,
@@ -1155,18 +1219,42 @@ void hasSubstructMatch(const std::vector<const RDKit::ROMol*>& targets,
     return;
   }
 
-  SubstructSearchConfig  hasMatchConfig;
-  SubstructSearchResults matchResults;
-  {
-    ScopedNvtxRange setupRange("hasSubstructMatch setup");
-    hasMatchConfig            = config;
-    hasMatchConfig.maxMatches = 1;
-  }
-  getSubstructMatchesImpl(targets, queries, matchResults, algorithm, stream, hasMatchConfig, &results, nullptr);
+  SubstructSearchConfig hasMatchConfig = config;
+  hasMatchConfig.maxMatches            = 1;
 
-  for (auto& [pairIdx, matches] : matchResults.matches) {
-    if (!matches.empty()) {
-      results.hasMatch[static_cast<size_t>(pairIdx)] = 1;
+  // Chunk targets to bound GPU memory — see countSubstructMatches for the why.
+  constexpr int kMaxTargetsPerSearch = 1024;
+  if (numTargets <= kMaxTargetsPerSearch) {
+    SubstructSearchResults matchResults;
+    getSubstructMatchesImpl(targets, queries, matchResults, algorithm, stream, hasMatchConfig, &results, nullptr);
+    for (auto& [pairIdx, matches] : matchResults.matches) {
+      if (!matches.empty()) {
+        results.hasMatch[static_cast<size_t>(pairIdx)] = 1;
+      }
+    }
+    return;
+  }
+
+  const int deviceId = config.gpuIds.empty() ? 0 : config.gpuIds.front();
+  for (int tStart = 0; tStart < numTargets; tStart += kMaxTargetsPerSearch) {
+    const int tEnd = std::min(tStart + kMaxTargetsPerSearch, numTargets);
+    const std::vector<const RDKit::ROMol*> chunkTargets(targets.begin() + tStart, targets.begin() + tEnd);
+    HasSubstructMatchResults               chunkResults;
+    chunkResults.resize(tEnd - tStart, numQueries);
+    SubstructSearchResults matchResults;
+    getSubstructMatchesImpl(chunkTargets, queries, matchResults, algorithm, stream, hasMatchConfig, &chunkResults, nullptr);
+    for (auto& [pairIdx, matches] : matchResults.matches) {
+      if (!matches.empty()) {
+        chunkResults.hasMatch[static_cast<size_t>(pairIdx)] = 1;
+      }
+    }
+    std::copy(chunkResults.hasMatch.begin(),
+              chunkResults.hasMatch.end(),
+              results.hasMatch.begin() + static_cast<size_t>(tStart) * numQueries);
+    cudaCheckError(hipDeviceSynchronize());
+    hipMemPool_t pool = nullptr;
+    if (hipDeviceGetDefaultMemPool(&pool, deviceId) == hipSuccess && pool != nullptr) {
+      hipMemPoolTrimTo(pool, 0);
     }
   }
 }
