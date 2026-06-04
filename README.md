@@ -118,16 +118,29 @@ its binding, so anything not built is skipped rather than failing. The same
 checks also exist as standalone scripts under `tools/` (`fp_validate.py`,
 `sim_validate.py`, `butina_validate.py`, `tfd_validate.py`) for ad-hoc runs.
 
-Run them inside the dev image (GPU passthrough + writable `/tmp` for comgr's
-JIT blit kernels):
+### Validate the published image on your GPU
+
+Pull the image and run the GPU suite against the **bindings installed in the
+image** (this checkout supplies only the test files + data). GPU passthrough,
+plus a writable `/tmp` for comgr's JIT blit kernels:
 
 ```bash
 docker run --rm \
     --device=/dev/kfd --device=/dev/dri \
     --group-add video --group-add render --security-opt seccomp=unconfined \
-    -e HIP_VISIBLE_DEVICES=0 -v "$PWD":/work -w /work \
+    -e HIP_VISIBLE_DEVICES=0 -v "$PWD":/work -w /tmp \
     ghcr.io/insilicall/rocmolkit:devel \
-    python3 -m pytest tests/ --rocm -v
+    python3 -m pytest /work/tests --rocm -v
+```
+
+`-w /tmp` (not `/work`) keeps the source tree off `sys.path`, so `import
+rocmolkit` resolves to the version baked into the image — you test the published
+artifact, not the local checkout. The convenience wrapper does the pull for you:
+
+```bash
+bash tools/test_image.sh                # :devel
+bash tools/test_image.sh v0.4.1-devel   # a specific tag
+ROCMOLKIT_NO_PULL=1 bash tools/test_image.sh   # reuse the local image
 ```
 
 ## Continuous integration
