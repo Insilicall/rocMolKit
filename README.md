@@ -42,6 +42,12 @@ terms), so we report both regimes — conformers per second, higher is better:
 | ETKDG generation | **~4,900** | 395 (**12×**) | 865 (**5.7×**) |
 | MMFF94 optimize | **~4,900** | 375 (**13×**) | 907 (**5.4×**) |
 
+![ETKDG throughput and speedup vs batch size](docs/assets/rocmolkit_conformer_scaling.png)
+
+The GPU throughput climbs with batch size and saturates around ~4,500 conf/s
+(drug-like, k=4), while RDKit stays flat — so the speedup grows with batch and
+then **holds at scale** (~5× vs 12-thread RDKit), all at 100% success.
+
 ### vs the Apple-Silicon sibling ports (their published numbers; different hardware)
 
 Both ports validate against RDKit, so "RDKit-quality conformers/s" is the shared,
