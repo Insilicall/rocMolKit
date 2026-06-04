@@ -65,9 +65,9 @@ add_caption(fig, "AMD Radeon RX 9060 XT (RDNA4) + Ryzen 5 7600, ROCm 7.2.3 · "
 logo = mpimg.imread(str(LOGO))
 lh, lw = logo.shape[0], logo.shape[1]
 fw, fh = fig.get_size_inches()
-w = 0.17
+w = 0.19
 h = w * (lh / lw) * (fw / fh)
-ax_logo = fig.add_axes([0.985 - w, 0.985 - h, w, h], anchor="NE", zorder=10)
+ax_logo = fig.add_axes([0.965 - w, 0.98 - h, w, h], anchor="NE", zorder=10)
 ax_logo.imshow(logo)
 ax_logo.axis("off")
 
