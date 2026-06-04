@@ -4,6 +4,42 @@ All notable changes to rocMolKit will be documented here.
 
 ## [unreleased]
 
+## [v0.4.3] — 2026-06-04
+
+### Fixed
+- **ETKDG silently dropped ~12% of conformers (the 88% "success" was a bug, not a
+  limitation).** The BATCHED FP64 BFGS backend converged *nothing* on
+  ROCm/gfx1200: `hipcub::DeviceSelect::Flagged` and `DeviceReduce::TransformReduce`
+  return 0 regardless of input on this arch (same class as the broken
+  `DeviceRadixSort`), so `compactAndCountConverged` reported "all converged" on
+  iteration 0 and the minimizer exited before doing any work. HYBRID routing sends
+  any batch containing a >64-atom molecule entirely to BATCHED, so one large
+  molecule dropped its whole 500-conformer batch — the largest/hardest ~12%, which
+  surfaced as an "88% success rate" and inflated throughput. Replaced both broken
+  primitives with wavefront-size-agnostic atomic compaction/count kernels. ETKDG
+  generation is now **100% success**, energy-validated (generated conformers fall
+  in the same MMFF basins as RDKit: median ΔE = 0.00 kcal/mol).
+
+### Performance
+- **Substructure: ~6× slower than RDKit → ~9× faster (vs 12-thread).** The scale
+  hardening in v0.4.2 chunked *every* search at 1024 targets with a
+  sync + `hipMemPoolTrimTo(pool, 0)` between chunks. That safety is needed only
+  for recursive SMARTS (GBs of paint scratch); for simple queries it was pure
+  overhead. Now chunk size adapts to recursion: recursive → 1024 + trim
+  (unchanged, OOM-safe); non-recursive → 65536 (single-shot for typical batches).
+  Measured 50k×20 drug-like: 326k → 3,770k pair/s (0.2× → 3.1× vs single-core,
+  9× vs 12-thread). Correctness unchanged (840/840 vs RDKit).
+- **MMFF optimize: reuse one BFGS minimizer per thread across batches** instead of
+  reconstructing (and reallocating all its device buffers) per batch. +22% in the
+  high-conformers-per-molecule regime; removes per-batch mem-pool churn.
+
+### Docs
+- Performance numbers rewritten to be honest and audit-proof: reported by molecule
+  size (small ~12 atoms vs drug-like ~30 atoms), all at 100% success and
+  RDKit-validated, with corrected vs-RDKit (5–13×) and vs-mlxmolkit (1.7–2.6×, both
+  forks, matched molecule sizes) comparisons. Speedup chart and two-panel
+  conformer-scaling figure regenerated with the corrected data.
+
 ## [v0.4.2] — 2026-06-04
 
 ### Fixed

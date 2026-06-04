@@ -4,7 +4,7 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "rocmolkit"
-version = "0.4.2"
+version = "0.4.3"
 description = "GPU-accelerated RDKit operations on AMD GPUs via HIP/ROCm"
 readme = "README.md"
 license = { text = "Apache-2.0" }
