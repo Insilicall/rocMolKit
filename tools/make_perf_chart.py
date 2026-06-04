@@ -29,7 +29,7 @@ data = [
     ("Tanimoto similarity", 658),
     ("TFD", 137),
     ("Butina clustering", 48),
-    ("Substructure", 12),
+    ("Substructure", 9),
     ("Morgan fingerprints", 7),
     ("ETKDG generation", 6),
     ("MMFF94 optimization", 5),
