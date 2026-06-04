@@ -7,13 +7,14 @@
 
 HIP/ROCm port of [nvMolKit](https://github.com/NVIDIA-Digital-Bio/nvMolKit) (NVIDIA CUDA, Apache 2.0) — same API surface, AMD backend. On a **consumer** Radeon RX 9060 XT it runs ETKDG conformer generation and MMFF94 optimization **faster than the published Apple-Silicon sibling port ([mlxmolkit](https://github.com/guillaume-osmo/mlxmolkit))** and an order of magnitude faster than multi-threaded RDKit on CPU.
 
-> **Status: alpha.** Functional: **ETKDG** generation and **MMFF94** optimization
-> (both validated on AMD RDNA4 / gfx1200 — see Performance), plus **UFF**,
-> **batched forcefield** and **conformer RMSD**.
-> Pending — scaffolded (CUDA code + tests present) but their HIP kernels are not
-> yet ported, so they are disabled in the build: **fingerprints, similarity,
-> Butina clustering, substructure, TFD**. Porting plan in [PLAN.md](PLAN.md);
-> see also [ISSUES.md](ISSUES.md), [CHANGELOG.md](CHANGELOG.md).
+> **Status: beta.** All core modules are ported to HIP and validated against
+> RDKit on AMD RDNA4 / gfx1200: **ETKDG** generation and **MMFF94** optimization
+> (see Performance), plus **UFF**, **batched forcefield**, **conformer RMSD**,
+> **Morgan fingerprints** (bit-exact), **Tanimoto/Cosine similarity** (bit-exact),
+> **Butina clustering** (matches RDKit; high-cutoff differences are valid
+> parallel tie-breaks), **substructure search** (840/840 vs RDKit) and **TFD**
+> (float32 precision). Per-feature porting notes and validators in
+> [PLAN.md](PLAN.md); see also [ISSUES.md](ISSUES.md), [CHANGELOG.md](CHANGELOG.md).
 
 ## Performance
 
@@ -109,8 +110,11 @@ for the architecture and the optimization history.
 
 ## Roadmap
 
-ETKDG → MMFF94 → fingerprints → similarity → Butina clustering → the rest.
-See [PLAN.md](PLAN.md).
+Core modules are ported and validated (ETKDG, MMFF94, UFF, batched forcefield,
+conformer RMSD, fingerprints, similarity, Butina clustering, substructure, TFD).
+Next: a self-hosted ROCm CI runner to gate the upstream test suites on real
+hardware, and refreshed devel/slim images shipping the new bindings. See
+[PLAN.md](PLAN.md).
 
 ## License
 
