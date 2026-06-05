@@ -29,7 +29,7 @@ namespace semiempirical {
 namespace ovdetail {
 
 constexpr double kOvAngToBohr = 1.0 / 0.529167;
-constexpr int kOvNMax = 7;
+constexpr int kOvNMax = 8;
 
 NVMOLKIT_HD inline void aintgs(double alpha, double* a) {
   if (std::fabs(alpha) < 1e-10) {
@@ -139,7 +139,8 @@ NVMOLKIT_HD inline int diatomOverlapSpDev(const AtomIntParams& pA, const double 
   else if (pA.qn == 4 && pB.qn == 1) jcall = 541;  // Br + H
   else if (pA.qn == 4 && pB.qn == 2) jcall = 642;  // Br + 2nd-row (C/N/O/F)
   else if (pA.qn == 5 && pB.qn == 1) jcall = 651;  // I + H
-  else {  // Br-Br (jcall 8) / I + heavy sp overlap formulas not yet ported
+  else if (pA.qn == 5 && pB.qn == 2) jcall = 752;  // I + 2nd-row (C/N/O/F)
+  else {  // homonuclear (jcall 8/10) sp overlap formulas not yet ported
     for (int i = 0; i < nA * nB; ++i) outBlock[i] = 0.0;
     return nA * nB;
   }
@@ -288,6 +289,33 @@ NVMOLKIT_HD inline int diatomOverlapSpDev(const AtomIntParams& pA, const double 
                 + 2.0 * (A211[3] * B211[2] + A211[4] * B211[3]) + 2.0 * (-A211[2] * B211[3] - A211[3] * B211[4])
                 - 3.0 * (A211[1] * B211[4] + A211[2] * B211[5]) + (-A211[0] * B211[5] - A211[1] * B211[6]))
              / (480.0 * std::sqrt(42.0));
+  } else if (jcall == 752) {  // heavy qn=5 + 2nd-row qn=2 (I + C/N/O/F)
+    S111 = std::pow(zsB, 2.5) * std::pow(zsA, 5.5) * std::pow(Rb, 8)
+           * (A111[7] * B111[0] + 3.0 * B111[1] * A111[6] + B111[2] * A111[5] - 5.0 * B111[3] * A111[4]
+              - 5.0 * A111[3] * B111[4] + B111[5] * A111[2] + 3.0 * B111[6] * A111[1] + B111[7] * A111[0])
+           / (std::sqrt(42.0) * 2880.0);
+    if (nA > 1 && nB > 1) {
+      S211 = std::pow(zsB, 2.5) * std::pow(zpA, 5.5) * std::pow(Rb, 8)
+             * ((A211[6] * B211[0] + A211[7] * B211[1]) - 2.0 * (-A211[5] * B211[1] - A211[6] * B211[2])
+                - (A211[4] * B211[2] + A211[5] * B211[3]) + 4.0 * (-A211[3] * B211[3] - A211[4] * B211[4])
+                - (A211[2] * B211[4] + A211[3] * B211[5]) - 2.0 * (-A211[1] * B211[5] - A211[2] * B211[6])
+                + (A211[0] * B211[6] + A211[1] * B211[7])) / (2880.0 * std::sqrt(14.0));
+      S121 = std::pow(zpB, 2.5) * std::pow(zsA, 5.5) * std::pow(Rb, 8)
+             * ((A121[6] * B121[0] - A121[7] * B121[1]) + 4.0 * (A121[5] * B121[1] - A121[6] * B121[2])
+                + 5.0 * (A121[4] * B121[2] - A121[5] * B121[3]) - 5.0 * (A121[2] * B121[4] - A121[3] * B121[5])
+                - 4.0 * (A121[1] * B121[5] - A121[2] * B121[6]) - (A121[0] * B121[6] - A121[1] * B121[7]))
+             / (2880.0 * std::sqrt(14.0));
+      S221 = std::pow(zpB, 2.5) * std::pow(zpA, 5.5) * std::pow(Rb, 8)
+             * ((A22[5] * B22[0] - A22[7] * B22[2]) + 3.0 * (A22[4] * B22[1] - A22[6] * B22[3])
+                + 2.0 * (A22[3] * B22[2] - A22[5] * B22[4]) - 2.0 * (A22[2] * B22[3] - A22[4] * B22[5])
+                - 3.0 * (A22[1] * B22[4] - A22[3] * B22[6]) - (A22[0] * B22[5] - A22[2] * B22[7]))
+             / (960.0 * std::sqrt(42.0));
+      S222 = std::pow(zpB, 2.5) * std::pow(zpA, 5.5) * std::pow(Rb, 8)
+             * ((A22[7] - A22[5]) * (B22[0] - B22[2]) + 3.0 * (A22[6] - A22[4]) * (B22[1] - B22[3])
+                + 2.0 * (A22[5] - A22[3]) * (B22[2] - B22[4]) - 2.0 * (A22[4] - A22[2]) * (B22[3] - B22[5])
+                - 3.0 * (A22[3] - A22[1]) * (B22[4] - B22[6]) - (A22[2] - A22[0]) * (B22[5] - B22[7]))
+             / (1920.0 * std::sqrt(42.0));
+    }
   }
 
   const double v[3] = {Rvec[0] / R, Rvec[1] / R, Rvec[2] / R};
@@ -302,7 +330,7 @@ NVMOLKIT_HD inline int diatomOverlapSpDev(const AtomIntParams& pA, const double 
   if (jcall == 3 || jcall == 431 || jcall == 541 || jcall == 651) {
     if (nA > 1)
       for (int k = 0; k < 3; ++k) outBlock[(k + 1) * nB + 0] = S211 * r0[k];
-  } else if (jcall == 4 || jcall == 5 || jcall == 6 || jcall == 642) {
+  } else if (jcall == 4 || jcall == 5 || jcall == 6 || jcall == 642 || jcall == 752) {
     if (nA > 1 && nB > 1) {
       for (int k = 0; k < 3; ++k) {
         outBlock[(k + 1) * nB + 0] = S211 * r0[k];

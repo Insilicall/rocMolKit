@@ -70,6 +70,14 @@ NVMOLKIT_HD inline void dsBlockDev(double zd, double zs, double Rb, int dqnA, in
   const double m4 = A[0] * (3 * B[4] - B[6]) + A[2] * (3 * B[6] - B[4]) + 4 * A[1] * B[5];
   const double p6 = m1 + 2.0 * m2 - 2.0 * m3 - m4;
   const double p651 = m1 - 2.0 * m2 - 2.0 * m3 + m4;
+  // jcall 752 (qn5 d - qn2 s): six groups (uses A/B up to index 7).
+  const double n1 = A[5] * (3 * B[0] - B[2]) + A[7] * (3 * B[2] - B[0]) + 4 * A[6] * B[1];
+  const double n2 = -A[4] * (3 * B[1] - B[3]) - A[6] * (3 * B[3] - B[1]) - 4 * A[5] * B[2];
+  const double n3 = A[3] * (3 * B[2] - B[4]) + A[5] * (3 * B[4] - B[2]) + 4 * A[4] * B[3];
+  const double n4 = -A[2] * (3 * B[3] - B[5]) - A[4] * (3 * B[5] - B[3]) - 4 * A[3] * B[4];
+  const double n5 = A[1] * (3 * B[4] - B[6]) + A[3] * (3 * B[6] - B[4]) + 4 * A[2] * B[5];
+  const double n6 = -A[0] * (3 * B[5] - B[7]) - A[2] * (3 * B[7] - B[5]) - 4 * A[1] * B[6];
+  const double p752 = n1 - n2 - 2.0 * n3 + 2.0 * n4 + n5 - n6;
   // jcall 541 (Br + H): same four groups as p5 but signs (+ - - +).
   const double p541 = (A[3] * (3 * B[0] - B[2]) + A[5] * (3 * B[2] - B[0]) + 4 * A[4] * B[1])
                       - (-A[2] * (3 * B[1] - B[3]) - A[4] * (3 * B[3] - B[1]) - 4 * A[3] * B[2])
@@ -90,7 +98,8 @@ NVMOLKIT_HD inline void dsBlockDev(double zd, double zs, double Rb, int dqnA, in
     // qnB 3/4 (jcall 7/8) extend the same pattern when needed.
   } else if (dqnA == 5) {
     if (qnB <= 1) s311 = std::pow(zs, 1.5) * std::pow(zd, 5.5) * std::pow(Rb, 7) * p651 / (576.0 * std::sqrt(70.0));
-    // qnB >= 2 (jcall 752/853/9/10) extend the same pattern when needed.
+    else if (qnB == 2) s311 = std::pow(zs, 2.5) * std::pow(zd, 5.5) * std::pow(Rb, 8) * p752 / (1152.0 * std::sqrt(210.0));
+    // qnB 3/4/5 (jcall 853/9/10) extend the same pattern when needed.
   }
   (void)p5;
   const double s3 = std::sqrt(3.0), s34 = std::sqrt(0.75);
@@ -135,10 +144,22 @@ NVMOLKIT_HD inline void dpBlockDev(double zd, double zp, double Rb, int dqnA, in
       const double pre = std::pow(zp, 3.5) * std::pow(zd, 3.5) * std::pow(Rb, 7);
       s321 = pre * (G1 + G2 - G3 - G4) / (192.0 * std::sqrt(15.0));
       s322 = pre * (H1 + H2 - H3 - H4) / (192.0 * std::sqrt(5.0));
-    } else {  // jcall 642: signs (+ - - +)
+    } else if (dqnA == 4) {  // jcall 642: signs (+ - - +)
       const double pre = std::pow(zp, 2.5) * std::pow(zd, 4.5) * std::pow(Rb, 7);
       s321 = pre * (G1 - G2 - G3 + G4) / (384.0 * std::sqrt(7.0));
       s322 = pre * (H1 - H2 - H3 + H4) / (128.0 * std::sqrt(21.0));
+    } else {  // jcall 752 (d-qn5 + p-qn2): six groups (uses A/B up to index 7)
+      const double P1 = A[4] * (3 * B[0] - B[2]) + A[5] * (B[1] + B[3]) - A[6] * (B[0] + B[2]) - A[7] * (3 * B[3] - B[1]);
+      const double P2 = -A[3] * (3 * B[1] - B[3]) - A[4] * (B[2] + B[4]) + A[5] * (B[1] + B[3]) + A[6] * (3 * B[4] - B[2]);
+      const double P3 = -A[1] * (3 * B[3] - B[5]) - A[2] * (B[4] + B[6]) + A[3] * (B[3] + B[5]) + A[4] * (3 * B[6] - B[4]);
+      const double P4 = A[0] * (3 * B[4] - B[6]) + A[1] * (B[5] + B[7]) - A[2] * (B[4] + B[6]) - A[3] * (3 * B[7] - B[5]);
+      const double Q1 = (A[6] - A[4]) * (B[0] - B[2]) + (A[5] - A[7]) * (-B[1] + B[3]);
+      const double Q2 = (A[5] - A[3]) * (-B[1] + B[3]) + (A[4] - A[6]) * (B[2] - B[4]);
+      const double Q3 = (A[3] - A[1]) * (-B[3] + B[5]) + (A[2] - A[4]) * (B[4] - B[6]);
+      const double Q4 = (A[2] - A[0]) * (B[4] - B[6]) + (A[1] - A[3]) * (-B[5] + B[7]);
+      const double pre = std::pow(zp, 2.5) * std::pow(zd, 5.5) * std::pow(Rb, 8);
+      s321 = pre * (P1 - 2.0 * P2 + 2.0 * P3 - P4) / (1152.0 * std::sqrt(70.0));
+      s322 = pre * (Q1 - 2.0 * Q2 + 2.0 * Q3 - Q4) / (384.0 * std::sqrt(210.0));
     }
   }
   const double s3 = std::sqrt(3.0), s34 = std::sqrt(0.75), t = 2 * ca * ca - 1;

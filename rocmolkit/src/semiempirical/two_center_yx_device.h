@@ -40,7 +40,7 @@ NVMOLKIT_HD inline bool yxWMolecular(const AtomIntParams& pA, const double coord
                                      const AtomIntParams& pB, const double coordB[3], double* W) {
   using namespace detail;
   double dp, ds, dd, rho3, rho4, rho5, rho6;
-  if (!dChargeSeparations(pA.z, dp, ds, dd, rho3, rho4, rho5, rho6)) return false;
+  if (!dChargeSeparationsTwoCenter(pA.z, dp, ds, dd, rho3, rho4, rho5, rho6)) return false;
 
   const double Rvec[3] = {coordB[0] - coordA[0], coordB[1] - coordA[1], coordB[2] - coordA[2]};
   const double R = std::sqrt(Rvec[0] * Rvec[0] + Rvec[1] * Rvec[1] + Rvec[2] * Rvec[2]);
@@ -100,8 +100,8 @@ NVMOLKIT_HD inline bool yyWMolecular(const AtomIntParams& pA, const double coord
                                      const AtomIntParams& pB, const double coordB[3], double* W) {
   using namespace detail;
   double dpA, dsA, ddA, r3A, r4A, r5A, r6A, dpB, dsB, ddB, r3B, r4B, r5B, r6B;
-  if (!dChargeSeparations(pA.z, dpA, dsA, ddA, r3A, r4A, r5A, r6A)) return false;
-  if (!dChargeSeparations(pB.z, dpB, dsB, ddB, r3B, r4B, r5B, r6B)) return false;
+  if (!dChargeSeparationsTwoCenter(pA.z, dpA, dsA, ddA, r3A, r4A, r5A, r6A)) return false;
+  if (!dChargeSeparationsTwoCenter(pB.z, dpB, dsB, ddB, r3B, r4B, r5B, r6B)) return false;
 
   const double Rvec[3] = {coordB[0] - coordA[0], coordB[1] - coordA[1], coordB[2] - coordA[2]};
   const double R = std::sqrt(Rvec[0] * Rvec[0] + Rvec[1] * Rvec[1] + Rvec[2] * Rvec[2]);

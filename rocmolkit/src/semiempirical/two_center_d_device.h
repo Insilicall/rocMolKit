@@ -58,6 +58,22 @@ NVMOLKIT_HD inline bool dChargeSeparations(int z, double& dp, double& ds, double
   return true;
 }
 
+// d charge separations for the two-center two-electron tensors (YX/YY). These
+// match dChargeSeparations (pyseqm_d_params) for P/S/Cl/Br, but for iodine the
+// oracle's YX/YY path uses cal_par's qn5 values, which differ from the (qn3-like)
+// pyseqm_d_params that the YH electron-core path uses for iodine. Returns false
+// if z has no d parameters.
+NVMOLKIT_HD inline bool dChargeSeparationsTwoCenter(int z, double& dp, double& ds, double& dd,
+                                                    double& rho3, double& rho4, double& rho5,
+                                                    double& rho6) {
+  if (z == 53) {  // I — cal_par (qn5) values, distinct from pyseqm_d_params
+    dp = 1.29634100; ds = 0.77747300; dd = 1.63749500;
+    rho3 = 0.80039300; rho4 = 1.20097700; rho5 = 0.71635300; rho6 = 1.06583500;
+    return true;
+  }
+  return dChargeSeparations(z, dp, ds, dd, rho3, rho4, rho5, rho6);
+}
+
 // 9x9 (mu nu_A | s_B s_B) matrix for the YH case (zA has d, zB = H). Writes W
 // row-major into out (81 doubles). Returns false if zA has no d parameters.
 NVMOLKIT_HD inline bool yhWMolecular(const AtomIntParams& pA, const double coordA[3],
