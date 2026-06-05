@@ -137,6 +137,60 @@ NVMOLKIT_HD inline void ddBlockDev(double zd1, double zd2, double Rb,
   out[4 * 5 + 3] = e78;
 }
 
+// Full molecular-frame overlap block (nA x nB, orbital order [s,px,py,pz,d...])
+// between atoms A and B, including d-orbitals. The sp rows/cols come from the
+// validated diatomOverlapSpDev (which already lays them out in the nOrb-strided
+// block with the d positions zeroed); the d rows are filled from the validated
+// ds/dp/dd blocks. To keep one code path, the heavier (more orbitals) atom is
+// always treated as A: if nA < nB the (B,A) block is built and transposed.
+// Returns nA*nB. NOTE: only the A-has-d rows are filled (d-s, d-p, d-d); the
+// sp-row x B-d-col entries (s-d, p-d when only B has d) are handled by the
+// transpose path, so a pair where BOTH atoms carry d (YY) leaves the A-sp x B-d
+// block unfilled — that case is gated out until the YY two-center is validated.
+NVMOLKIT_HD inline int diatomOverlapDDev(const AtomIntParams& pA, const double coordA[3],
+                                         const AtomIntParams& pB, const double coordB[3],
+                                         double* out) {
+  const int nA = pA.nOrb, nB = pB.nOrb;
+  if (nA == 0 || nB == 0) return 0;
+
+  if (nA < nB) {  // ensure the d-bearing / larger atom is A; transpose at the end
+    double tmp[81];
+    diatomOverlapDDev(pB, coordB, pA, coordA, tmp);
+    for (int i = 0; i < nA; ++i)
+      for (int j = 0; j < nB; ++j) out[i * nB + j] = tmp[j * nA + i];
+    return nA * nB;
+  }
+
+  // sp rows/cols (d positions left zero) in the nA x nB layout.
+  diatomOverlapSpDev(pA, coordA, pB, coordB, out);
+  if (nA < 9) return nA * nB;  // A has no d shell -> done
+
+  const double Rvec[3] = {coordB[0] - coordA[0], coordB[1] - coordA[1], coordB[2] - coordA[2]};
+  const double R = std::sqrt(Rvec[0] * Rvec[0] + Rvec[1] * Rvec[1] + Rvec[2] * Rvec[2]);
+  const double Rb = R * ovdetail::kOvAngToBohr;
+  const double v[3] = {Rvec[0] / R, Rvec[1] / R, Rvec[2] / R};
+  double ca, cb, sa, sb;
+  bondAngles(v, ca, cb, sa, sb);
+
+  // A's d rows (4..8) against B's s / p / d columns.
+  double ds[5];
+  dsBlockDev(pA.zetaD, pB.zetaS, Rb, ca, cb, sa, sb, ds);
+  for (int m = 0; m < 5; ++m) out[(4 + m) * nB + 0] = ds[m];
+  if (nB >= 4) {
+    double dp[15];
+    dpBlockDev(pA.zetaD, pB.zetaP, Rb, ca, cb, sa, sb, dp);
+    for (int m = 0; m < 5; ++m)
+      for (int q = 0; q < 3; ++q) out[(4 + m) * nB + (1 + q)] = dp[m * 3 + q];
+  }
+  if (nB == 9) {
+    double dd[25];
+    ddBlockDev(pA.zetaD, pB.zetaD, Rb, ca, cb, sa, sb, dd);
+    for (int m = 0; m < 5; ++m)
+      for (int n = 0; n < 5; ++n) out[(4 + m) * nB + (4 + n)] = dd[m * 5 + n];
+  }
+  return nA * nB;
+}
+
 }  // namespace semiempirical
 }  // namespace nvMolKit
 

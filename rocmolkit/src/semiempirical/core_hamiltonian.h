@@ -26,6 +26,10 @@ namespace semiempirical {
 // host-side gather, shared by the CPU wrappers and the GPU batch entries.
 bool gatherAtomIntParams(int z, AtomIntParams& out);
 
+// Like gatherAtomIntParams, but sets nOrb to the full PM6_D valence basis size
+// (9 for d-bearing P/S/Cl/...). Use this for the d-orbital (PM6_D) SCF path.
+bool gatherAtomIntParamsD(int z, AtomIntParams& out);
+
 // Number of sp basis functions for a molecule (1 per H/He, 4 per other sp
 // atom). Returns 0 if any atom is unparameterized or carries d-orbitals (qn>=3,
 // not yet supported). Orbital order within an atom is [s, px, py, pz].

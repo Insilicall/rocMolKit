@@ -32,10 +32,10 @@ namespace semiempirical {
 // PM6 table, or into device arrays for a batch). Carrying explicit values keeps
 // the device math free of any global parameter-table lookup.
 struct AtomIntParams {
-  double zetaS, zetaP;             // valence Slater exponents
+  double zetaS, zetaP, zetaD;      // valence Slater exponents (zetaD: PM6_D only)
   double gss, gsp, gpp, gp2, hsp;  // one-center two-electron integrals
-  double uss, upp;                 // one-center one-electron core integrals
-  double betaS, betaP;             // resonance (two-center one-electron) params
+  double uss, upp, udd;            // one-center one-electron core integrals (udd: PM6_D)
+  double betaS, betaP, betaD;      // resonance (two-center one-electron) params
   double alpha;                    // core-core exponent (nuclear repulsion)
   double gaussK[4], gaussL[4], gaussM[4];  // AM1/PM3-style core-core Gaussians
   double eisol;                    // isolated-atom electronic energy (eV)
@@ -43,7 +43,7 @@ struct AtomIntParams {
   int z;         // atomic number (for the N-H/O-H core-core special case)
   int qn;        // principal quantum number of the valence shell
   int valence;   // core charge (valence electrons)
-  int nOrb;      // sp orbital count: 1 (H/He) or 4
+  int nOrb;      // valence basis size: 1 (H/He), 4 (sp), or 9 (sp+d, PM6_D)
 };
 
 }  // namespace semiempirical

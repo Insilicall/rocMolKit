@@ -46,6 +46,7 @@ bool gatherAtomIntParams(int z, AtomIntParams& o) {
   if (p == nullptr) return false;
   o.zetaS = p->zeta_s;
   o.zetaP = p->zeta_p;
+  o.zetaD = p->zeta_d;
   o.gss = p->gss;
   o.gsp = p->gsp;
   o.gpp = p->gpp;
@@ -53,8 +54,10 @@ bool gatherAtomIntParams(int z, AtomIntParams& o) {
   o.hsp = p->hsp;
   o.uss = p->Uss;
   o.upp = p->Upp;
+  o.udd = p->Udd;
   o.betaS = p->beta_s;
   o.betaP = p->beta_p;
+  o.betaD = p->beta_d;
   o.alpha = p->alpha;
   for (int k = 0; k < 4; ++k) {
     o.gaussK[k] = p->gaussianK[k];
@@ -68,6 +71,14 @@ bool gatherAtomIntParams(int z, AtomIntParams& o) {
   o.valence = pm6ValenceElectrons(z);
   o.nOrb = spCount(z);
   return true;
+}
+
+// PM6_D gather: identical to gatherAtomIntParams but nOrb is the full valence
+// basis size (9 for d-bearing atoms), so the d-orbital stages see the d shell.
+bool gatherAtomIntParamsD(int z, AtomIntParams& o) {
+  if (!gatherAtomIntParams(z, o)) return false;
+  o.nOrb = pm6NumOrbitals(z);
+  return o.nOrb > 0;
 }
 
 int spBasisSize(int nAtoms, const int* atoms) {
