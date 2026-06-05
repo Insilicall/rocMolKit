@@ -28,14 +28,16 @@ namespace semiempirical {
 //   atomsAll            : atomic numbers, length sum(nAtoms)
 //   coordsAll           : 3*sum(nAtoms) (Angstrom)
 //   chargesAll (out)    : per-atom Mulliken charge, length sum(nAtoms)
-//   hofAll (out)        : per-molecule heat of formation (kcal/mol), length nMol;
-//                         may be nullptr to skip.
+//   hofAll (out)        : per-molecule PYSEQM-referenced PM6_D heat of formation
+//                         (kcal/mol), length nMol; may be nullptr to skip.
 //   convergedAll (out)  : 1/0 per molecule (length nMol)
+//   hofPm6All (out)     : per-molecule canonical (MOPAC-aligned) PM6 heat of
+//                         formation (kcal/mol), length nMol; may be nullptr to skip.
 // Returns false on an unsupported element or odd-electron (open-shell) molecule.
 bool scfBatchDGpu(int nMol, const int* molNAtoms, const int* molNBasis,
                   const int* atomsAll, const double* coordsAll,
                   double* chargesAll, double* hofAll, int* convergedAll,
-                  int maxIter = 800, double convTol = 1e-10);
+                  int maxIter = 800, double convTol = 1e-10, double* hofPm6All = nullptr);
 
 }  // namespace semiempirical
 }  // namespace nvMolKit

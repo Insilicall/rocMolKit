@@ -64,11 +64,11 @@ boost::python::object pm6dChargesBatch(const boost::python::list& mols) {
     molNBasis[m] = nb;
   }
 
-  std::vector<double> chargesAll(atomsAll.size()), hofAll(nMol);
+  std::vector<double> chargesAll(atomsAll.size()), hofAll(nMol), hofPm6All(nMol);
   std::vector<int> convAll(nMol);
   const bool ok = nvMolKit::semiempirical::scfBatchDGpu(
       nMol, molNAtoms.data(), molNBasis.data(), atomsAll.data(), coordsAll.data(),
-      chargesAll.data(), hofAll.data(), convAll.data());
+      chargesAll.data(), hofAll.data(), convAll.data(), 800, 1e-10, hofPm6All.data());
 
   boost::python::list out;
   int off = 0, coff = 0;
@@ -82,7 +82,7 @@ boost::python::object pm6dChargesBatch(const boost::python::list& mols) {
       // PM6-D3H4 = NDDO heat of formation + the post-SCF D3 + H4 + H-H correction.
       const double corr = nvMolKit::semiempirical::pm6dD3H4Correction(
           na, &atomsAll[coff], &coordsAll[3 * coff]);
-      out.append(boost::python::make_tuple(q, hofAll[m], hofAll[m] + corr));
+      out.append(boost::python::make_tuple(q, hofAll[m], hofPm6All[m], hofAll[m] + corr));
     }
     off += na;
     coff += na;
@@ -166,12 +166,15 @@ boost::python::object pm6dOptimizeBatch(const boost::python::list& mols) {
 
 BOOST_PYTHON_MODULE(_Semiempirical) {
   def("PM6DCharges", &pm6dChargesBatch, (arg("molecules")),
-      "PM6_D (d-orbital NDDO) Mulliken charges + heat of formation for a list of "
+      "PM6_D (d-orbital NDDO) Mulliken charges + heats of formation for a list of "
       "RDKit molecules with 3D conformers. Returns a list of "
-      "(charges, hof_nddo_kcal, hof_d3h4_kcal) tuples (or None per molecule if "
-      "unsupported / open-shell / non-converged); hof_d3h4 adds the post-SCF "
-      "PM6-D3H4 correction (D3 dispersion + H4 H-bond + H-H repulsion). The whole "
-      "d-orbital SCF runs on the GPU.");
+      "(charges, hof_nddo_kcal, hof_pm6_kcal, hof_d3h4_kcal) tuples (or None per "
+      "molecule if unsupported / open-shell / non-converged): hof_nddo is the "
+      "PYSEQM-referenced PM6_D heat of formation (AM1-style core-core), hof_pm6 is "
+      "the canonical MOPAC-aligned PM6 heat of formation (PWCCT core-core; ~1 "
+      "kcal/mol of MOPAC for light + Br, looser for iodine), and hof_d3h4 adds the "
+      "post-SCF PM6-D3H4 correction to hof_nddo. The whole d-orbital SCF runs on "
+      "the GPU.");
   def("PM6DGradient", &pm6dGradientBatch, (arg("molecules")),
       "PM6_D (d-orbital NDDO) frozen-density energy gradient (eV/Angstrom) for a "
       "list of RDKit molecules with 3D conformers. Returns a list of per-molecule "

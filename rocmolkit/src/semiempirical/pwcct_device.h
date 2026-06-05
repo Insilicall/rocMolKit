@@ -32,7 +32,7 @@
 
 #include <cmath>
 
-#include "device_macros.h"
+#include "device_macros.h"   // AtomIntParams
 #include "pm6_params.h"   // pm6ValenceElectrons (core charge)
 #include "pwcct_data.h"
 #include "pwcct_ref_data.h"  // kHofRef, kEvToKcal
@@ -116,6 +116,23 @@ NVMOLKIT_HD inline double heatOfFormationPm6Kcal(double eElec, int nAtoms, const
   double ref = 0.0;
   for (int a = 0; a < nAtoms; ++a) ref += kHofRef[atoms[a]];
   return kEvToKcal * (eElec + pwcctCoreCoreDev(nAtoms, atoms, coords)) - ref;
+}
+
+// Same, sourcing the atomic numbers from gathered AtomIntParams (.z) -- for the
+// GPU batch kernel, which carries ap rather than a separate Z array.
+NVMOLKIT_HD inline double heatOfFormationPm6KcalAp(double eElec, int nAtoms,
+                                                   const AtomIntParams* ap, const double* coords) {
+  using namespace pwcct;
+  double ref = 0.0, ecc = 0.0;
+  for (int a = 0; a < nAtoms; ++a) ref += kHofRef[ap[a].z];
+  for (int i = 0; i < nAtoms - 1; ++i)
+    for (int j = i + 1; j < nAtoms; ++j) {
+      const double dx = coords[3 * j] - coords[3 * i];
+      const double dy = coords[3 * j + 1] - coords[3 * i + 1];
+      const double dz = coords[3 * j + 2] - coords[3 * i + 2];
+      ecc += pwcctPairDev(ap[i].z, ap[j].z, std::sqrt(dx * dx + dy * dy + dz * dz));
+    }
+  return kEvToKcal * (eElec + ecc) - ref;
 }
 
 }  // namespace semiempirical

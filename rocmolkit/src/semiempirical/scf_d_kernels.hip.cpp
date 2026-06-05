@@ -27,6 +27,7 @@
 #include "core_hamiltonian.h"           // gatherAtomIntParamsD
 #include "core_hamiltonian_d_device.h"  // buildCoreHamiltonianDDev
 #include "energy_device.h"              // nuclearRepulsionAm1Dev, heatOfFormationKcalDev
+#include "pwcct_device.h"               // heatOfFormationPm6KcalAp (canonical PM6 HoF)
 #include "scf_d_device.h"
 #include "scf_d_kernels.h"
 
@@ -39,7 +40,8 @@ __global__ void scfBatchDKernel(int nMol, const AtomIntParams* ap, const int* st
                                 const int* norb, const double* coords, const int* atomOff,
                                 const int* nAtomsArr, const int* nBasisArr, const int* nOccArr,
                                 const long* scratchOff, double* scratch, double* chargesOut,
-                                int* convOut, double* hofOut, int maxIter, double convTol) {
+                                int* convOut, double* hofOut, double* hofPm6Out, int maxIter,
+                                double convTol) {
   const int m = blockIdx.x * blockDim.x + threadIdx.x;
   if (m >= nMol) return;
   const int nB = nBasisArr[m], na = nAtomsArr[m], ao = atomOff[m];
@@ -74,6 +76,9 @@ __global__ void scfBatchDKernel(int nMol, const AtomIntParams* ap, const int* st
   // Heat of formation on-device (PM6_D uses the AM1-style core-core).
   const double eNuc = nuclearRepulsionAm1Dev(na, &ap[ao], &coords[3 * ao]);
   hofOut[m] = heatOfFormationKcalDev(eElec, eNuc, na, &ap[ao]);
+  // Canonical (MOPAC-aligned) PM6 heat of formation (PWCCT core-core).
+  if (hofPm6Out != nullptr)
+    hofPm6Out[m] = heatOfFormationPm6KcalAp(eElec, na, &ap[ao], &coords[3 * ao]);
 }
 
 }  // namespace
@@ -81,7 +86,7 @@ __global__ void scfBatchDKernel(int nMol, const AtomIntParams* ap, const int* st
 bool scfBatchDGpu(int nMol, const int* molNAtoms, const int* molNBasis,
                   const int* atomsAll, const double* coordsAll,
                   double* chargesAll, double* hofAll, int* convergedAll,
-                  int maxIter, double convTol) {
+                  int maxIter, double convTol, double* hofPm6All) {
   if (nMol <= 0) return true;
 
   std::vector<int> atomOff(nMol), nOcc(nMol);
@@ -119,7 +124,8 @@ bool scfBatchDGpu(int nMol, const int* molNAtoms, const int* molNBasis,
   int *dStart = nullptr, *dNorb = nullptr, *dAtomOff = nullptr, *dNAtoms = nullptr,
       *dNBasis = nullptr, *dNOcc = nullptr, *dConv = nullptr;
   long* dScratchOff = nullptr;
-  double *dCoords = nullptr, *dScratch = nullptr, *dCharges = nullptr, *dHof = nullptr;
+  double *dCoords = nullptr, *dScratch = nullptr, *dCharges = nullptr, *dHof = nullptr,
+         *dHofPm6 = nullptr;
   bool ok = true;
   auto need = [&](hipError_t e) { if (e != hipSuccess) ok = false; };
 
@@ -136,6 +142,7 @@ bool scfBatchDGpu(int nMol, const int* molNAtoms, const int* molNBasis,
   need(hipMalloc(&dScratch, sizeof(double) * totScratch));
   need(hipMalloc(&dCharges, sizeof(double) * totAtoms));
   need(hipMalloc(&dHof, sizeof(double) * nMol));
+  need(hipMalloc(&dHofPm6, sizeof(double) * nMol));
 
   if (ok) {
     hipMemcpy(dAp, ap.data(), sizeof(AtomIntParams) * totAtoms, hipMemcpyHostToDevice);
@@ -157,18 +164,20 @@ bool scfBatchDGpu(int nMol, const int* molNAtoms, const int* molNBasis,
     const int grid = (nMol + block - 1) / block;
     scfBatchDKernel<<<grid, block>>>(nMol, dAp, dStart, dNorb, dCoords, dAtomOff, dNAtoms,
                                      dNBasis, dNOcc, dScratchOff, dScratch, dCharges,
-                                     dConv, dHof, maxIter, convTol);
+                                     dConv, dHof, dHofPm6, maxIter, convTol);
     if (hipDeviceSynchronize() != hipSuccess) ok = false;
   }
   if (ok) {
     hipMemcpy(chargesAll, dCharges, sizeof(double) * totAtoms, hipMemcpyDeviceToHost);
     hipMemcpy(convergedAll, dConv, sizeof(int) * nMol, hipMemcpyDeviceToHost);
     if (hofAll != nullptr) hipMemcpy(hofAll, dHof, sizeof(double) * nMol, hipMemcpyDeviceToHost);
+    if (hofPm6All != nullptr)
+      hipMemcpy(hofPm6All, dHofPm6, sizeof(double) * nMol, hipMemcpyDeviceToHost);
   }
 
   hipFree(dAp); hipFree(dStart); hipFree(dNorb); hipFree(dAtomOff); hipFree(dNAtoms);
   hipFree(dNBasis); hipFree(dNOcc); hipFree(dConv); hipFree(dScratchOff);
-  hipFree(dCoords); hipFree(dScratch); hipFree(dCharges); hipFree(dHof);
+  hipFree(dCoords); hipFree(dScratch); hipFree(dCharges); hipFree(dHof); hipFree(dHofPm6);
   return ok;
 }
 
