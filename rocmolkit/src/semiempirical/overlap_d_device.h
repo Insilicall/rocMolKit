@@ -27,6 +27,7 @@
 
 #include "device_macros.h"
 #include "overlap_device.h"  // ovdetail::aintgs / bintgs / kOvAngToBohr
+#include "overlap_d_interhalide_device.h"  // interhalideOverlapDDev (mixed heavy halogens)
 
 namespace nvMolKit {
 namespace semiempirical {
@@ -333,6 +334,38 @@ NVMOLKIT_HD inline int diatomOverlapDDev(const AtomIntParams& pA, const double c
     diatomOverlapDDev(pB, coordB, pA, coordA, tmp);
     for (int i = 0; i < nA; ++i)
       for (int j = 0; j < nB; ++j) out[i * nB + j] = tmp[j * nA + i];
+    return nA * nB;
+  }
+
+  // Heteronuclear d-d pair whose d shells have DIFFERENT principal quantum
+  // numbers (mixed heavy halogens: Br-Cl/Br-S, I-Cl/I-S, I-Br, and P/S-with-
+  // heavier-halogen). The reverse-dsBlock trick can't express the s-d/p-d block
+  // of such a pair (e.g. I-Cl would need a jcallds(dqn=3, partner qn=5) formula
+  // PYSEQM never tabulates), so build the full 9x9 from the faithful transpiled
+  // interhalide kernel. Atom A must be the heavier-qn atom (dqn_A >= dqn_B) to
+  // match the jcall derivation; transpose when the caller's pA is the lighter.
+  if (nA == 9 && nB == 9 && pA.qnD != pB.qnD) {
+    const bool aHi = pA.qn >= pB.qn;
+    const AtomIntParams& hi = aHi ? pA : pB;
+    const AtomIntParams& lo = aHi ? pB : pA;
+    const double* chi = aHi ? coordA : coordB;
+    const double* clo = aHi ? coordB : coordA;
+    int jc = (hi.qn == 5 && lo.qn == 4) ? 9 : (hi.qn == 5) ? 853 : 7;  // (5,3)->853,(4,3)->7
+    const double za[3] = {hi.zetaS, hi.zetaP, hi.zetaD};
+    const double zb[3] = {lo.zetaS, lo.zetaP, lo.zetaD};
+    const double Rvec[3] = {clo[0] - chi[0], clo[1] - chi[1], clo[2] - chi[2]};
+    const double R = std::sqrt(Rvec[0] * Rvec[0] + Rvec[1] * Rvec[1] + Rvec[2] * Rvec[2]);
+    const double Rb = R * ovdetail::kOvAngToBohr;
+    const double v[3] = {Rvec[0] / R, Rvec[1] / R, Rvec[2] / R};
+    double ca, cb, sa, sb;
+    bondAngles(v, ca, cb, sa, sb);
+    double di[81];
+    interhalideOverlapDDev(za, zb, Rb, jc, ca, cb, sa, sb, di);  // [hi-orb, lo-orb]
+    if (aHi)
+      for (int i = 0; i < 81; ++i) out[i] = di[i];
+    else
+      for (int i = 0; i < 9; ++i)
+        for (int j = 0; j < 9; ++j) out[i * 9 + j] = di[j * 9 + i];
     return nA * nB;
   }
 

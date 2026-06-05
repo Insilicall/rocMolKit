@@ -60,6 +60,12 @@ MOLECULES = [
      [[0.0, 0.0, 2.1390], [0.0, 0.0, 0.0], [1.028, 0.0, -0.363],
       [-0.514, 0.890, -0.363], [-0.514, -0.890, -0.363]]),
     ("Br2", [35, 35], [[0.0, 0.0, 0.0], [0.0, 0.0, 2.2800]]),
+    # Interhalides — both atoms carry d-orbitals with DIFFERENT principal qn, so
+    # the s-d/p-d overlap is built by the transpiled, PYSEQM-faithful interhalide
+    # kernel (jcall 7/853/9). Diatomics; the oracle SCF converges for all three.
+    ("BrCl", [35, 17], [[0.0, 0.0, 0.0], [0.0, 0.0, 1.9400]]),
+    ("ICl", [53, 17], [[0.0, 0.0, 0.0], [0.0, 0.0, 2.3200]]),
+    ("IBr", [53, 35], [[0.0, 0.0, 0.0], [0.0, 0.0, 2.4700]]),
     # Not in the full-SCF set: CH3Br is a hard bistable case (the oracle reaches a
     # high-energy solution our DIIS doesn't settle on); I2's oracle SCF itself does
     # not converge. Both are validated at the component level (overlap + two-center)
