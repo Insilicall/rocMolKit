@@ -57,8 +57,11 @@ NVMOLKIT_HD inline double pwcctGaussianDev(int z, double R) {
   return kGaussA[z] * std::exp(-kGaussB[z] * rmc * rmc);
 }
 
-// PM6 pairwise core-core energy between atoms zi, zj at distance R (Angstrom), eV.
-NVMOLKIT_HD inline double pwcctPairDev(int zi, int zj, double R) {
+// PM6 pairwise core-core energy between atoms zi, zj (with core charges zci, zcj =
+// valence electrons) at distance R (Angstrom), eV. The core charge is passed in so
+// the function is device-callable (the host-only pm6ValenceElectrons is not used
+// here); on the GPU it comes from AtomIntParams.valence.
+NVMOLKIT_HD inline double pwcctPairDev(int zi, int zj, double zci, double zcj, double R) {
   using namespace pwcct;
   using namespace pwcctdetail;
   const int nz = kPwcctMaxZ + 1;
@@ -81,9 +84,7 @@ NVMOLKIT_HD inline double pwcctPairDev(int zi, int zj, double R) {
     // (Si-O special case omitted: silicon is outside the supported set.)
   }
 
-  const double za = static_cast<double>(pm6ValenceElectrons(zi));
-  const double zb = static_cast<double>(pm6ValenceElectrons(zj));
-
+  const double za = zci, zb = zcj;
   const double baseTerm = za * zb * ssss * paren;
   const double v = (std::cbrt(static_cast<double>(zi)) + std::cbrt(static_cast<double>(zj))) / R;
   const double v2 = v * v, v6 = v2 * v2 * v2;
@@ -93,15 +94,17 @@ NVMOLKIT_HD inline double pwcctPairDev(int zi, int zj, double R) {
 }
 
 // Total PM6 core-core (PWCCT) energy for a molecule (eV). atoms: 1-based Z;
-// coords: nAtoms*3 row-major (Angstrom).
-NVMOLKIT_HD inline double pwcctCoreCoreDev(int nAtoms, const int* atoms, const double* coords) {
+// coords: nAtoms*3 row-major (Angstrom). Host-only (uses pm6ValenceElectrons for
+// the core charges); the device/GPU path uses heatOfFormationPm6KcalAp.
+inline double pwcctCoreCoreDev(int nAtoms, const int* atoms, const double* coords) {
   double e = 0.0;
   for (int i = 0; i < nAtoms - 1; ++i) {
     for (int j = i + 1; j < nAtoms; ++j) {
       const double dx = coords[3 * j] - coords[3 * i];
       const double dy = coords[3 * j + 1] - coords[3 * i + 1];
       const double dz = coords[3 * j + 2] - coords[3 * i + 2];
-      e += pwcctPairDev(atoms[i], atoms[j], std::sqrt(dx * dx + dy * dy + dz * dz));
+      e += pwcctPairDev(atoms[i], atoms[j], pm6ValenceElectrons(atoms[i]),
+                        pm6ValenceElectrons(atoms[j]), std::sqrt(dx * dx + dy * dy + dz * dz));
     }
   }
   return e;
@@ -110,8 +113,9 @@ NVMOLKIT_HD inline double pwcctCoreCoreDev(int nAtoms, const int* atoms, const d
 // Canonical (MOPAC-aligned) PM6 heat of formation (kcal/mol) from the converged
 // electronic energy eElec (eV): HoF = kEvToKcal*(eElec + E_core_PWCCT) - sum ref.
 // Matches MOPAC PM6 to ~1 kcal/mol for light + Br molecules (iodine looser).
-NVMOLKIT_HD inline double heatOfFormationPm6Kcal(double eElec, int nAtoms, const int* atoms,
-                                                 const double* coords) {
+// Host-only (uses pwcctCoreCoreDev); the GPU path uses heatOfFormationPm6KcalAp.
+inline double heatOfFormationPm6Kcal(double eElec, int nAtoms, const int* atoms,
+                                     const double* coords) {
   using namespace pwcct;
   double ref = 0.0;
   for (int a = 0; a < nAtoms; ++a) ref += kHofRef[atoms[a]];
@@ -130,7 +134,8 @@ NVMOLKIT_HD inline double heatOfFormationPm6KcalAp(double eElec, int nAtoms,
       const double dx = coords[3 * j] - coords[3 * i];
       const double dy = coords[3 * j + 1] - coords[3 * i + 1];
       const double dz = coords[3 * j + 2] - coords[3 * i + 2];
-      ecc += pwcctPairDev(ap[i].z, ap[j].z, std::sqrt(dx * dx + dy * dy + dz * dz));
+      ecc += pwcctPairDev(ap[i].z, ap[j].z, ap[i].valence, ap[j].valence,
+                          std::sqrt(dx * dx + dy * dy + dz * dz));
     }
   return kEvToKcal * (eElec + ecc) - ref;
 }
