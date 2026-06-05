@@ -34,20 +34,25 @@ def main() -> int:
                          text=True, check=True).stdout.strip().splitlines()
 
     worst = 0.0
+    worstH = 0.0
     fails = 0
     for mol, line in zip(mols, out):
         tok = line.split()
         conv = int(tok[0])
-        q = [float(x) for x in tok[1:]]
+        hof = float(tok[1])
+        q = [float(x) for x in tok[2:]]
         gold = mol["q"]
         d = max(abs(a - b) for a, b in zip(q, gold)) if conv and len(q) == len(gold) else float("inf")
-        ok = conv == 1 and d < 1e-4
+        dH = abs(hof - mol["hof_kcal"]) if conv else float("inf")
+        ok = conv == 1 and d < 1e-4 and dH < 1e-3
         fails += 0 if ok else 1
-        worst = max(worst, d if d != float("inf") else worst)
-        print(f"{mol['name']:5s} conv={conv} max|dq|={d:.2e}  "
-              f"q={[round(x, 4) for x in q]}  {'OK' if ok else '** FAIL'}")
+        if d != float("inf"):
+            worst = max(worst, d)
+            worstH = max(worstH, dH)
+        print(f"{mol['name']:5s} conv={conv} max|dq|={d:.2e} |dHoF|={dH:.2e} kcal  "
+              f"HoF={hof:.4f}  q={[round(x, 4) for x in q]}  {'OK' if ok else '** FAIL'}")
 
-    print(f"\nPM6_D C++ engine worst |dq| = {worst:.2e}  "
+    print(f"\nPM6_D C++ engine worst |dq| = {worst:.2e}, worst |dHoF| = {worstH:.2e} kcal  "
           f"({'matches oracle golden' if fails == 0 else f'{fails} FAILED'})")
     return 1 if fails else 0
 

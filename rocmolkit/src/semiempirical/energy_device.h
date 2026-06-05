@@ -117,6 +117,51 @@ NVMOLKIT_HD inline double nuclearRepulsionDev(int nAtoms, const AtomIntParams* a
   return eNuc;
 }
 
+// AM1/RM1-style core-core (nuclear) repulsion (eV) — the convention the oracle's
+// PM6_D path uses (rm1.integrals.compute_nuclear_repulsion): E_pair =
+// Z_A Z_B (ss|ss)(1 + e^{-alpha_A R} + e^{-alpha_B R}) + Z_A Z_B/R (G_A + G_B),
+// with the N-H/O-H exp(-alpha R)*R special case and per-element Gaussians.
+// coords in Angstrom. Used for the PM6_D heat of formation.
+NVMOLKIT_HD inline double nuclearRepulsionAm1Dev(int nAtoms, const AtomIntParams* ap,
+                                                 const double* coords) {
+  constexpr double kEV = 27.21;
+  constexpr double kAngToBohr = 1.0 / 0.529167;
+  double eNuc = 0.0;
+  for (int i = 0; i < nAtoms; ++i) {
+    for (int j = i + 1; j < nAtoms; ++j) {
+      const double dx = coords[3 * i] - coords[3 * j];
+      const double dy = coords[3 * i + 1] - coords[3 * j + 1];
+      const double dz = coords[3 * i + 2] - coords[3 * j + 2];
+      const double R = std::sqrt(dx * dx + dy * dy + dz * dz);
+      const double Rb = R * kAngToBohr;
+
+      const double rho0A = (ap[i].gss > 0.0) ? 0.5 * kEV / ap[i].gss : 0.0;
+      const double rho0B = (ap[j].gss > 0.0) ? 0.5 * kEV / ap[j].gss : 0.0;
+      const double ssss = kEV / std::sqrt(Rb * Rb + (rho0A + rho0B) * (rho0A + rho0B));
+
+      const double ZA = static_cast<double>(ap[i].valence);
+      const double ZB = static_cast<double>(ap[j].valence);
+      const int zA = ap[i].z, zB = ap[j].z;
+
+      double t2 = std::exp(-ap[i].alpha * R);
+      if ((zA == 7 || zA == 8) && zB == 1) t2 *= R;
+      double t3 = std::exp(-ap[j].alpha * R);
+      if ((zB == 7 || zB == 8) && zA == 1) t3 *= R;
+
+      const double t4 = ZA * ZB / R;
+      double t5 = 0.0, t6 = 0.0;
+      for (int k = 0; k < 4; ++k) {
+        if (ap[i].gaussK[k] != 0.0)
+          t5 += ap[i].gaussK[k] * std::exp(-ap[i].gaussL[k] * (R - ap[i].gaussM[k]) * (R - ap[i].gaussM[k]));
+        if (ap[j].gaussK[k] != 0.0)
+          t6 += ap[j].gaussK[k] * std::exp(-ap[j].gaussL[k] * (R - ap[j].gaussM[k]) * (R - ap[j].gaussM[k]));
+      }
+      eNuc += ZA * ZB * ssss * (1.0 + t2 + t3) + t4 * (t5 + t6);
+    }
+  }
+  return eNuc;
+}
+
 // Heat of formation (kcal/mol): (E_elec + E_nuc - sum eisol) * eV->kcal + sum
 // eheat. eElec/eNuc in eV.
 NVMOLKIT_HD inline double heatOfFormationKcalDev(double eElec, double eNuc, int nAtoms,

@@ -31,6 +31,7 @@
 
 #include "core_hamiltonian.h"        // gatherAtomIntParamsD
 #include "core_hamiltonian_d_device.h"
+#include "energy_device.h"           // nuclearRepulsionDev, heatOfFormationKcalDev
 #include "pm6_params.h"              // pm6ValenceElectrons
 #include "scf_d_device.h"
 
@@ -70,11 +71,15 @@ int main() {
     buildCoreHamiltonianDDev(nBasis, nAtoms, ap.data(), start.data(), norb.data(), coords.data(),
                              H.data());
     int conv = 0, niter = 0;
+    double eElec = 0.0;
     scfLoopDDev(nBasis, nAtoms, ap.data(), start.data(), norb.data(), coords.data(), H.data(),
                 nElec / 2, 800, 1e-10, density.data(), eval.data(), F.data(), eigA.data(),
-                C.data(), Pnew.data(), &conv, &niter);
+                C.data(), Pnew.data(), &conv, &niter, &eElec);
 
-    std::printf("%d", conv);
+    const double eNuc = nuclearRepulsionAm1Dev(nAtoms, ap.data(), coords.data());
+    const double hof = heatOfFormationKcalDev(eElec, eNuc, nAtoms, ap.data());
+
+    std::printf("%d %.6f", conv, hof);
     for (int a = 0; a < nAtoms; ++a) {
       double pop = 0.0;
       for (int o = 0; o < norb[a]; ++o) pop += density[(start[a] + o) * nBasis + (start[a] + o)];
