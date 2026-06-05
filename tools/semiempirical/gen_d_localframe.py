@@ -31,11 +31,17 @@ YX_INPUTS = ["r0", "da0", "db0", "qa0", "qb0", "dpa0", "dsa0", "dda0",
              "rho0a", "rho0b", "rho1a", "rho1b", "rho2a", "rho2b",
              "rho3a", "rho4a", "rho5a", "rho6a"]
 
+# YY carries the d charge separations and rho radii of BOTH atoms.
+YY_INPUTS = ["r0", "da0", "db0", "qa0", "qb0", "dpa0", "dpb0", "dsa0", "dsb0",
+             "dda0", "ddb0", "rho0a", "rho0b", "rho1a", "rho1b", "rho2a", "rho2b",
+             "rho3a", "rho3b", "rho4a", "rho4b", "rho5a", "rho5b", "rho6a", "rho6b"]
+
 # Case -> (1-based source line range of the term-defs + ri assignments, ri name,
 # ri size, the input list). Ranges cover from just after the `ri = zeros` line to
 # just before the `core...` packing, i.e. only the scalar reduced-integral math.
 CASES = {
     "YX": {"lo": 730, "hi": 1413, "ri": "riYX", "size": 450, "inputs": YX_INPUTS},
+    "YY": {"lo": 1707, "hi": 4025, "ri": "riYY", "size": 2025, "inputs": YY_INPUTS},
 }
 
 

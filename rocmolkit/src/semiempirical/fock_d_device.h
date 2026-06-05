@@ -106,7 +106,40 @@ NVMOLKIT_HD inline void buildFockDDev(int nBasis, int nAtoms, const AtomIntParam
       if (norb[i] == 9 && norb[j] == 4) { yxD = i; yxS = j; }
       else if (norb[i] == 4 && norb[j] == 9) { yxD = j; yxS = i; }
 
-      if (yxD >= 0) {  // YX d two-center (d-atom + sp atom): full 9x4 J/K.
+      if (norb[i] == 9 && norb[j] == 9) {  // YY d two-center (both d): full 9x9 J/K.
+        double W[9 * 9 * 9 * 9];
+        yyWMolecular(ap[i], &coords[3 * i], ap[j], &coords[3 * j], W);
+        const int sA = start[i], sB = start[j];
+        auto Wd = [&](int mu, int nu, int lam, int sig) {
+          return W[((mu * 9 + nu) * 9 + lam) * 9 + sig];
+        };
+        for (int mu = 0; mu < 9; ++mu)
+          for (int nu = 0; nu < 9; ++nu) {
+            double acc = 0.0;
+            for (int lam = 0; lam < 9; ++lam)
+              for (int sig = 0; sig < 9; ++sig)
+                acc += P[(sB + lam) * nBasis + (sB + sig)] * Wd(mu, nu, lam, sig);
+            F[(sA + mu) * nBasis + (sA + nu)] += acc;
+          }
+        for (int lam = 0; lam < 9; ++lam)
+          for (int sig = 0; sig < 9; ++sig) {
+            double acc = 0.0;
+            for (int mu = 0; mu < 9; ++mu)
+              for (int nu = 0; nu < 9; ++nu)
+                acc += P[(sA + mu) * nBasis + (sA + nu)] * Wd(mu, nu, lam, sig);
+            F[(sB + lam) * nBasis + (sB + sig)] += acc;
+          }
+        for (int mu = 0; mu < 9; ++mu)
+          for (int lam = 0; lam < 9; ++lam) {
+            double acc = 0.0;
+            for (int nu = 0; nu < 9; ++nu)
+              for (int sig = 0; sig < 9; ++sig)
+                acc += Wd(mu, nu, lam, sig) * P[(sA + nu) * nBasis + (sB + sig)];
+            acc *= -0.5;
+            F[(sA + mu) * nBasis + (sB + lam)] += acc;
+            F[(sB + lam) * nBasis + (sA + mu)] += acc;
+          }
+      } else if (yxD >= 0) {  // YX d two-center (d-atom + sp atom): full 9x4 J/K.
         // yxW carries the molecular sp block too, so the full contraction is the
         // complete sp + d two-center (no separate sp pass for this pair).
         double W[9 * 9 * 4 * 4];

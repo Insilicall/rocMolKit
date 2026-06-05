@@ -94,6 +94,57 @@ NVMOLKIT_HD inline bool yxWMolecular(const AtomIntParams& pA, const double coord
   return true;
 }
 
+// Build the molecular YY tensor W[9*9*9*9] (row-major mu,nu,lam,sig) for the pair
+// (both atoms carry d). Returns false if either atom has no baked d parameters.
+NVMOLKIT_HD inline bool yyWMolecular(const AtomIntParams& pA, const double coordA[3],
+                                     const AtomIntParams& pB, const double coordB[3], double* W) {
+  using namespace detail;
+  double dpA, dsA, ddA, r3A, r4A, r5A, r6A, dpB, dsB, ddB, r3B, r4B, r5B, r6B;
+  if (!dChargeSeparations(pA.z, dpA, dsA, ddA, r3A, r4A, r5A, r6A)) return false;
+  if (!dChargeSeparations(pB.z, dpB, dsB, ddB, r3B, r4B, r5B, r6B)) return false;
+
+  const double Rvec[3] = {coordB[0] - coordA[0], coordB[1] - coordA[1], coordB[2] - coordA[2]};
+  const double R = std::sqrt(Rvec[0] * Rvec[0] + Rvec[1] * Rvec[1] + Rvec[2] * Rvec[2]);
+  const double r0 = R * kSemiAngToBohr;
+
+  double daA, qaA, rho0A, rho1A, rho2A, daB, qaB, rho0B, rho1B, rho2B;
+  computeMultipoleParamsDev(pA, daA, qaA, rho0A, rho1A, rho2A);
+  computeMultipoleParamsDev(pB, daB, qaB, rho0B, rho1B, rho2B);
+
+  double ri[2025];
+  dlocal::riLocalYY(r0, daA, daB, qaA, qaB, dpA, dpB, dsA, dsB, ddA, ddB,
+                    rho0A, rho0B, rho1A, rho1B, rho2A, rho2B, r3A, r3B, r4A, r4B,
+                    r5A, r5B, r6A, r6B, ri);
+
+  // Local WW = riYY (full 45x45); the sp 10x10 is then the sp molecular w.
+  double WW[45 * 45];
+  for (int i = 0; i < 45 * 45; ++i) WW[i] = ri[i];
+  AtomIntParams spA = pA, spB = pB;
+  if (spA.nOrb > 4) spA.nOrb = 4;
+  if (spB.nOrb > 4) spB.nOrb = 4;
+  double w[256], e1b[16], e2a[16];
+  twoCenterMolecularDev(spA, coordA, spB, coordB, w, e1b, e2a);
+  const int PI[10] = {0, 1, 1, 2, 2, 2, 3, 3, 3, 3};
+  const int PJ[10] = {0, 0, 1, 0, 1, 2, 0, 1, 2, 3};
+  for (int bp = 0; bp < 10; ++bp)
+    for (int ap = 0; ap < 10; ++ap)
+      WW[bp * 45 + ap] = w[wIdxDev(PI[bp], PJ[bp], PI[ap], PJ[ap])];
+
+  const double v[3] = {Rvec[0] / R, Rvec[1] / R, Rvec[2] / R};
+  double mat[15 * 45];
+  drot::generateRotationMatrixD(v, mat);
+  double wmol[45 * 45];
+  drot::rotate2Center2ElectronD(WW, mat, wmol);
+
+  for (int mu = 0; mu < 9; ++mu)
+    for (int nu = 0; nu < 9; ++nu)
+      for (int lam = 0; lam < 9; ++lam)
+        for (int sig = 0; sig < 9; ++sig)
+          W[((mu * 9 + nu) * 9 + lam) * 9 + sig] =
+              wmol[drot::packedTril(lam, sig) * 45 + drot::packedTril(mu, nu)];
+  return true;
+}
+
 }  // namespace semiempirical
 }  // namespace nvMolKit
 
