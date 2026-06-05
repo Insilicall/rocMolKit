@@ -49,6 +49,8 @@ HEADER = """// SPDX-FileCopyrightText: Copyright (c) 2025 InsilicAll. All rights
 #ifndef NVMOLKIT_SEMIEMPIRICAL_ONECENTER_D_DATA_H
 #define NVMOLKIT_SEMIEMPIRICAL_ONECENTER_D_DATA_H
 
+#include "device_macros.h"  // NVMOLKIT_HD
+
 namespace nvMolKit {
 namespace semiempirical {
 namespace onecenterd {
@@ -60,7 +62,7 @@ constexpr int kNTril = 45;
 FOOTER = """
 // Per-element one-center d two-electron integrals (243 each). Returns nullptr if
 // z has no d parameters baked here.
-inline const double* oneCenterDW(int z) {
+NVMOLKIT_HD inline const double* oneCenterDW(int z) {
 %(WSWITCH)s  return nullptr;
 }
 

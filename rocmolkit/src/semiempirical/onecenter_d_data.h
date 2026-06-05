@@ -25,6 +25,8 @@
 #ifndef NVMOLKIT_SEMIEMPIRICAL_ONECENTER_D_DATA_H
 #define NVMOLKIT_SEMIEMPIRICAL_ONECENTER_D_DATA_H
 
+#include "device_macros.h"  // NVMOLKIT_HD
+
 namespace nvMolKit {
 namespace semiempirical {
 namespace onecenterd {
@@ -52,7 +54,7 @@ constexpr double kW17[243] = {8.66509146, 8.66509146, 8.66509146, 8.66509146, 8.
 
 // Per-element one-center d two-electron integrals (243 each). Returns nullptr if
 // z has no d parameters baked here.
-inline const double* oneCenterDW(int z) {
+NVMOLKIT_HD inline const double* oneCenterDW(int z) {
   if (z == 15) return kW15;
   if (z == 16) return kW16;
   if (z == 17) return kW17;  return nullptr;
