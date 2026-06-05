@@ -61,14 +61,16 @@ void cpuRun(const Mol& mol, std::vector<double>& q, double& hof, int& conv) {
     nElec += pm6ValenceElectrons(mol.z[a]);
   }
   const int n2 = nBasis * nBasis;
-  std::vector<double> H(n2), density(n2), eval(nBasis), F(n2), eigA(n2), C(n2), Pnew(n2);
+  std::vector<double> H(n2), density(n2), eval(nBasis), F(n2), eigA(n2), C(n2), Pnew(n2),
+      ecom(n2), diisF(kScfDiisMax * n2), diisE(kScfDiisMax * n2);
   buildCoreHamiltonianDDev(nBasis, n, ap.data(), start.data(), norb.data(), mol.coords.data(),
                            H.data());
   int niter = 0;
   double eElec = 0.0;
   scfLoopDDev(nBasis, n, ap.data(), start.data(), norb.data(), mol.coords.data(), H.data(),
               nElec / 2, 800, 1e-10, density.data(), eval.data(), F.data(), eigA.data(),
-              C.data(), Pnew.data(), &conv, &niter, &eElec);
+              C.data(), Pnew.data(), ecom.data(), diisF.data(), diisE.data(), &conv, &niter,
+              &eElec);
   const double eNuc = nuclearRepulsionAm1Dev(n, ap.data(), mol.coords.data());
   hof = heatOfFormationKcalDev(eElec, eNuc, n, ap.data());
   q.assign(n, 0.0);
@@ -94,6 +96,11 @@ int main() {
        {-0.1241, -0.2028, 0.1634, 0.1634}, -48.8769},  // YX (C-S)
       {"Cl2", {17, 17}, {0, 0, 0, 0, 0, 1.988}, {0.0, 0.0}, -58.9368},  // YY (Cl-Cl)
       {"HBr", {35, 1}, {0, 0, 0, 0, 0, 1.41}, {-0.1868, 0.1868}, -75.4900},  // Br qn4
+      {"HI", {53, 1}, {0, 0, 0, 0, 0, 1.609}, {-0.1626, 0.1626}, -34.6896},  // I qn5
+      {"CH3I", {53, 6, 1, 1, 1},
+       {0, 0, 2.139, 0, 0, 0, 1.028, 0, -0.363, -0.514, 0.890, -0.363, -0.514, -0.890, -0.363},
+       {-0.0485, -0.5437, 0.1974, 0.1974, 0.1974}, -140.4681},  // YX (DIIS)
+      {"Br2", {35, 35}, {0, 0, 0, 0, 0, 2.28}, {0.0, 0.0}, -105.4548},  // YY (DIIS)
   };
 
   // Concatenate for the batched GPU call.

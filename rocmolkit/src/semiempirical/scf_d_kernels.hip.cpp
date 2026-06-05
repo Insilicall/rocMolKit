@@ -52,6 +52,9 @@ __global__ void scfBatchDKernel(int nMol, const AtomIntParams* ap, const int* st
   double* eigA = F + n2;
   double* C = eigA + n2;
   double* Pnew = C + n2;
+  double* ecom = Pnew + n2;
+  double* diisF = ecom + n2;
+  double* diisE = diisF + kScfDiisMax * n2;
 
   // Build the core Hamiltonian on the device (closing the 100%-GPU PM6_D SCF).
   buildCoreHamiltonianDDev(nB, na, &ap[ao], &start[ao], &norb[ao], &coords[3 * ao], H);
@@ -59,7 +62,8 @@ __global__ void scfBatchDKernel(int nMol, const AtomIntParams* ap, const int* st
   int conv = 0, niter = 0;
   double eElec = 0.0;
   scfLoopDDev(nB, na, &ap[ao], &start[ao], &norb[ao], &coords[3 * ao], H, nOccArr[m],
-              maxIter, convTol, density, eval, F, eigA, C, Pnew, &conv, &niter, &eElec);
+              maxIter, convTol, density, eval, F, eigA, C, Pnew, ecom, diisF, diisE,
+              &conv, &niter, &eElec);
   convOut[m] = conv;
   for (int a = 0; a < na; ++a) {
     const int s = start[ao + a];
@@ -89,8 +93,8 @@ bool scfBatchDGpu(int nMol, const int* molNAtoms, const int* molNBasis,
     scratchOff[m] = totScratch;
     const long nB = molNBasis[m];
     totAtoms += molNAtoms[m];
-    // H,density,F,eigA,C,Pnew (6 n^2) + eval (n)
-    totScratch += 6 * nB * nB + nB;
+    // H,density,F,eigA,C,Pnew,ecom (7 n^2) + diisF,diisE (2*kScfDiisMax n^2) + eval (n)
+    totScratch += (7 + 2 * kScfDiisMax) * nB * nB + nB;
   }
 
   // Gather PM6_D params (nOrb up to 9) + molecule-local start/norb.

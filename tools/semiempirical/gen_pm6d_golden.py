@@ -55,11 +55,15 @@ MOLECULES = [
     ("HBr", [35, 1], [[0.0, 0.0, 0.0], [0.0, 0.0, 1.4100]]),
     # I (qn5 sp): hydrogen iodide HI (I-H, jcall 651 sp + d-s).
     ("HI", [53, 1], [[0.0, 0.0, 0.0], [0.0, 0.0, 1.6090]]),
-    # Note: Br-C (CH3Br) is a multi-solution SCF case — the Fock is bit-exact to
-    # the oracle, but damped mixing and the oracle's DIIS converge to different
-    # (both valid) fixed points. The Br qn4-qn2 overlap (jcall 642) and YX
-    # two-center tensor are validated bit-exact at the component level instead
-    # (tools/semiempirical/validate_brc_components.py).
+    # Heavy-halogen organic + dimer — DIIS converges these to the oracle.
+    ("CH3I", [53, 6, 1, 1, 1],
+     [[0.0, 0.0, 2.1390], [0.0, 0.0, 0.0], [1.028, 0.0, -0.363],
+      [-0.514, 0.890, -0.363], [-0.514, -0.890, -0.363]]),
+    ("Br2", [35, 35], [[0.0, 0.0, 0.0], [0.0, 0.0, 2.2800]]),
+    # Not in the full-SCF set: CH3Br is a hard bistable case (the oracle reaches a
+    # high-energy solution our DIIS doesn't settle on); I2's oracle SCF itself does
+    # not converge. Both are validated at the component level (overlap + two-center)
+    # by validate_organohalide_components.py / validate_homonuclear_components.py.
 ]
 
 

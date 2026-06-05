@@ -67,14 +67,16 @@ int main() {
     }
 
     const int n2 = nBasis * nBasis;
-    std::vector<double> H(n2), density(n2), eval(nBasis), F(n2), eigA(n2), C(n2), Pnew(n2);
+    std::vector<double> H(n2), density(n2), eval(nBasis), F(n2), eigA(n2), C(n2), Pnew(n2),
+        ecom(n2), diisF(kScfDiisMax * n2), diisE(kScfDiisMax * n2);
     buildCoreHamiltonianDDev(nBasis, nAtoms, ap.data(), start.data(), norb.data(), coords.data(),
                              H.data());
     int conv = 0, niter = 0;
     double eElec = 0.0;
     scfLoopDDev(nBasis, nAtoms, ap.data(), start.data(), norb.data(), coords.data(), H.data(),
                 nElec / 2, 800, 1e-10, density.data(), eval.data(), F.data(), eigA.data(),
-                C.data(), Pnew.data(), &conv, &niter, &eElec);
+                C.data(), Pnew.data(), ecom.data(), diisF.data(), diisE.data(), &conv, &niter,
+                &eElec);
 
     const double eNuc = nuclearRepulsionAm1Dev(nAtoms, ap.data(), coords.data());
     const double hof = heatOfFormationKcalDev(eElec, eNuc, nAtoms, ap.data());

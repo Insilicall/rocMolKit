@@ -39,7 +39,8 @@ NVMOLKIT_HD inline void scfLoopDDev(int nBasis, int nAtoms, const AtomIntParams*
                                     const int* start, const int* norb, const double* coords,
                                     const double* H, int nOcc, int maxIter, double convTol,
                                     double* density, double* eval, double* F, double* eigA,
-                                    double* C, double* Pnew, int* conv, int* niter, double* eElec) {
+                                    double* C, double* Pnew, double* ecom, double* diisF,
+                                    double* diisE, int* conv, int* niter, double* eElec) {
   const int n2 = nBasis * nBasis;
   // Initial guess: diagonalize H_core with the d-orbital diagonals shifted far up
   // so d MOs are virtual at iteration 0 (matching the oracle) — this keeps the
@@ -53,10 +54,71 @@ NVMOLKIT_HD inline void scfLoopDDev(int nBasis, int nAtoms, const AtomIntParams*
   jacobiEigenDev(eigA, nBasis, eval, C);
   buildDensityDev(C, nBasis, nOcc, density);
 
+  int histN = 0;
   bool converged = false;
   int it = 0;
   for (it = 0; it < maxIter; ++it) {
     buildFockDDev(nBasis, nAtoms, ap, start, norb, coords, H, density, F);
+
+    // Pulay DIIS (same as the sp scfLoopDev) — extrapolate the Fock from the
+    // commutator-error history. This resolves the d-orbital SCF to the oracle's
+    // solution where plain damped mixing finds a different fixed point.
+    if (it >= 2) {
+      for (int i = 0; i < nBasis; ++i)
+        for (int j = 0; j < nBasis; ++j) {
+          double fp = 0.0, pf = 0.0;
+          for (int k = 0; k < nBasis; ++k) {
+            fp += F[i * nBasis + k] * density[k * nBasis + j];
+            pf += density[i * nBasis + k] * F[k * nBasis + j];
+          }
+          ecom[i * nBasis + j] = fp - pf;
+        }
+      if (histN == kScfDiisMax) {
+        for (int h = 1; h < kScfDiisMax; ++h)
+          for (int i = 0; i < n2; ++i) {
+            diisF[(h - 1) * n2 + i] = diisF[h * n2 + i];
+            diisE[(h - 1) * n2 + i] = diisE[h * n2 + i];
+          }
+        histN = kScfDiisMax - 1;
+      }
+      for (int i = 0; i < n2; ++i) {
+        diisF[histN * n2 + i] = F[i];
+        diisE[histN * n2 + i] = ecom[i];
+      }
+      ++histN;
+
+      if (histN >= 2) {
+        const int m = histN + 1;
+        double B[(kScfDiisMax + 1) * (kScfDiisMax + 1)];
+        double rhs[kScfDiisMax + 1];
+        double cf[kScfDiisMax + 1];
+        for (int i = 0; i < m * m; ++i) B[i] = 0.0;
+        for (int i = 0; i < histN; ++i)
+          for (int j = 0; j < histN; ++j) {
+            double dot = 0.0;
+            for (int t = 0; t < n2; ++t) dot += diisE[i * n2 + t] * diisE[j * n2 + t];
+            B[i * m + j] = dot;
+          }
+        for (int i = 0; i < histN; ++i) {
+          B[histN * m + i] = -1.0;
+          B[i * m + histN] = -1.0;
+          rhs[i] = 0.0;
+        }
+        rhs[histN] = -1.0;
+        if (solveLinearDev(B, rhs, m, cf)) {
+          for (int i = 0; i < n2; ++i) F[i] = 0.0;
+          for (int i = 0; i < histN; ++i)
+            for (int t = 0; t < n2; ++t) F[t] += cf[i] * diisF[i * n2 + t];
+          for (int i = 0; i < nBasis; ++i)
+            for (int j = i + 1; j < nBasis; ++j) {
+              const double avg = 0.5 * (F[i * nBasis + j] + F[j * nBasis + i]);
+              F[i * nBasis + j] = avg;
+              F[j * nBasis + i] = avg;
+            }
+        }
+      }
+    }
+
     for (int i = 0; i < n2; ++i) eigA[i] = F[i];
     jacobiEigenDev(eigA, nBasis, eval, C);
     buildDensityDev(C, nBasis, nOcc, Pnew);
@@ -72,8 +134,7 @@ NVMOLKIT_HD inline void scfLoopDDev(int nBasis, int nAtoms, const AtomIntParams*
       converged = true;
       break;
     }
-    // Oracle's d-orbital mixing schedule: heavy damping (0.05) while far from
-    // convergence keeps the SCF in the same basin it picks; lighter near the end.
+    // Damped mixing (with the oracle's d schedule) feeds the DIIS history.
     double mix;
     if (it < 3) mix = 0.3;
     else if (delta > 0.1) mix = 0.05;
