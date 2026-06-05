@@ -144,10 +144,10 @@ bool scfBatchDGpu(int nMol, const int* molNAtoms, const int* molNBasis,
     hipMemcpy(dScratchOff, scratchOff.data(), sizeof(long) * nMol, hipMemcpyHostToDevice);
     hipMemcpy(dCoords, coordsAll, sizeof(double) * 3 * totAtoms, hipMemcpyHostToDevice);
 
-    // buildCoreHamiltonianDDev's e1b loop recurses through twoCenterMolecularDev
-    // (HX case) and holds a 256-double w tensor per frame; bump the per-thread
-    // stack above the ~1 KB default (same as the sp kernel).
-    hipDeviceSetLimit(hipLimitStackSize, 64 * 1024);
+    // The YY Fock branch materializes a 9x9x9x9 (52 KB) tensor per thread, on top
+    // of the recursive e1b frames; bump the per-thread stack well above the
+    // ~1 KB default to hold it.
+    hipDeviceSetLimit(hipLimitStackSize, 192 * 1024);
 
     const int block = 64;
     const int grid = (nMol + block - 1) / block;
