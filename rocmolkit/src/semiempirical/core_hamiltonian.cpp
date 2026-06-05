@@ -68,6 +68,9 @@ bool gatherAtomIntParams(int z, AtomIntParams& o) {
   o.eheat = pm6Eheat(z);
   o.z = z;
   o.qn = principalQn(z);
+  // PYSEQM treats the valence d shell as 3d for P/S/Cl (qn3), but 4d for Br
+  // (qn4) and 5d for I (qn5) — the d principal qn tracks the sp shell for qn>=4.
+  o.qnD = (o.qn >= 4) ? o.qn : 3;
   o.valence = pm6ValenceElectrons(z);
   o.nOrb = spCount(z);
   return true;

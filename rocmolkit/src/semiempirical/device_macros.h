@@ -41,7 +41,8 @@ struct AtomIntParams {
   double eisol;                    // isolated-atom electronic energy (eV)
   double eheat;                    // atomic heat of formation (kcal/mol)
   int z;         // atomic number (for the N-H/O-H core-core special case)
-  int qn;        // principal quantum number of the valence shell
+  int qn;        // principal quantum number of the valence sp shell
+  int qnD;       // principal quantum number of the valence d shell (3/4/5)
   int valence;   // core charge (valence electrons)
   int nOrb;      // valence basis size: 1 (H/He), 4 (sp), or 9 (sp+d, PM6_D)
 };

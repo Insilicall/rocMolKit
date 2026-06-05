@@ -136,7 +136,8 @@ NVMOLKIT_HD inline int diatomOverlapSpDev(const AtomIntParams& pA, const double 
   else if (pA.qn == 3 && pB.qn == 1) jcall = 431;
   else if (pA.qn == 3 && pB.qn == 2) jcall = 5;
   else if (pA.qn == 3 && pB.qn == 3) jcall = 6;
-  else {  // qn >= 4 (Br, I): the sp overlap formulas are not yet ported
+  else if (pA.qn == 4 && pB.qn == 1) jcall = 541;  // Br + H
+  else {  // qn >= 5 (I) sp overlap formulas are not yet ported
     for (int i = 0; i < nA * nB; ++i) outBlock[i] = 0.0;
     return nA * nB;
   }
@@ -213,7 +214,7 @@ NVMOLKIT_HD inline int diatomOverlapSpDev(const AtomIntParams& pA, const double 
                 - (A22[3] - A22[1]) * (B22[2] - B22[4]) - (A22[2] - A22[0]) * (B22[3] - B22[5]))
              / (32.0 * sqrt30);
     }
-  } else {  // jcall == 6: qn=3 - qn=3
+  } else if (jcall == 6) {  // qn=3 - qn=3
     S111 = std::pow(zsA * zsB, 3.5) * std::pow(Rb, 7)
            * (A111[6] * B111[0] - 3.0 * B111[2] * A111[4] + 3.0 * A111[2] * B111[4]
               - A111[0] * B111[6]) / 1440.0;
@@ -237,6 +238,17 @@ NVMOLKIT_HD inline int diatomOverlapSpDev(const AtomIntParams& pA, const double 
              * ((A22[6] - A22[4]) * (B22[0] - B22[2]) - 2.0 * (A22[4] - A22[2]) * (B22[2] - B22[4])
                 + (A22[2] - A22[0]) * (B22[4] - B22[6])) / 960.0;
     }
+  } else if (jcall == 541) {  // heavy qn=4 + H (Br + H)
+    S111 = std::pow(zsB, 1.5) * std::pow(zsA, 4.5) * std::pow(Rb, 6)
+           * (A111[5] * B111[0] + 3.0 * B111[1] * A111[4] + 2.0 * B111[2] * A111[3]
+              - 2.0 * B111[3] * A111[2] - 3.0 * A111[1] * B111[4] - B111[5] * A111[0])
+           / (std::sqrt(35.0) * 96.0);
+    if (nA > 1)
+      S211 = std::pow(zsB, 1.5) * std::pow(zpA, 4.5) * std::pow(Rb, 6)
+             * ((A211[4] * B211[0] + A211[5] * B211[1])
+                - 2.0 * (-A211[3] * B211[1] - A211[4] * B211[2])
+                + 2.0 * (-A211[1] * B211[3] - A211[2] * B211[4])
+                - (A211[0] * B211[4] + A211[1] * B211[5])) / (32.0 * std::sqrt(105.0));
   }
 
   const double v[3] = {Rvec[0] / R, Rvec[1] / R, Rvec[2] / R};
@@ -248,7 +260,7 @@ NVMOLKIT_HD inline int diatomOverlapSpDev(const AtomIntParams& pA, const double 
 
   for (int i = 0; i < nA * nB; ++i) outBlock[i] = 0.0;
   outBlock[0] = S111;
-  if (jcall == 3 || jcall == 431) {
+  if (jcall == 3 || jcall == 431 || jcall == 541) {
     if (nA > 1)
       for (int k = 0; k < 3; ++k) outBlock[(k + 1) * nB + 0] = S211 * r0[k];
   } else if (jcall == 4 || jcall == 5 || jcall == 6) {
