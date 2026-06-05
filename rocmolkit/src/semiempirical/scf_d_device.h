@@ -41,7 +41,15 @@ NVMOLKIT_HD inline void scfLoopDDev(int nBasis, int nAtoms, const AtomIntParams*
                                     double* density, double* eval, double* F, double* eigA,
                                     double* C, double* Pnew, int* conv, int* niter, double* eElec) {
   const int n2 = nBasis * nBasis;
+  // Initial guess: diagonalize H_core with the d-orbital diagonals shifted far up
+  // so d MOs are virtual at iteration 0 (matching the oracle) — this keeps the
+  // SCF in the sp-occupied basin instead of collapsing into a d-occupied one.
   for (int i = 0; i < n2; ++i) eigA[i] = H[i];
+  for (int a = 0; a < nAtoms; ++a)
+    for (int o = 4; o < norb[a]; ++o) {
+      const int mu = start[a] + o;
+      eigA[mu * nBasis + mu] += 1000.0;
+    }
   jacobiEigenDev(eigA, nBasis, eval, C);
   buildDensityDev(C, nBasis, nOcc, density);
 
@@ -58,12 +66,20 @@ NVMOLKIT_HD inline void scfLoopDDev(int nBasis, int nAtoms, const AtomIntParams*
       const double d = Pnew[i] - density[i];
       ss += d * d;
     }
-    if (std::sqrt(ss / static_cast<double>(n2)) < convTol) {
+    const double delta = std::sqrt(ss / static_cast<double>(n2));
+    if (delta < convTol) {
       for (int i = 0; i < n2; ++i) density[i] = Pnew[i];
       converged = true;
       break;
     }
-    for (int i = 0; i < n2; ++i) density[i] = 0.3 * Pnew[i] + 0.7 * density[i];
+    // Oracle's d-orbital mixing schedule: heavy damping (0.05) while far from
+    // convergence keeps the SCF in the same basin it picks; lighter near the end.
+    double mix;
+    if (it < 3) mix = 0.3;
+    else if (delta > 0.1) mix = 0.05;
+    else if (delta > 0.01) mix = 0.5;
+    else mix = 0.8;
+    for (int i = 0; i < n2; ++i) density[i] = mix * Pnew[i] + (1.0 - mix) * density[i];
   }
   *conv = converged ? 1 : 0;
   *niter = it + 1;

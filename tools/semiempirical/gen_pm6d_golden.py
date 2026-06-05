@@ -53,6 +53,11 @@ MOLECULES = [
       [2.555, -0.50, 1.130]]),
     # Br (qn4 sp): hydrogen bromide HBr (Br-H, jcall 541 sp + 431 d-s).
     ("HBr", [35, 1], [[0.0, 0.0, 0.0], [0.0, 0.0, 1.4100]]),
+    # Note: Br-C (CH3Br) is a multi-solution SCF case — the Fock is bit-exact to
+    # the oracle, but damped mixing and the oracle's DIIS converge to different
+    # (both valid) fixed points. The Br qn4-qn2 overlap (jcall 642) and YX
+    # two-center tensor are validated bit-exact at the component level instead
+    # (tools/semiempirical/validate_brc_components.py).
 ]
 
 
