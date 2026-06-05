@@ -71,5 +71,72 @@ bool pm6dCharges(int nAtoms, const int* atoms, const double* coords, double* q,
   return true;
 }
 
+namespace {
+
+// Frozen-density total energy E = 0.5 tr(P (H + F)) + E_nuc (eV) at the given
+// geometry: rebuild H_core and Fock from P at `coords` WITHOUT re-solving the SCF.
+double frozenDensityEnergy(int nBasis, int nAtoms, const AtomIntParams* ap,
+                           const int* start, const int* norb, const double* coords,
+                           const double* P, double* H, double* F) {
+  buildCoreHamiltonianDDev(nBasis, nAtoms, ap, start, norb, coords, H);
+  buildFockDDev(nBasis, nAtoms, ap, start, norb, coords, H, P, F);
+  const int n2 = nBasis * nBasis;
+  double e = 0.0;
+  for (int i = 0; i < n2; ++i) e += 0.5 * P[i] * (H[i] + F[i]);
+  return e + nuclearRepulsionAm1Dev(nAtoms, ap, coords);
+}
+
+}  // namespace
+
+bool pm6dGradient(int nAtoms, const int* atoms, const double* coords, double* grad,
+                  double* energyEv, int maxIter, double convTol, double step) {
+  if (nAtoms <= 0) return false;
+
+  std::vector<AtomIntParams> ap(nAtoms);
+  std::vector<int> start(nAtoms), norb(nAtoms);
+  int nBasis = 0, nElec = 0;
+  for (int a = 0; a < nAtoms; ++a) {
+    if (!gatherAtomIntParamsD(atoms[a], ap[a])) return false;
+    start[a] = nBasis;
+    norb[a] = ap[a].nOrb;
+    nBasis += norb[a];
+    nElec += pm6ValenceElectrons(atoms[a]);
+  }
+  if (nBasis == 0 || nElec % 2 != 0) return false;  // unsupported / open shell
+
+  const int n2 = nBasis * nBasis;
+  std::vector<double> H(n2), density(n2), eval(nBasis), F(n2), eigA(n2), C(n2), Pnew(n2),
+      ecom(n2), diisF(kScfDiisMax * n2), diisE(kScfDiisMax * n2);
+  buildCoreHamiltonianDDev(nBasis, nAtoms, ap.data(), start.data(), norb.data(), coords, H.data());
+
+  int conv = 0, niter = 0;
+  double eElec = 0.0;
+  scfLoopDDev(nBasis, nAtoms, ap.data(), start.data(), norb.data(), coords, H.data(), nElec / 2,
+              maxIter, convTol, density.data(), eval.data(), F.data(), eigA.data(), C.data(),
+              Pnew.data(), ecom.data(), diisF.data(), diisE.data(), &conv, &niter, &eElec);
+  if (!conv) return false;
+
+  if (energyEv != nullptr)
+    *energyEv = eElec + nuclearRepulsionAm1Dev(nAtoms, ap.data(), coords);
+
+  // Frozen-density central finite difference, per atom and Cartesian direction.
+  std::vector<double> disp(3 * nAtoms);
+  for (int a = 0; a < nAtoms; ++a) {
+    for (int d = 0; d < 3; ++d) {
+      for (int k = 0; k < 3 * nAtoms; ++k) disp[k] = coords[k];
+      disp[3 * a + d] = coords[3 * a + d] + step;
+      const double ep = frozenDensityEnergy(nBasis, nAtoms, ap.data(), start.data(),
+                                            norb.data(), disp.data(), density.data(),
+                                            H.data(), F.data());
+      disp[3 * a + d] = coords[3 * a + d] - step;
+      const double em = frozenDensityEnergy(nBasis, nAtoms, ap.data(), start.data(),
+                                            norb.data(), disp.data(), density.data(),
+                                            H.data(), F.data());
+      grad[3 * a + d] = (ep - em) / (2.0 * step);
+    }
+  }
+  return true;
+}
+
 }  // namespace semiempirical
 }  // namespace nvMolKit

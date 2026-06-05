@@ -26,6 +26,7 @@
 #include <vector>
 
 #include "semiempirical/scf_d_kernels.h"  // scfBatchDGpu
+#include "semiempirical/scf_d.h"          // pm6dGradient
 #include "semiempirical/pm6_params.h"     // pm6NumOrbitals
 #include "semiempirical/h4_device.h"      // pm6dD3H4Correction
 
@@ -89,6 +90,39 @@ boost::python::object pm6dChargesBatch(const boost::python::list& mols) {
   return out;
 }
 
+// PM6_D frozen-density energy gradient (eV/Angstrom) for a list of RDKit
+// molecules (each with a 3D conformer). Returns a list of length len(mols); each
+// element is either a list of nAtoms (gx, gy, gz) tuples or None when the molecule
+// is unsupported / open-shell / did not converge. Runs on the CPU host path.
+boost::python::object pm6dGradientBatch(const boost::python::list& mols) {
+  const int nMol = static_cast<int>(len(mols));
+  boost::python::list out;
+  for (int m = 0; m < nMol; ++m) {
+    const RDKit::ROMol* mol = extract<const RDKit::ROMol*>(boost::python::object(mols[m]));
+    const int na = static_cast<int>(mol->getNumAtoms());
+    const RDKit::Conformer& conf = mol->getConformer();  // throws if none
+    std::vector<int> atoms(na);
+    std::vector<double> coords(3 * na);
+    for (int a = 0; a < na; ++a) {
+      atoms[a] = static_cast<int>(mol->getAtomWithIdx(a)->getAtomicNum());
+      const RDGeom::Point3D& p = conf.getAtomPos(a);
+      coords[3 * a] = p.x;
+      coords[3 * a + 1] = p.y;
+      coords[3 * a + 2] = p.z;
+    }
+    std::vector<double> grad(3 * na);
+    if (!nvMolKit::semiempirical::pm6dGradient(na, atoms.data(), coords.data(), grad.data())) {
+      out.append(boost::python::object());  // None
+      continue;
+    }
+    boost::python::list g;
+    for (int a = 0; a < na; ++a)
+      g.append(boost::python::make_tuple(grad[3 * a], grad[3 * a + 1], grad[3 * a + 2]));
+    out.append(g);
+  }
+  return out;
+}
+
 }  // namespace
 
 BOOST_PYTHON_MODULE(_Semiempirical) {
@@ -99,4 +133,10 @@ BOOST_PYTHON_MODULE(_Semiempirical) {
       "unsupported / open-shell / non-converged); hof_d3h4 adds the post-SCF "
       "PM6-D3H4 correction (D3 dispersion + H4 H-bond + H-H repulsion). The whole "
       "d-orbital SCF runs on the GPU.");
+  def("PM6DGradient", &pm6dGradientBatch, (arg("molecules")),
+      "PM6_D (d-orbital NDDO) frozen-density energy gradient (eV/Angstrom) for a "
+      "list of RDKit molecules with 3D conformers. Returns a list of per-molecule "
+      "[(gx, gy, gz), ...] (length nAtoms), or None per molecule if unsupported / "
+      "open-shell / non-converged. Hellmann-Feynman frozen-density gradient: one "
+      "SCF + 6*nAtoms integral passes (no SCF re-solve).");
 }

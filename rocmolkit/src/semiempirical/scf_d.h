@@ -33,6 +33,19 @@ namespace semiempirical {
 bool pm6dCharges(int nAtoms, const int* atoms, const double* coords, double* q,
                  double* hofKcal = nullptr, int maxIter = 800, double convTol = 1e-10);
 
+// PM6_D energy gradient dE/dR for one molecule, via the frozen-density
+// (Hellmann-Feynman) method: solve the SCF once for the density P, then take the
+// central finite difference of E = 0.5 tr(P (H + F)) + E_nuc rebuilt at each
+// displaced geometry WITHOUT re-solving (P is variationally converged, so dE/dP
+// vanishes). One SCF + 6*nAtoms integral passes, vs 6N+1 SCF re-solves for a
+// plain numerical gradient. grad is nAtoms*3 row-major in eV/Angstrom; if
+// energyEv != nullptr it receives the converged electronic+nuclear energy (eV).
+// step is the displacement (Angstrom). Returns false on unsupported element,
+// open shell, or non-convergence. Mirrors the oracle's analytical_gradient.
+bool pm6dGradient(int nAtoms, const int* atoms, const double* coords, double* grad,
+                  double* energyEv = nullptr, int maxIter = 800, double convTol = 1e-10,
+                  double step = 1e-5);
+
 }  // namespace semiempirical
 }  // namespace nvMolKit
 
