@@ -159,13 +159,35 @@ Agreement of `hof_pm6` with MOPAC 23.2.5 (`validate_pm6_mopac.py`):
 to MOPAC's, so although the charges/eigenvalues stay close, the total electronic
 energy — and hence `hof_pm6` — diverges from MOPAC by a few kcal/mol for
 iodine-containing molecules. The core-core (PWCCT) is correct; the gap is in the
-**two-center electronic d-integrals / d-parameters** for qn5. **IBr** is worse:
-PYSEQM's qn5 s–d overlap there is unphysical (S > 1), which the engine reproduces
-faithfully (bit-exact to PYSEQM, by design), so that single energy is meaningless
-(MOPAC computes it correctly). Closing this would require re-porting iodine's
-electronic two-center integrals / d-parameters from Sparrow/MOPAC — a re-baseline
-of the **electronic** engine for qn5, not just the core-core — and is deliberately
-left as a separate phase to avoid disturbing the PYSEQM bit-exactness elsewhere.
+**electronic** d-treatment for qn5. **IBr** is worse: PYSEQM's qn5 s–d overlap
+there is unphysical (S > 1), which the engine reproduces faithfully (bit-exact to
+PYSEQM, by design), so that single energy is meaningless (MOPAC computes it
+correctly).
+
+This was investigated in depth and is **not a quick fix** (the naive routes
+regress):
+
+- The divergence is a *parameter* difference — PYSEQM's iodine d-shell
+  (`zeta_d = 2.723`, `U_dd = -23.46`, `beta_d = -5.25`, and the one-center d
+  `F0SD/G2SD`) differs from the published Stewart/Sparrow PM6 values
+  (`zeta_d = 1.875`, `U_dd = -28.82`, `beta_d = -7.68`, `F0SD = 20.50`,
+  `G2SD = 2.16`). All other elements (incl. Br) already match.
+- But **Sparrow's iodine parameters are stale relative to MOPAC 23.2.5**:
+  substituting them (d-params and the regenerated one-center d) makes the iodine
+  total energy move *further* from MOPAC, not closer (HI 0.10 eV → 0.39 eV). The
+  current PYSEQM iodine parametrisation is already the *closest* of the three to
+  MOPAC 23.2.5 (~0.1 eV / 2 kcal on HI).
+- Matching MOPAC 23.2.5 bit-exact would therefore require **MOPAC's own iodine
+  parameters** (not Sparrow's; they are not printed by `mopac`/`mopac-param`, so
+  they must come from the openmopac source) **and** porting MOPAC's qn5
+  overlap/integral formulas (to fix the IBr S > 1 and the residual). That is a
+  re-baseline of the **electronic** engine for qn5, deliberately left as a
+  separate phase to avoid disturbing the PYSEQM bit-exactness everywhere else.
+
+In short: the canonical core-core + reference is done; canonical *iodine
+electronics* needs MOPAC's exact iodine data + qn5 formulas, which is its own
+project. Until then `hof_pm6` for iodine is the PYSEQM-electronics value
+(~2–8 kcal of MOPAC), and IBr is excluded.
 
 Everything above (both HoFs, charges, the PWCCT core-core, the interhalide
 overlap) is verified **GPU == CPU on real gfx1200 hardware** to floating-point
