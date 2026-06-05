@@ -133,6 +133,45 @@ anchor to an external reference. Here the anchor is **PYSEQM/MOPAC**.
 A result counts only when it matches the golden charges (and, once added, the
 heat of formation) to the stated tolerance — never timing alone.
 
+## Canonical PM6 (MOPAC) and known limitations — iodine & IBr
+
+The engine exposes **two heats of formation** (the SCF / charges are identical for
+both; only the post-SCF energy reference differs):
+
+- `hof_nddo` — the PYSEQM-referenced PM6_D heat of formation (AM1-style core-core).
+  **Bit-exact to the PYSEQM oracle** (`validate_pm6d_cpp.py`).
+- `hof_pm6` — the **canonical, MOPAC-aligned** PM6 heat of formation: the PYSEQM
+  electronic energy + the **PWCCT** pairwise core-core (Stewart 2007, ported from
+  SCINE Sparrow) + a MOPAC-calibrated per-element reference. The core-core term is
+  **bit-exact to MOPAC's `NUCLEAR-NUCLEAR REPULSION`** (`validate_pwcct.py`, worst
+  5.4e-5 eV), and the SCF itself already matches MOPAC PM6 (charges to ~1e-4 e,
+  HOMO/IP to ~1e-4 eV — the core-core does not enter the Fock).
+
+Agreement of `hof_pm6` with MOPAC 23.2.5 (`validate_pm6_mopac.py`):
+
+| elements | `hof_pm6` vs MOPAC |
+| -------- | ------------------ |
+| H, C, N, O, F, P, S, Cl, **Br** | **~0.5–1 kcal/mol** (canonical PM6) |
+| **I** (iodine) | looser, ~kcal (up to ~8 for CH3I) |
+| **IBr** | excluded — energy meaningless (see below) |
+
+**Known limitation (iodine).** Iodine's 5d treatment in PYSEQM is *not* identical
+to MOPAC's, so although the charges/eigenvalues stay close, the total electronic
+energy — and hence `hof_pm6` — diverges from MOPAC by a few kcal/mol for
+iodine-containing molecules. The core-core (PWCCT) is correct; the gap is in the
+**two-center electronic d-integrals / d-parameters** for qn5. **IBr** is worse:
+PYSEQM's qn5 s–d overlap there is unphysical (S > 1), which the engine reproduces
+faithfully (bit-exact to PYSEQM, by design), so that single energy is meaningless
+(MOPAC computes it correctly). Closing this would require re-porting iodine's
+electronic two-center integrals / d-parameters from Sparrow/MOPAC — a re-baseline
+of the **electronic** engine for qn5, not just the core-core — and is deliberately
+left as a separate phase to avoid disturbing the PYSEQM bit-exactness elsewhere.
+
+Everything above (both HoFs, charges, the PWCCT core-core, the interhalide
+overlap) is verified **GPU == CPU on real gfx1200 hardware** to floating-point
+rounding by `validate_gpu_cpu.py` (worst |Δq| = 2.2e-14, |ΔHoF| = 1.6e-11,
+|ΔHoF_pm6| = 1.9e-11 kcal/mol).
+
 ## Two-step methodology
 
 1. **CPU oracle first.** Rather than write our own NumPy SCF, we reuse the
