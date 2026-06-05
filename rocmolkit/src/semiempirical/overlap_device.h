@@ -138,7 +138,8 @@ NVMOLKIT_HD inline int diatomOverlapSpDev(const AtomIntParams& pA, const double 
   else if (pA.qn == 3 && pB.qn == 3) jcall = 6;
   else if (pA.qn == 4 && pB.qn == 1) jcall = 541;  // Br + H
   else if (pA.qn == 4 && pB.qn == 2) jcall = 642;  // Br + 2nd-row (C/N/O/F)
-  else {  // Br-Br (jcall 8) / qn>=5 (I) sp overlap formulas not yet ported
+  else if (pA.qn == 5 && pB.qn == 1) jcall = 651;  // I + H
+  else {  // Br-Br (jcall 8) / I + heavy sp overlap formulas not yet ported
     for (int i = 0; i < nA * nB; ++i) outBlock[i] = 0.0;
     return nA * nB;
   }
@@ -276,6 +277,17 @@ NVMOLKIT_HD inline int diatomOverlapSpDev(const AtomIntParams& pA, const double 
                 - 2.0 * (A22[3] - A22[1]) * (B22[3] - B22[5]) - (A22[2] - A22[0]) * (B22[4] - B22[6]))
              / (128.0 * std::sqrt(105.0));
     }
+  } else if (jcall == 651) {  // heavy qn=5 + H (I + H)
+    S111 = std::pow(zsB, 1.5) * std::pow(zsA, 5.5) * std::pow(Rb, 7)
+           * (A111[6] * B111[0] + 4.0 * B111[1] * A111[5] + 5.0 * B111[2] * A111[4]
+              - 5.0 * B111[4] * A111[2] - 4.0 * A111[1] * B111[5] - B111[6] * A111[0])
+           / (std::sqrt(14.0) * 1440.0);
+    if (nA > 1)
+      S211 = std::pow(zsB, 1.5) * std::pow(zpA, 5.5) * std::pow(Rb, 7)
+             * ((A211[5] * B211[0] + A211[6] * B211[1]) - 3.0 * (-A211[4] * B211[1] - A211[5] * B211[2])
+                + 2.0 * (A211[3] * B211[2] + A211[4] * B211[3]) + 2.0 * (-A211[2] * B211[3] - A211[3] * B211[4])
+                - 3.0 * (A211[1] * B211[4] + A211[2] * B211[5]) + (-A211[0] * B211[5] - A211[1] * B211[6]))
+             / (480.0 * std::sqrt(42.0));
   }
 
   const double v[3] = {Rvec[0] / R, Rvec[1] / R, Rvec[2] / R};
@@ -287,7 +299,7 @@ NVMOLKIT_HD inline int diatomOverlapSpDev(const AtomIntParams& pA, const double 
 
   for (int i = 0; i < nA * nB; ++i) outBlock[i] = 0.0;
   outBlock[0] = S111;
-  if (jcall == 3 || jcall == 431 || jcall == 541) {
+  if (jcall == 3 || jcall == 431 || jcall == 541 || jcall == 651) {
     if (nA > 1)
       for (int k = 0; k < 3; ++k) outBlock[(k + 1) * nB + 0] = S211 * r0[k];
   } else if (jcall == 4 || jcall == 5 || jcall == 6 || jcall == 642) {

@@ -62,10 +62,14 @@ NVMOLKIT_HD inline void dsBlockDev(double zd, double zs, double Rb, int dqnA, in
                      + (-A[2] * (3 * B[1] - B[3]) - A[4] * (3 * B[3] - B[1]) - 4 * A[3] * B[2]))
                     - ((A[1] * (3 * B[2] - B[4]) + A[3] * (3 * B[4] - B[2]) + 4 * A[2] * B[3])
                        + (-A[0] * (3 * B[3] - B[5]) - A[2] * (3 * B[5] - B[3]) - 4 * A[1] * B[4]));
-  const double p6 = (A[4] * (3 * B[0] - B[2]) + A[6] * (3 * B[2] - B[0]) + 4 * A[5] * B[1])
-                    + 2.0 * (-A[3] * (3 * B[1] - B[3]) - A[5] * (3 * B[3] - B[1]) - 4 * A[4] * B[2])
-                    - 2.0 * (-A[1] * (3 * B[3] - B[5]) - A[3] * (3 * B[5] - B[3]) - 4 * A[2] * B[4])
-                    - (A[0] * (3 * B[4] - B[6]) + A[2] * (3 * B[6] - B[4]) + 4 * A[1] * B[5]);
+  // Four groups shared by jcall 6 (qn3 d - qn3 s) and jcall 651 (qn5 d - qn1 s),
+  // differing only in the signs on the inner two groups.
+  const double m1 = A[4] * (3 * B[0] - B[2]) + A[6] * (3 * B[2] - B[0]) + 4 * A[5] * B[1];
+  const double m2 = -A[3] * (3 * B[1] - B[3]) - A[5] * (3 * B[3] - B[1]) - 4 * A[4] * B[2];
+  const double m3 = -A[1] * (3 * B[3] - B[5]) - A[3] * (3 * B[5] - B[3]) - 4 * A[2] * B[4];
+  const double m4 = A[0] * (3 * B[4] - B[6]) + A[2] * (3 * B[6] - B[4]) + 4 * A[1] * B[5];
+  const double p6 = m1 + 2.0 * m2 - 2.0 * m3 - m4;
+  const double p651 = m1 - 2.0 * m2 - 2.0 * m3 + m4;
   // jcall 541 (Br + H): same four groups as p5 but signs (+ - - +).
   const double p541 = (A[3] * (3 * B[0] - B[2]) + A[5] * (3 * B[2] - B[0]) + 4 * A[4] * B[1])
                       - (-A[2] * (3 * B[1] - B[3]) - A[4] * (3 * B[3] - B[1]) - 4 * A[3] * B[2])
@@ -84,6 +88,9 @@ NVMOLKIT_HD inline void dsBlockDev(double zd, double zs, double Rb, int dqnA, in
     if (qnB <= 1) s311 = std::pow(zs, 1.5) * std::pow(zd, 4.5) * std::pow(Rb, 6) * p541 / (192.0 * std::sqrt(7.0));
     else if (qnB == 2) s311 = std::pow(zs, 2.5) * std::pow(zd, 4.5) * std::pow(Rb, 7) * p642 / (384.0 * std::sqrt(21.0));
     // qnB 3/4 (jcall 7/8) extend the same pattern when needed.
+  } else if (dqnA == 5) {
+    if (qnB <= 1) s311 = std::pow(zs, 1.5) * std::pow(zd, 5.5) * std::pow(Rb, 7) * p651 / (576.0 * std::sqrt(70.0));
+    // qnB >= 2 (jcall 752/853/9/10) extend the same pattern when needed.
   }
   (void)p5;
   const double s3 = std::sqrt(3.0), s34 = std::sqrt(0.75);
