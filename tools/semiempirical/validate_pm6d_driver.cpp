@@ -25,15 +25,10 @@
 // stdin format: per molecule "<nAtoms>" then nAtoms lines "<Z> <x> <y> <z>".
 // Output per molecule: "<conv> <q0> <q1> ...".
 
-#include <cmath>
 #include <cstdio>
 #include <vector>
 
-#include "core_hamiltonian.h"        // gatherAtomIntParamsD
-#include "core_hamiltonian_d_device.h"
-#include "energy_device.h"           // nuclearRepulsionDev, heatOfFormationKcalDev
-#include "pm6_params.h"              // pm6ValenceElectrons
-#include "scf_d_device.h"
+#include "scf_d.h"  // pm6dCharges (public host API)
 
 using namespace nvMolKit::semiempirical;
 
@@ -49,44 +44,17 @@ int main() {
       }
     }
 
-    std::vector<AtomIntParams> ap(nAtoms);
-    std::vector<int> start(nAtoms), norb(nAtoms);
-    int nBasis = 0, nElec = 0;
-    bool ok = true;
-    for (int a = 0; a < nAtoms; ++a) {
-      if (!gatherAtomIntParamsD(z[a], ap[a])) { ok = false; break; }
-      start[a] = nBasis;
-      norb[a] = ap[a].nOrb;
-      nBasis += norb[a];
-      nElec += pm6ValenceElectrons(z[a]);
-    }
-    if (!ok || nBasis == 0) {
+    // Exercise the public host API (scf_d.h) — the same path the library exposes.
+    std::vector<double> q(nAtoms);
+    double hof = 0.0;
+    const bool conv = pm6dCharges(nAtoms, z.data(), coords.data(), q.data(), &hof);
+    if (!conv) {
       std::printf("0\n");
       std::fflush(stdout);
       continue;
     }
-
-    const int n2 = nBasis * nBasis;
-    std::vector<double> H(n2), density(n2), eval(nBasis), F(n2), eigA(n2), C(n2), Pnew(n2),
-        ecom(n2), diisF(kScfDiisMax * n2), diisE(kScfDiisMax * n2);
-    buildCoreHamiltonianDDev(nBasis, nAtoms, ap.data(), start.data(), norb.data(), coords.data(),
-                             H.data());
-    int conv = 0, niter = 0;
-    double eElec = 0.0;
-    scfLoopDDev(nBasis, nAtoms, ap.data(), start.data(), norb.data(), coords.data(), H.data(),
-                nElec / 2, 800, 1e-10, density.data(), eval.data(), F.data(), eigA.data(),
-                C.data(), Pnew.data(), ecom.data(), diisF.data(), diisE.data(), &conv, &niter,
-                &eElec);
-
-    const double eNuc = nuclearRepulsionAm1Dev(nAtoms, ap.data(), coords.data());
-    const double hof = heatOfFormationKcalDev(eElec, eNuc, nAtoms, ap.data());
-
-    std::printf("%d %.6f", conv, hof);
-    for (int a = 0; a < nAtoms; ++a) {
-      double pop = 0.0;
-      for (int o = 0; o < norb[a]; ++o) pop += density[(start[a] + o) * nBasis + (start[a] + o)];
-      std::printf(" %.6f", static_cast<double>(pm6ValenceElectrons(z[a])) - pop);
-    }
+    std::printf("1 %.6f", hof);
+    for (int a = 0; a < nAtoms; ++a) std::printf(" %.6f", q[a]);
     std::printf("\n");
     std::fflush(stdout);
   }
