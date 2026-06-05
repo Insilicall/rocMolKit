@@ -95,11 +95,33 @@ NVMOLKIT_HD inline void dsBlockDev(double zd, double zs, double Rb, int dqnA, in
   } else if (dqnA == 4) {
     if (qnB <= 1) s311 = std::pow(zs, 1.5) * std::pow(zd, 4.5) * std::pow(Rb, 6) * p541 / (192.0 * std::sqrt(7.0));
     else if (qnB == 2) s311 = std::pow(zs, 2.5) * std::pow(zd, 4.5) * std::pow(Rb, 7) * p642 / (384.0 * std::sqrt(21.0));
-    // qnB 3/4 (jcall 7/8) extend the same pattern when needed.
+    else {  // jcall 8 (qn4 d - qn4 s): seven groups (signs + 2 - -4 - 2 +)
+      const double g1 = A[6] * (3 * B[0] - B[2]) + A[8] * (3 * B[2] - B[0]) + 4 * A[7] * B[1];
+      const double g2 = -A[5] * (3 * B[1] - B[3]) - A[7] * (3 * B[3] - B[1]) - 4 * A[6] * B[2];
+      const double g3 = A[4] * (3 * B[2] - B[4]) + A[6] * (3 * B[4] - B[2]) + 4 * A[5] * B[3];
+      const double g4 = -A[3] * (3 * B[3] - B[5]) - A[5] * (3 * B[5] - B[3]) - 4 * A[4] * B[4];
+      const double g5 = A[2] * (3 * B[4] - B[6]) + A[4] * (3 * B[6] - B[4]) + 4 * A[3] * B[5];
+      const double g6 = -A[1] * (3 * B[5] - B[7]) - A[3] * (3 * B[7] - B[5]) - 4 * A[2] * B[6];
+      const double g7 = A[0] * (3 * B[6] - B[8]) + A[2] * (3 * B[8] - B[6]) + 4 * A[1] * B[7];
+      s311 = std::pow(zs, 4.5) * std::pow(zd, 4.5) * std::pow(Rb, 9)
+             * (g1 + 2.0 * g2 - g3 - 4.0 * g4 - g5 + 2.0 * g6 + g7) / (32256.0 * std::sqrt(5.0));
+    }
   } else if (dqnA == 5) {
     if (qnB <= 1) s311 = std::pow(zs, 1.5) * std::pow(zd, 5.5) * std::pow(Rb, 7) * p651 / (576.0 * std::sqrt(70.0));
     else if (qnB == 2) s311 = std::pow(zs, 2.5) * std::pow(zd, 5.5) * std::pow(Rb, 8) * p752 / (1152.0 * std::sqrt(210.0));
-    // qnB 3/4/5 (jcall 853/9/10) extend the same pattern when needed.
+    else {  // jcall 10 (qn5 d - qn5 s): eight groups (signs + 2 -2 -6 +6 +2 -2 -)
+      const double h1 = A[8] * (3 * B[0] - B[2]) + A[10] * (3 * B[2] - B[0]) + 4 * A[9] * B[1];
+      const double h2 = -A[7] * (3 * B[1] - B[3]) - A[9] * (3 * B[3] - B[1]) - 4 * A[8] * B[2];
+      const double h3 = A[6] * (3 * B[2] - B[4]) + A[8] * (3 * B[4] - B[2]) + 4 * A[7] * B[3];
+      const double h4 = -A[5] * (3 * B[3] - B[5]) - A[7] * (3 * B[5] - B[3]) - 4 * A[6] * B[4];
+      const double h5 = -A[3] * (3 * B[5] - B[7]) - A[5] * (3 * B[7] - B[5]) - 4 * A[4] * B[6];
+      const double h6 = A[2] * (3 * B[6] - B[8]) + A[4] * (3 * B[8] - B[6]) + 4 * A[3] * B[7];
+      const double h7 = -A[1] * (3 * B[7] - B[9]) - A[3] * (3 * B[9] - B[7]) - 4 * A[2] * B[8];
+      const double h8 = A[0] * (3 * B[8] - B[10]) + A[2] * (3 * B[10] - B[8]) + 4 * A[1] * B[9];
+      s311 = std::pow(zs, 5.5) * std::pow(zd, 5.5) * std::pow(Rb, 11)
+             * (h1 + 2.0 * h2 - 2.0 * h3 - 6.0 * h4 + 6.0 * h5 + 2.0 * h6 - 2.0 * h7 - h8)
+             / (2903040.0 * std::sqrt(5.0));
+    }
   }
   (void)p5;
   const double s3 = std::sqrt(3.0), s34 = std::sqrt(0.75);
@@ -129,6 +151,42 @@ NVMOLKIT_HD inline void dpBlockDev(double zd, double zp, double Rb, int dqnA, in
         * (((A[4] - A[2]) * (B[0] - B[2]) + (A[3] - A[5]) * (-B[1] + B[3]))
            - ((A[2] - A[0]) * (B[2] - B[4]) + (A[1] - A[3]) * (-B[3] + B[5])))
         / (32.0 * std::sqrt(6.0));
+  } else if (dqnA == 4 && qnB >= 4) {  // jcall 8 (d-qn4 + p-qn4): six groups
+    const double P1 = A[5] * (3 * B[0] - B[2]) + A[6] * (B[1] + B[3]) - A[7] * (B[0] + B[2]) - A[8] * (3 * B[3] - B[1]);
+    const double P2 = -A[4] * (3 * B[1] - B[3]) - A[5] * (B[2] + B[4]) + A[6] * (B[1] + B[3]) + A[7] * (3 * B[4] - B[2]);
+    const double P3 = A[3] * (3 * B[2] - B[4]) + A[4] * (B[3] + B[5]) - A[5] * (B[2] + B[4]) - A[6] * (3 * B[5] - B[3]);
+    const double P4 = -A[2] * (3 * B[3] - B[5]) - A[3] * (B[4] + B[6]) + A[4] * (B[3] + B[5]) + A[5] * (3 * B[6] - B[4]);
+    const double P5 = A[1] * (3 * B[4] - B[6]) + A[2] * (B[5] + B[7]) - A[3] * (B[4] + B[6]) - A[4] * (3 * B[7] - B[5]);
+    const double P6 = -A[0] * (3 * B[5] - B[7]) - A[1] * (B[6] + B[8]) + A[2] * (B[5] + B[7]) + A[3] * (3 * B[8] - B[6]);
+    const double Q1 = (A[7] - A[5]) * (B[0] - B[2]) + (A[6] - A[8]) * (-B[1] + B[3]);
+    const double Q2 = (A[6] - A[4]) * (-B[1] + B[3]) + (A[5] - A[7]) * (B[2] - B[4]);
+    const double Q3 = (A[5] - A[3]) * (B[2] - B[4]) + (A[4] - A[6]) * (-B[3] + B[5]);
+    const double Q4 = (A[4] - A[2]) * (-B[3] + B[5]) + (A[3] - A[5]) * (B[4] - B[6]);
+    const double Q5 = (A[3] - A[1]) * (B[4] - B[6]) + (A[2] - A[4]) * (-B[5] + B[7]);
+    const double Q6 = (A[2] - A[0]) * (-B[5] + B[7]) + (A[1] - A[3]) * (B[6] - B[8]);
+    const double pre = std::pow(zp, 4.5) * std::pow(zd, 4.5) * std::pow(Rb, 9);
+    s321 = pre * (P1 + P2 - 2.0 * P3 - 2.0 * P4 + P5 + P6) / (10752.0 * std::sqrt(15.0));
+    s322 = pre * (Q1 + Q2 - 2.0 * Q3 - 2.0 * Q4 + Q5 + Q6) / (10752.0 * std::sqrt(5.0));
+  } else if (dqnA == 5 && qnB >= 4) {  // jcall 10 (d-qn5 + p-qn5): eight groups
+    const double P1 = A[7] * (3 * B[0] - B[2]) + A[8] * (B[1] + B[3]) - A[9] * (B[0] + B[2]) - A[10] * (3 * B[3] - B[1]);
+    const double P2 = -A[6] * (3 * B[1] - B[3]) - A[7] * (B[2] + B[4]) + A[8] * (B[1] + B[3]) + A[9] * (3 * B[4] - B[2]);
+    const double P3 = A[5] * (3 * B[2] - B[4]) + A[6] * (B[3] + B[5]) - A[7] * (B[2] + B[4]) - A[8] * (3 * B[5] - B[3]);
+    const double P4 = -A[4] * (3 * B[3] - B[5]) - A[5] * (B[4] + B[6]) + A[6] * (B[3] + B[5]) + A[7] * (3 * B[6] - B[4]);
+    const double P5 = A[3] * (3 * B[4] - B[6]) + A[4] * (B[5] + B[7]) - A[5] * (B[4] + B[6]) - A[6] * (3 * B[7] - B[5]);
+    const double P6 = -A[2] * (3 * B[5] - B[7]) - A[3] * (B[6] + B[8]) + A[4] * (B[5] + B[7]) + A[5] * (3 * B[8] - B[6]);
+    const double P7 = A[1] * (3 * B[6] - B[8]) + A[2] * (B[7] + B[9]) - A[3] * (B[6] + B[8]) - A[4] * (3 * B[9] - B[7]);
+    const double P8 = -A[0] * (3 * B[7] - B[9]) - A[1] * (B[8] + B[10]) + A[2] * (B[7] + B[9]) + A[3] * (3 * B[10] - B[8]);
+    const double Q1 = (A[9] - A[7]) * (B[0] - B[2]) + (A[8] - A[10]) * (-B[1] + B[3]);
+    const double Q2 = (A[8] - A[6]) * (-B[1] + B[3]) + (A[7] - A[9]) * (B[2] - B[4]);
+    const double Q3 = (A[7] - A[5]) * (B[2] - B[4]) + (A[6] - A[8]) * (-B[3] + B[5]);
+    const double Q4 = (A[6] - A[4]) * (-B[3] + B[5]) + (A[5] - A[7]) * (B[4] - B[6]);
+    const double Q5 = (A[5] - A[3]) * (B[4] - B[6]) + (A[4] - A[6]) * (-B[5] + B[7]);
+    const double Q6 = (A[4] - A[2]) * (-B[5] + B[7]) + (A[3] - A[5]) * (B[6] - B[8]);
+    const double Q7 = (A[3] - A[1]) * (B[6] - B[8]) + (A[2] - A[4]) * (-B[7] + B[9]);
+    const double Q8 = (A[2] - A[0]) * (-B[7] + B[9]) + (A[1] - A[3]) * (B[8] - B[10]);
+    const double pre = std::pow(zp, 5.5) * std::pow(zd, 5.5) * std::pow(Rb, 11);
+    s321 = pre * (P1 + P2 - 3.0 * P3 - 3.0 * P4 + 3.0 * P5 + 3.0 * P6 - P7 - P8) / (967680.0 * std::sqrt(15.0));
+    s322 = pre * (Q1 + Q2 - 3.0 * Q3 - 3.0 * Q4 + 3.0 * Q5 + 3.0 * Q6 - Q7 - Q8) / (967680.0 * std::sqrt(5.0));
   } else {
     // jcall 6 (d-qn3 + p-qn3) and jcall 642 (d-qn4 + p-qn2) share the same four
     // groups (G/H), differing only in sign pattern and prefactor/denominator.
@@ -180,23 +238,59 @@ NVMOLKIT_HD inline void dpBlockDev(double zd, double zp, double Rb, int dqnA, in
   out[14] = -(s321 * s3 * sa * ca * sb * sb * cb + s322 * (2 * sa * ca * sb * cb * sb));
 }
 
-// d-d overlap 5x5 block (jcall 6). out is 5*5 row-major. Slater-Koster outer
-// product, with the dyz-dxy cross term (out[3][4]=out[4][3]) written explicitly.
-NVMOLKIT_HD inline void ddBlockDev(double zd1, double zd2, double Rb,
+// d-d overlap 5x5 block. dqn = principal qn of the (homonuclear) d shells: 3
+// (jcall 6) or 4 (jcall 8). out is 5*5 row-major. Slater-Koster outer product,
+// with the dyz-dxy cross term (out[3][4]=out[4][3]) written explicitly.
+NVMOLKIT_HD inline void ddBlockDev(double zd1, double zd2, double Rb, int dqn,
                                    double ca, double cb, double sa, double sb, double* out) {
   using namespace ovdetail;
   double A[kOvNMax], B[kOvNMax];
   aintgs(0.5 * Rb * (zd1 + zd2), A);
   bintgs(0.5 * Rb * (zd1 - zd2), B);
-  const double w = std::pow(zd2, 3.5) * std::pow(zd1, 3.5) * std::pow(Rb, 7);
-  const double s333 = w * (((A[2] - 2 * A[4] + A[6]) * (B[0] - 2 * B[2] + B[4]))
-                           - ((A[0] - 2 * A[2] + A[4]) * (B[2] - 2 * B[4] + B[6]))) / 768.0;
-  const double s332 = -w * ((A[2] * (B[2] - B[0]) + A[4] * (B[0] - B[4]) - A[6] * (B[2] - B[4]))
-                            - (A[0] * (B[4] - B[2]) + A[2] * (B[2] - B[6]) - A[4] * (B[4] - B[6]))) / 192.0;
-  const double s331 = w * ((A[2] * (9 * B[0] - 6 * B[2] + B[4]) - 2 * A[4] * (3 * B[0] - 2 * B[2] + 3 * B[4])
-                            + A[6] * (B[0] - 6 * B[2] + 9 * B[4]))
-                           - (A[0] * (9 * B[2] - 6 * B[4] + B[6]) - 2 * A[2] * (3 * B[2] - 2 * B[4] + 3 * B[6])
-                              + A[4] * (B[2] - 6 * B[4] + 9 * B[6]))) / 1152.0;
+  double s331, s332, s333;
+  if (dqn <= 3) {  // jcall 6 (qn3 d - qn3 d)
+    const double w = std::pow(zd2, 3.5) * std::pow(zd1, 3.5) * std::pow(Rb, 7);
+    s333 = w * (((A[2] - 2 * A[4] + A[6]) * (B[0] - 2 * B[2] + B[4]))
+                - ((A[0] - 2 * A[2] + A[4]) * (B[2] - 2 * B[4] + B[6]))) / 768.0;
+    s332 = -w * ((A[2] * (B[2] - B[0]) + A[4] * (B[0] - B[4]) - A[6] * (B[2] - B[4]))
+                 - (A[0] * (B[4] - B[2]) + A[2] * (B[2] - B[6]) - A[4] * (B[4] - B[6]))) / 192.0;
+    s331 = w * ((A[2] * (9 * B[0] - 6 * B[2] + B[4]) - 2 * A[4] * (3 * B[0] - 2 * B[2] + 3 * B[4])
+                 + A[6] * (B[0] - 6 * B[2] + 9 * B[4]))
+                - (A[0] * (9 * B[2] - 6 * B[4] + B[6]) - 2 * A[2] * (3 * B[2] - 2 * B[4] + 3 * B[6])
+                   + A[4] * (B[2] - 6 * B[4] + 9 * B[6]))) / 1152.0;
+  } else if (dqn == 4) {  // jcall 8 (qn4 d - qn4 d)
+    const double w = std::pow(zd2, 4.5) * std::pow(zd1, 4.5) * std::pow(Rb, 9);
+    s333 = w * (((A[4] - 2 * A[6] + A[8]) * (B[0] - 2 * B[2] + B[4]))
+                - 2.0 * ((A[2] - 2 * A[4] + A[6]) * (B[2] - 2 * B[4] + B[6]))
+                + ((A[0] - 2 * A[2] + A[4]) * (B[4] - 2 * B[6] + B[8]))) / 43008.0;
+    s332 = -w * ((A[4] * (B[2] - B[0]) + A[6] * (B[0] - B[4]) - A[8] * (B[2] - B[4]))
+                 - 2.0 * (A[2] * (B[4] - B[2]) + A[4] * (B[2] - B[6]) - A[6] * (B[4] - B[6]))
+                 + (A[0] * (B[6] - B[4]) + A[2] * (B[4] - B[8]) - A[4] * (B[6] - B[8]))) / 10752.0;
+    s331 = w * ((A[4] * (9 * B[0] - 6 * B[2] + B[4]) - 2 * A[6] * (3 * B[0] - 2 * B[2] + 3 * B[4])
+                 + A[8] * (B[0] - 6 * B[2] + 9 * B[4]))
+                - 2.0 * (A[2] * (9 * B[2] - 6 * B[4] + B[6]) - 2 * A[4] * (3 * B[2] - 2 * B[4] + 3 * B[6])
+                         + A[6] * (B[2] - 6 * B[4] + 9 * B[6]))
+                + (A[0] * (9 * B[4] - 6 * B[6] + B[8]) - 2 * A[2] * (3 * B[4] - 2 * B[6] + 3 * B[8])
+                   + A[4] * (B[4] - 6 * B[6] + 9 * B[8]))) / 64512.0;
+  } else {  // jcall 10 (qn5 d - qn5 d)
+    const double w = std::pow(zd2, 5.5) * std::pow(zd1, 5.5) * std::pow(Rb, 11);
+    s333 = w * (((A[6] - 2 * A[8] + A[10]) * (B[0] - 2 * B[2] + B[4]))
+                - 3.0 * ((A[4] - 2 * A[6] + A[8]) * (B[2] - 2 * B[4] + B[6]))
+                + 3.0 * ((A[2] - 2 * A[4] + A[6]) * (B[4] - 2 * B[6] + B[8]))
+                - ((A[0] - 2 * A[2] + A[4]) * (B[6] - 2 * B[8] + B[10]))) / 3870720.0;
+    s332 = -w * ((A[6] * (B[2] - B[0]) + A[8] * (B[0] - B[4]) - A[10] * (B[2] - B[4]))
+                 - 3.0 * (A[4] * (B[4] - B[2]) + A[6] * (B[2] - B[6]) - A[8] * (B[4] - B[6]))
+                 + 3.0 * (A[2] * (B[6] - B[4]) + A[4] * (B[4] - B[8]) - A[6] * (B[6] - B[8]))
+                 - (A[0] * (B[8] - B[6]) + A[2] * (B[6] - B[10]) - A[4] * (B[8] - B[10]))) / 967680.0;
+    s331 = w * ((A[6] * (9 * B[0] - 6 * B[2] + B[4]) - 2 * A[8] * (3 * B[0] - 2 * B[2] + 3 * B[4])
+                 + A[10] * (B[0] - 6 * B[2] + 9 * B[4]))
+                - 3.0 * (A[4] * (9 * B[2] - 6 * B[4] + B[6]) - 2 * A[6] * (3 * B[2] - 2 * B[4] + 3 * B[6])
+                         + A[8] * (B[2] - 6 * B[4] + 9 * B[6]))
+                + 3.0 * (A[2] * (9 * B[4] - 6 * B[6] + B[8]) - 2 * A[4] * (3 * B[4] - 2 * B[6] + 3 * B[8])
+                         + A[6] * (B[4] - 6 * B[6] + 9 * B[8]))
+                - (A[0] * (9 * B[6] - 6 * B[8] + B[10]) - 2 * A[2] * (3 * B[6] - 2 * B[8] + 3 * B[10])
+                   + A[4] * (B[6] - 6 * B[8] + 9 * B[10]))) / 5806080.0;
+  }
   const double s3 = std::sqrt(3.0), s34 = std::sqrt(0.75), t = 2 * ca * ca - 1;
   const double sig[5] = {s34 * t * sb * sb, s3 * ca * sb * cb, cb * cb - 0.5 * sb * sb,
                          s3 * sa * sb * cb, s3 * sa * ca * sb * sb};
@@ -265,7 +359,7 @@ NVMOLKIT_HD inline int diatomOverlapDDev(const AtomIntParams& pA, const double c
   }
   if (nB == 9) {
     double dd[25];
-    ddBlockDev(pA.zetaD, pB.zetaD, Rb, ca, cb, sa, sb, dd);
+    ddBlockDev(pA.zetaD, pB.zetaD, Rb, pA.qnD, ca, cb, sa, sb, dd);
     for (int m = 0; m < 5; ++m)
       for (int n = 0; n < 5; ++n) out[(4 + m) * nB + (4 + n)] = dd[m * 5 + n];
     // A's sp rows (s,p) against B's d columns: S(s/p_A, d_B) = the d-s/d-p block
