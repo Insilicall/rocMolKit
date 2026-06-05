@@ -81,9 +81,13 @@ NVMOLKIT_HD inline void buildCoreHamiltonianDDev(int nBasis, int nAtoms, const A
   for (int i = 0; i < nAtoms; ++i) {
     for (int j = 0; j < nAtoms; ++j) {
       if (i == j) continue;
-      if (norb[i] == 9 && ap[j].nOrb == 1) {  // YH: 9x9 d e1b on the d-atom
+      if (norb[i] == 9) {  // d-atom A: full 9x9 e1b from core j (YH/YX/YY).
+        // The electron-core attraction (mu nu_A | s_B s_B) depends on B only
+        // through Z_B and rho0_B, so the YH machinery handles any core j once B
+        // is reduced to its monopole (sp cap avoids a d-orbital twoCenterLocal).
+        const AtomIntParams pj = spCapped(ap[j]);
         double W[81];
-        yhWMolecular(ap[i], &coords[3 * i], ap[j], &coords[3 * j], W);
+        yhWMolecular(ap[i], &coords[3 * i], pj, &coords[3 * j], W);
         const double e = -static_cast<double>(ap[j].valence);
         for (int mo = 0; mo < 9; ++mo)
           for (int no = 0; no < 9; ++no)

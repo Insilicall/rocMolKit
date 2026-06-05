@@ -26,8 +26,9 @@
 #include "core_hamiltonian_d_device.h"  // spCapped
 #include "device_macros.h"
 #include "onecenter_d_data.h"
-#include "two_center_d_device.h"  // yhWMolecular
-#include "two_center_device.h"    // twoCenterMolecularDev, wIdxDev
+#include "two_center_d_device.h"   // yhWMolecular
+#include "two_center_device.h"     // twoCenterMolecularDev, wIdxDev
+#include "two_center_yx_device.h"  // yxWMolecular
 
 namespace nvMolKit {
 namespace semiempirical {
@@ -101,8 +102,46 @@ NVMOLKIT_HD inline void buildFockDDev(int nBasis, int nAtoms, const AtomIntParam
       int dA = -1, hB = -1;
       if (norb[i] == 9 && norb[j] == 1) { dA = i; hB = j; }
       else if (norb[i] == 1 && norb[j] == 9) { dA = j; hB = i; }
+      int yxD = -1, yxS = -1;
+      if (norb[i] == 9 && norb[j] == 4) { yxD = i; yxS = j; }
+      else if (norb[i] == 4 && norb[j] == 9) { yxD = j; yxS = i; }
 
-      if (dA >= 0) {  // YH d two-center: J on both atoms + cross K
+      if (yxD >= 0) {  // YX d two-center (d-atom + sp atom): full 9x4 J/K.
+        // yxW carries the molecular sp block too, so the full contraction is the
+        // complete sp + d two-center (no separate sp pass for this pair).
+        double W[9 * 9 * 4 * 4];
+        yxWMolecular(ap[yxD], &coords[3 * yxD], ap[yxS], &coords[3 * yxS], W);
+        const int sA = start[yxD], sB = start[yxS];
+        auto Wd = [&](int mu, int nu, int lam, int sig) {
+          return W[((mu * 9 + nu) * 4 + lam) * 4 + sig];
+        };
+        for (int mu = 0; mu < 9; ++mu)
+          for (int nu = 0; nu < 9; ++nu) {
+            double acc = 0.0;
+            for (int lam = 0; lam < 4; ++lam)
+              for (int sig = 0; sig < 4; ++sig)
+                acc += P[(sB + lam) * nBasis + (sB + sig)] * Wd(mu, nu, lam, sig);
+            F[(sA + mu) * nBasis + (sA + nu)] += acc;
+          }
+        for (int lam = 0; lam < 4; ++lam)
+          for (int sig = 0; sig < 4; ++sig) {
+            double acc = 0.0;
+            for (int mu = 0; mu < 9; ++mu)
+              for (int nu = 0; nu < 9; ++nu)
+                acc += P[(sA + mu) * nBasis + (sA + nu)] * Wd(mu, nu, lam, sig);
+            F[(sB + lam) * nBasis + (sB + sig)] += acc;
+          }
+        for (int mu = 0; mu < 9; ++mu)
+          for (int lam = 0; lam < 4; ++lam) {
+            double acc = 0.0;
+            for (int nu = 0; nu < 9; ++nu)
+              for (int sig = 0; sig < 4; ++sig)
+                acc += Wd(mu, nu, lam, sig) * P[(sA + nu) * nBasis + (sB + sig)];
+            acc *= -0.5;
+            F[(sA + mu) * nBasis + (sB + lam)] += acc;
+            F[(sB + lam) * nBasis + (sA + mu)] += acc;
+          }
+      } else if (dA >= 0) {  // YH d two-center: J on both atoms + cross K
         double W[81];
         yhWMolecular(ap[dA], &coords[3 * dA], ap[hB], &coords[3 * hB], W);
         const int sA = start[dA], sB = start[hB];

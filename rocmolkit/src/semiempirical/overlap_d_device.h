@@ -46,17 +46,28 @@ NVMOLKIT_HD inline void bondAngles(const double v[3], double& ca, double& cb,
   }
 }
 
-// d-s overlap column (5 d-orbitals on A, 1 s on B), jcall 431. out[5].
-NVMOLKIT_HD inline void dsBlockDev(double zd, double zs, double Rb,
+// d-s overlap column (5 d-orbitals on A, 1 s on B), qnB = principal qn of B's s
+// shell: 1 (H, jcall 431) or 2 (2nd-row s, jcall 5). out[5].
+NVMOLKIT_HD inline void dsBlockDev(double zd, double zs, double Rb, int qnB,
                                    double ca, double cb, double sa, double sb, double* out) {
   using namespace ovdetail;
   double A[kOvNMax], B[kOvNMax];
   aintgs(0.5 * Rb * (zd + zs), A);
   bintgs(0.5 * Rb * (zd - zs), B);
-  const double s311 = std::pow(zs, 1.5) * std::pow(zd, 3.5) * std::pow(Rb, 5)
-                      * ((A[2] * (3 * B[0] - B[2]) + A[4] * (3 * B[2] - B[0]) + 4 * A[3] * B[1])
-                         - (A[0] * (3 * B[2] - B[4]) + A[2] * (3 * B[4] - B[2]) + 4 * A[1] * B[3]))
-                      / (48.0 * std::sqrt(2.0));
+  double s311;
+  if (qnB <= 1) {  // d(qn3) - s(qn1), jcall 431
+    s311 = std::pow(zs, 1.5) * std::pow(zd, 3.5) * std::pow(Rb, 5)
+           * ((A[2] * (3 * B[0] - B[2]) + A[4] * (3 * B[2] - B[0]) + 4 * A[3] * B[1])
+              - (A[0] * (3 * B[2] - B[4]) + A[2] * (3 * B[4] - B[2]) + 4 * A[1] * B[3]))
+           / (48.0 * std::sqrt(2.0));
+  } else {  // d(qn3) - s(qn2), jcall 5
+    s311 = std::pow(zs, 2.5) * std::pow(zd, 3.5) * std::pow(Rb, 6)
+           * (((A[3] * (3 * B[0] - B[2]) + A[5] * (3 * B[2] - B[0]) + 4 * A[4] * B[1])
+               + (-A[2] * (3 * B[1] - B[3]) - A[4] * (3 * B[3] - B[1]) - 4 * A[3] * B[2]))
+              - ((A[1] * (3 * B[2] - B[4]) + A[3] * (3 * B[4] - B[2]) + 4 * A[2] * B[3])
+                 + (-A[0] * (3 * B[3] - B[5]) - A[2] * (3 * B[5] - B[3]) - 4 * A[1] * B[4])))
+           / (96.0 * std::sqrt(6.0));
+  }
   const double s3 = std::sqrt(3.0), s34 = std::sqrt(0.75);
   out[0] = s311 * s34 * (2 * ca * ca - 1) * sb * sb;
   out[1] = s311 * s3 * ca * sb * cb;
@@ -174,7 +185,7 @@ NVMOLKIT_HD inline int diatomOverlapDDev(const AtomIntParams& pA, const double c
 
   // A's d rows (4..8) against B's s / p / d columns.
   double ds[5];
-  dsBlockDev(pA.zetaD, pB.zetaS, Rb, ca, cb, sa, sb, ds);
+  dsBlockDev(pA.zetaD, pB.zetaS, Rb, pB.qn, ca, cb, sa, sb, ds);
   for (int m = 0; m < 5; ++m) out[(4 + m) * nB + 0] = ds[m];
   if (nB >= 4) {
     double dp[15];
