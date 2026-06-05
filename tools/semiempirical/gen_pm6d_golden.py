@@ -66,6 +66,15 @@ MOLECULES = [
     ("BrCl", [35, 17], [[0.0, 0.0, 0.0], [0.0, 0.0, 1.9400]]),
     ("ICl", [53, 17], [[0.0, 0.0, 0.0], [0.0, 0.0, 2.3200]]),
     ("IBr", [53, 35], [[0.0, 0.0, 0.0], [0.0, 0.0, 2.4700]]),
+    # Polyatomic that exercises a mixed-dqn d-d (interhalide) pair in situ: the
+    # non-bonded Br...Cl and Cl...Cl two-center blocks go through the faithful
+    # interhalide kernel inside a full polyatomic SCF (alongside the YX C-halogen
+    # bonds). Br(dqn4)...Cl(dqn3) is the interhalide pair. (CH2ICl, with an
+    # I...Cl pair, is another bistable SCF like CH3Br -- the oracle reaches a
+    # solution our DIIS doesn't settle on -- so it stays component-validated.)
+    ("CHBrCl2", [6, 35, 17, 17, 1],
+     [[0.0, 0.0, 0.0], [0.0, 0.0, 1.9400], [1.7000, 0.0, -0.7000],
+      [-0.8500, 1.4700, -0.7000], [-0.6000, -1.0000, -0.4000]]),
     # Not in the full-SCF set: CH3Br is a hard bistable case (the oracle reaches a
     # high-energy solution our DIIS doesn't settle on); I2's oracle SCF itself does
     # not converge. Both are validated at the component level (overlap + two-center)
