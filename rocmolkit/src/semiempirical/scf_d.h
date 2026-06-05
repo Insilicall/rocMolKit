@@ -30,8 +30,15 @@ namespace semiempirical {
 // of formation (kcal/mol). atoms: Z array (length nAtoms); coords: nAtoms*3
 // row-major, Angstrom. Returns false on an unsupported element, an odd-electron
 // (open-shell) molecule, or non-convergence.
+//
+// hofKcal (if non-null) receives the PYSEQM-referenced PM6_D heat of formation
+// (AM1-style core-core, bit-exact to the PYSEQM oracle). hofPm6Kcal (if non-null)
+// receives the canonical, MOPAC-aligned PM6 heat of formation (PWCCT core-core +
+// MOPAC-calibrated reference), which matches MOPAC PM6 to ~1 kcal/mol for light +
+// Br molecules (iodine looser). The SCF / charges are identical for both.
 bool pm6dCharges(int nAtoms, const int* atoms, const double* coords, double* q,
-                 double* hofKcal = nullptr, int maxIter = 800, double convTol = 1e-10);
+                 double* hofKcal = nullptr, int maxIter = 800, double convTol = 1e-10,
+                 double* hofPm6Kcal = nullptr);
 
 // PM6_D energy gradient dE/dR for one molecule, via the frozen-density
 // (Hellmann-Feynman) method: solve the SCF once for the density P, then take the

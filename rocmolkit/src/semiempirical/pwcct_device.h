@@ -35,6 +35,7 @@
 #include "device_macros.h"
 #include "pm6_params.h"   // pm6ValenceElectrons (core charge)
 #include "pwcct_data.h"
+#include "pwcct_ref_data.h"  // kHofRef, kEvToKcal
 
 namespace nvMolKit {
 namespace semiempirical {
@@ -104,6 +105,17 @@ NVMOLKIT_HD inline double pwcctCoreCoreDev(int nAtoms, const int* atoms, const d
     }
   }
   return e;
+}
+
+// Canonical (MOPAC-aligned) PM6 heat of formation (kcal/mol) from the converged
+// electronic energy eElec (eV): HoF = kEvToKcal*(eElec + E_core_PWCCT) - sum ref.
+// Matches MOPAC PM6 to ~1 kcal/mol for light + Br molecules (iodine looser).
+NVMOLKIT_HD inline double heatOfFormationPm6Kcal(double eElec, int nAtoms, const int* atoms,
+                                                 const double* coords) {
+  using namespace pwcct;
+  double ref = 0.0;
+  for (int a = 0; a < nAtoms; ++a) ref += kHofRef[atoms[a]];
+  return kEvToKcal * (eElec + pwcctCoreCoreDev(nAtoms, atoms, coords)) - ref;
 }
 
 }  // namespace semiempirical

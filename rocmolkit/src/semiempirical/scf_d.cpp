@@ -27,13 +27,14 @@
 #include "core_hamiltonian_d_device.h"
 #include "energy_device.h"  // nuclearRepulsionAm1Dev, heatOfFormationKcalDev
 #include "pm6_params.h"     // pm6ValenceElectrons
+#include "pwcct_device.h"   // heatOfFormationPm6Kcal (canonical/MOPAC core-core)
 #include "scf_d_device.h"
 
 namespace nvMolKit {
 namespace semiempirical {
 
 bool pm6dCharges(int nAtoms, const int* atoms, const double* coords, double* q,
-                 double* hofKcal, int maxIter, double convTol) {
+                 double* hofKcal, int maxIter, double convTol, double* hofPm6Kcal) {
   if (nAtoms <= 0) return false;
 
   std::vector<AtomIntParams> ap(nAtoms);
@@ -69,6 +70,8 @@ bool pm6dCharges(int nAtoms, const int* atoms, const double* coords, double* q,
     const double eNuc = nuclearRepulsionAm1Dev(nAtoms, ap.data(), coords);
     *hofKcal = heatOfFormationKcalDev(eElec, eNuc, nAtoms, ap.data());
   }
+  if (hofPm6Kcal != nullptr)
+    *hofPm6Kcal = heatOfFormationPm6Kcal(eElec, nAtoms, atoms, coords);
   return true;
 }
 
