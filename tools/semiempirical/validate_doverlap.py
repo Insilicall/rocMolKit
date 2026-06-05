@@ -29,10 +29,10 @@ ANG_TO_BOHR = 1.0 / 0.529167
 # zeta_d (valence d Slater exponent) and zeta_s per element, from the PM6 table
 # (rocmolkit/src/semiempirical/pm6_params_data.h). Only the elements used in the
 # golden d-overlap pairs.
-# zeta_d of the heavy atom and zeta_s of the light atom, exact PM6 table values
-# (rocmolkit/src/semiempirical/pm6_params_data.h).
+# Exact PM6 table values (rocmolkit/src/semiempirical/pm6_params_data.h).
 ZETA_D = {15: 1.23036, 16: 3.109401, 17: 1.32403}
 ZETA_S_TBL = {1: 1.26864, 6: 2.04756, 8: 5.42175, 15: 2.15803, 16: 2.192844, 17: 2.63705}
+ZETA_P_TBL = {6: 1.70284, 8: 2.27096, 15: 1.80534, 16: 1.841078, 17: 2.11815}
 
 
 def _aintgs(alpha: float, n: int = 7):
@@ -76,31 +76,77 @@ def ds_block(zd: float, zs: float, Rb: float, ca, cb, sa, sb):
             S311 * s3 * sa * ca * sb ** 2]
 
 
+def dp_block(zd: float, zp: float, Rb: float, ca, cb, sa, sb):
+    """d-p overlap block (5 d-orbitals on A, 3 p on B), jcall 5 (qn3 d - qn2 p).
+    Returns a 5x3 list [d-orbital][p-orbital] for di[4:9, 1:4]."""
+    al = 0.5 * Rb * (zd + zp)
+    be = 0.5 * Rb * (zd - zp)
+    A = _aintgs(al)
+    B = _bintgs(be)
+    s321 = (zp ** 2.5 * zd ** 3.5 * Rb ** 6
+            * ((A[2] * (3 * B[0] - B[2]) + A[3] * (B[1] + B[3]) - A[4] * (B[0] + B[2]) - A[5] * (3 * B[3] - B[1]))
+               - (A[0] * (3 * B[2] - B[4]) + A[1] * (B[3] + B[5]) - A[2] * (B[2] + B[4]) - A[3] * (3 * B[5] - B[3])))
+            / (96.0 * math.sqrt(2.0)))
+    s322 = (zp ** 2.5 * zd ** 3.5 * Rb ** 6
+            * (((A[4] - A[2]) * (B[0] - B[2]) + (A[3] - A[5]) * (-B[1] + B[3]))
+               - ((A[2] - A[0]) * (B[2] - B[4]) + (A[1] - A[3]) * (-B[3] + B[5])))
+            / (32.0 * math.sqrt(6.0)))
+    s3 = math.sqrt(3.0)
+    s34 = math.sqrt(0.75)
+    return [
+        [-(s321 * s34 * (2 * ca**2 - 1) * sb**2 * ca * sb - s322 * ((2 * ca**2 - 1) * sb * cb * ca * cb + 2 * sa * ca * sb * sa)),
+         -(s321 * s34 * (2 * ca**2 - 1) * sb**2 * sa * sb - s322 * ((2 * ca**2 - 1) * sb * cb * sa * cb - 2 * sa * ca * sb * ca)),
+         -(s321 * s34 * (2 * ca**2 - 1) * sb**2 * cb + s322 * ((2 * ca**2 - 1) * sb * cb * sb))],
+        [-(s321 * s3 * ca * sb * cb * ca * sb - s322 * (ca * (2 * cb**2 - 1) * ca * cb + sa * cb * sa)),
+         -(s321 * s3 * ca * sb * cb * sa * sb - s322 * (ca * (2 * cb**2 - 1) * sa * cb - sa * cb * ca)),
+         -(s321 * s3 * ca * sb * cb * cb + s322 * (ca * (2 * cb**2 - 1) * sb))],
+        [-(s321 * (cb**2 - 0.5 * sb**2) * ca * sb + s322 * s3 * sb * cb * ca * cb),
+         -(s321 * (cb**2 - 0.5 * sb**2) * sa * sb + s322 * s3 * sb * cb * sa * cb),
+         -(s321 * (cb**2 - 0.5 * sb**2) * cb - s322 * s3 * sb * cb * sb)],
+        [-(s321 * s3 * sa * sb * cb * ca * sb - s322 * ((sa * (2 * cb**2 - 1)) * ca * cb - ca * cb * sa)),
+         -(s321 * s3 * sa * sb * cb * sa * sb - s322 * ((sa * (2 * cb**2 - 1)) * sa * cb + ca * cb * ca)),
+         -(s321 * s3 * sa * sb * cb * cb + s322 * ((sa * (2 * cb**2 - 1)) * sb))],
+        [-(s321 * s3 * sa * ca * sb**2 * ca * sb - s322 * (2 * sa * ca * sb * cb * ca * cb - sb * (2 * ca**2 - 1) * sa)),
+         -(s321 * s3 * sa * ca * sb**2 * sa * sb - s322 * (2 * sa * ca * sb * cb * sa * cb + sb * (2 * ca**2 - 1) * ca)),
+         -(s321 * s3 * sa * ca * sb**2 * cb + s322 * (2 * sa * ca * sb * cb * sb))],
+    ]
+
+
+def _angles(cB, R):
+    v = [c / R for c in cB]
+    xy = math.hypot(v[0], v[1])
+    cb = v[2]
+    sb = xy
+    ca = v[0] / xy if xy >= 1e-10 else 1.0
+    sa = v[1] / xy if xy >= 1e-10 else 0.0
+    return ca, cb, sa, sb
+
+
 def main() -> int:
     golden = json.loads(GOLDEN.read_text())
     worst = 0.0
     fails = 0
     for e in golden:
         zA, zB = e["zA"], e["zB"]
-        if zB != 1:  # only the d-s (heavy-d to H) block is ported so far
-            continue
-        R = e["R"]
-        Rb = R * ANG_TO_BOHR
-        cB = e["coordB"]
-        v = [c / R for c in cB]
-        xy = math.hypot(v[0], v[1])
-        cb = v[2]
-        sb = xy
-        ca = v[0] / xy if xy >= 1e-10 else 1.0
-        sa = v[1] / xy if xy >= 1e-10 else 0.0
-        mine = ds_block(ZETA_D[zA], ZETA_S_TBL[zB], Rb, ca, cb, sa, sb)
-        gold = [e["S"][i][0] for i in range(4, 9)]
-        d = max(abs(a - b) for a, b in zip(mine, gold))
+        Rb = e["R"] * ANG_TO_BOHR
+        ca, cb, sa, sb = _angles(e["coordB"], e["R"])
+        S = e["S"]
+        if zB == 1:  # d-s block (heavy-d to H)
+            mine = ds_block(ZETA_D[zA], ZETA_S_TBL[zB], Rb, ca, cb, sa, sb)
+            gold = [S[i][0] for i in range(4, 9)]
+            d = max(abs(a - b) for a, b in zip(mine, gold))
+            label = "d-s"
+        elif zB in (6, 8):  # d-p block (heavy-d to a 2nd-row p atom)
+            mine = dp_block(ZETA_D[zA], ZETA_P_TBL[zB], Rb, ca, cb, sa, sb)
+            d = max(abs(mine[i][j] - S[4 + i][1 + j]) for i in range(5) for j in range(3))
+            label = "d-p"
+        else:
+            continue  # d-d (heavy-heavy) block: remaining work
         worst = max(worst, d)
         fails += 0 if d < 1e-6 else 1
-        print(f"{zA}-{zB} d-s  max|dS|={d:.2e}  {'OK' if d < 1e-6 else '** FAIL'}")
+        print(f"{zA}-{zB} {label}  max|dS|={d:.2e}  {'OK' if d < 1e-6 else '** FAIL'}")
 
-    print(f"\nd-s block worst |dS| = {worst:.2e}  "
+    print(f"\nd-s + d-p blocks worst |dS| = {worst:.2e}  "
           f"({'bit-exact vs oracle golden' if fails == 0 else f'{fails} FAILED'})")
     return 1 if fails else 0
 
