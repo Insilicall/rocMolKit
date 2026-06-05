@@ -46,6 +46,17 @@ bool pm6dGradient(int nAtoms, const int* atoms, const double* coords, double* gr
                   double* energyEv = nullptr, int maxIter = 800, double convTol = 1e-10,
                   double step = 1e-5);
 
+// PM6_D geometry optimization (L-BFGS with backtracking/Armijo line search) using
+// the frozen-density gradient. coordsIn: nAtoms*3 row-major (Angstrom) start;
+// coordsOut receives the optimized geometry. Converges when the RMS gradient falls
+// below gradTol (eV/Angstrom). If non-null, energyEv / gradRms / nIter receive the
+// final energy (eV), RMS gradient, and iteration count. Returns true if the RMS
+// gradient reached gradTol within maxIter (else false with the best geometry so
+// far in coordsOut). Mirrors the oracle's nddo_optimize.
+bool pm6dOptimize(int nAtoms, const int* atoms, const double* coordsIn, double* coordsOut,
+                  double* energyEv = nullptr, double* gradRms = nullptr, int* nIter = nullptr,
+                  int maxIter = 50, double gradTol = 0.005);
+
 }  // namespace semiempirical
 }  // namespace nvMolKit
 

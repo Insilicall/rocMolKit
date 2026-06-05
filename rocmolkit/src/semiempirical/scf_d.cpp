@@ -20,6 +20,7 @@
 
 #include "scf_d.h"
 
+#include <cmath>
 #include <vector>
 
 #include "core_hamiltonian.h"  // gatherAtomIntParamsD
@@ -136,6 +137,100 @@ bool pm6dGradient(int nAtoms, const int* atoms, const double* coords, double* gr
     }
   }
   return true;
+}
+
+bool pm6dOptimize(int nAtoms, const int* atoms, const double* coordsIn, double* coordsOut,
+                  double* energyEv, double* gradRms, int* nIter, int maxIter, double gradTol) {
+  if (nAtoms <= 0) return false;
+  const int nv = 3 * nAtoms;
+  std::vector<double> coords(coordsIn, coordsIn + nv), grad(nv), gNew(nv), trial(nv);
+  double E = 0.0;
+  if (!pm6dGradient(nAtoms, atoms, coords.data(), grad.data(), &E)) return false;
+
+  const int m = 8;
+  std::vector<std::vector<double>> sHist, yHist;
+  std::vector<double> rhoHist;
+
+  auto dot = [nv](const double* a, const double* b) {
+    double s = 0.0;
+    for (int i = 0; i < nv; ++i) s += a[i] * b[i];
+    return s;
+  };
+
+  int it = 0;
+  double gRms = std::sqrt(dot(grad.data(), grad.data()) / nv);
+  for (; it < maxIter && gRms >= gradTol; ++it) {
+    // L-BFGS two-loop recursion for the search direction.
+    const int h = static_cast<int>(sHist.size());
+    std::vector<double> q(grad), alpha(h), r(nv), dir(nv);
+    for (int k = h - 1; k >= 0; --k) {
+      alpha[k] = rhoHist[k] * dot(sHist[k].data(), q.data());
+      for (int i = 0; i < nv; ++i) q[i] -= alpha[k] * yHist[k][i];
+    }
+    const double gamma = h > 0 ? dot(sHist[h - 1].data(), yHist[h - 1].data())
+                                     / dot(yHist[h - 1].data(), yHist[h - 1].data())
+                               : 0.1;
+    for (int i = 0; i < nv; ++i) r[i] = gamma * q[i];
+    for (int k = 0; k < h; ++k) {
+      const double beta = rhoHist[k] * dot(yHist[k].data(), r.data());
+      for (int i = 0; i < nv; ++i) r[i] += (alpha[k] - beta) * sHist[k][i];
+    }
+    for (int i = 0; i < nv; ++i) dir[i] = -r[i];
+    double gd = dot(grad.data(), dir.data());
+    double step = 1.0;
+    if (gd > 0.0) {  // not a descent direction -> reset to steepest descent
+      for (int i = 0; i < nv; ++i) dir[i] = -grad[i];
+      gd = -dot(grad.data(), grad.data());
+      step = 0.05;
+    }
+
+    // Backtracking line search (Armijo sufficient-decrease on the re-solved energy).
+    double Enew = 0.0;
+    bool ok = false;
+    for (int ls = 0; ls < 15; ++ls) {
+      for (int i = 0; i < nv; ++i) trial[i] = coords[i] + step * dir[i];
+      if (pm6dGradient(nAtoms, atoms, trial.data(), gNew.data(), &Enew)
+          && Enew <= E + 1e-4 * step * gd) {
+        ok = true;
+        break;
+      }
+      step *= 0.5;
+    }
+    if (!ok) {  // line search failed -> take a tiny step and continue
+      step = 1e-4;
+      for (int i = 0; i < nv; ++i) trial[i] = coords[i] + step * dir[i];
+      if (!pm6dGradient(nAtoms, atoms, trial.data(), gNew.data(), &Enew)) break;
+    }
+
+    // Curvature pair; update the limited-memory history when s.y is positive.
+    std::vector<double> sK(nv), yK(nv);
+    double sy = 0.0;
+    for (int i = 0; i < nv; ++i) {
+      sK[i] = step * dir[i];
+      yK[i] = gNew[i] - grad[i];
+      sy += sK[i] * yK[i];
+    }
+    coords = trial;
+    grad = gNew;
+    E = Enew;
+    if (sy > 1e-10) {
+      sHist.push_back(std::move(sK));
+      yHist.push_back(std::move(yK));
+      rhoHist.push_back(1.0 / sy);
+      if (static_cast<int>(sHist.size()) > m) {
+        sHist.erase(sHist.begin());
+        yHist.erase(yHist.begin());
+        rhoHist.erase(rhoHist.begin());
+      }
+    }
+    gRms = std::sqrt(dot(grad.data(), grad.data()) / nv);
+  }
+
+  for (int i = 0; i < nv; ++i) coordsOut[i] = coords[i];
+  if (energyEv) *energyEv = E;
+  if (gradRms) *gradRms = gRms;
+  if (nIter) *nIter = it;
+  return gRms < gradTol;
 }
 
 }  // namespace semiempirical

@@ -123,6 +123,45 @@ boost::python::object pm6dGradientBatch(const boost::python::list& mols) {
   return out;
 }
 
+// PM6_D geometry optimization (L-BFGS on the frozen-density gradient) for a list
+// of RDKit molecules (each with a 3D conformer used as the starting geometry).
+// Returns a list of length len(mols); each element is either a tuple
+// (optimized_coords, energy_eV, grad_rms, converged) -- where optimized_coords is
+// a list of nAtoms (x, y, z) in Angstrom -- or None when the molecule is
+// unsupported / open-shell / the initial SCF did not converge.
+boost::python::object pm6dOptimizeBatch(const boost::python::list& mols) {
+  const int nMol = static_cast<int>(len(mols));
+  boost::python::list out;
+  for (int m = 0; m < nMol; ++m) {
+    const RDKit::ROMol* mol = extract<const RDKit::ROMol*>(boost::python::object(mols[m]));
+    const int na = static_cast<int>(mol->getNumAtoms());
+    const RDKit::Conformer& conf = mol->getConformer();  // throws if none
+    std::vector<int> atoms(na);
+    std::vector<double> coords(3 * na);
+    for (int a = 0; a < na; ++a) {
+      atoms[a] = static_cast<int>(mol->getAtomWithIdx(a)->getAtomicNum());
+      const RDGeom::Point3D& p = conf.getAtomPos(a);
+      coords[3 * a] = p.x;
+      coords[3 * a + 1] = p.y;
+      coords[3 * a + 2] = p.z;
+    }
+    std::vector<double> opt(3 * na);
+    double E = 0.0, gRms = 0.0;
+    int nIter = 0;
+    const bool conv = nvMolKit::semiempirical::pm6dOptimize(
+        na, atoms.data(), coords.data(), opt.data(), &E, &gRms, &nIter);
+    if (gRms == 0.0 && nIter == 0 && !conv) {
+      out.append(boost::python::object());  // None (initial SCF failed)
+      continue;
+    }
+    boost::python::list xyz;
+    for (int a = 0; a < na; ++a)
+      xyz.append(boost::python::make_tuple(opt[3 * a], opt[3 * a + 1], opt[3 * a + 2]));
+    out.append(boost::python::make_tuple(xyz, E, gRms, conv));
+  }
+  return out;
+}
+
 }  // namespace
 
 BOOST_PYTHON_MODULE(_Semiempirical) {
@@ -139,4 +178,11 @@ BOOST_PYTHON_MODULE(_Semiempirical) {
       "[(gx, gy, gz), ...] (length nAtoms), or None per molecule if unsupported / "
       "open-shell / non-converged. Hellmann-Feynman frozen-density gradient: one "
       "SCF + 6*nAtoms integral passes (no SCF re-solve).");
+  def("PM6DOptimize", &pm6dOptimizeBatch, (arg("molecules")),
+      "PM6_D (d-orbital NDDO) geometry optimization (L-BFGS on the frozen-density "
+      "gradient) for a list of RDKit molecules; each conformer is the starting "
+      "geometry. Returns a list of (optimized_coords, energy_eV, grad_rms, "
+      "converged) tuples -- optimized_coords is a list of nAtoms (x, y, z) in "
+      "Angstrom -- or None per molecule if unsupported / open-shell / the initial "
+      "SCF did not converge.");
 }
