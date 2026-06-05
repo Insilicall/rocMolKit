@@ -27,6 +27,7 @@
 
 #include "semiempirical/scf_d_kernels.h"  // scfBatchDGpu
 #include "semiempirical/pm6_params.h"     // pm6NumOrbitals
+#include "semiempirical/h4_device.h"      // pm6dD3H4Correction
 
 namespace {
 
@@ -69,16 +70,21 @@ boost::python::object pm6dChargesBatch(const boost::python::list& mols) {
       chargesAll.data(), hofAll.data(), convAll.data());
 
   boost::python::list out;
-  int off = 0;
+  int off = 0, coff = 0;
   for (int m = 0; m < nMol; ++m) {
+    const int na = molNAtoms[m];
     if (!ok || !convAll[m]) {
       out.append(boost::python::object());  // None
     } else {
       boost::python::list q;
-      for (int a = 0; a < molNAtoms[m]; ++a) q.append(chargesAll[off + a]);
-      out.append(boost::python::make_tuple(q, hofAll[m]));
+      for (int a = 0; a < na; ++a) q.append(chargesAll[off + a]);
+      // PM6-D3H4 = NDDO heat of formation + the post-SCF D3 + H4 + H-H correction.
+      const double corr = nvMolKit::semiempirical::pm6dD3H4Correction(
+          na, &atomsAll[coff], &coordsAll[3 * coff]);
+      out.append(boost::python::make_tuple(q, hofAll[m], hofAll[m] + corr));
     }
-    off += molNAtoms[m];
+    off += na;
+    coff += na;
   }
   return out;
 }
@@ -88,7 +94,9 @@ boost::python::object pm6dChargesBatch(const boost::python::list& mols) {
 BOOST_PYTHON_MODULE(_Semiempirical) {
   def("PM6DCharges", &pm6dChargesBatch, (arg("molecules")),
       "PM6_D (d-orbital NDDO) Mulliken charges + heat of formation for a list of "
-      "RDKit molecules with 3D conformers. Returns a list of (charges, hof_kcal) "
-      "tuples (or None per molecule if unsupported / open-shell / non-converged). "
-      "The whole d-orbital SCF runs on the GPU.");
+      "RDKit molecules with 3D conformers. Returns a list of "
+      "(charges, hof_nddo_kcal, hof_d3h4_kcal) tuples (or None per molecule if "
+      "unsupported / open-shell / non-converged); hof_d3h4 adds the post-SCF "
+      "PM6-D3H4 correction (D3 dispersion + H4 H-bond + H-H repulsion). The whole "
+      "d-orbital SCF runs on the GPU.");
 }
