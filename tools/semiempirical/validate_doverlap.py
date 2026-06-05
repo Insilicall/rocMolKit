@@ -112,6 +112,42 @@ def dp_block(zd: float, zp: float, Rb: float, ca, cb, sa, sb):
     ]
 
 
+def dd_block(zd1: float, zd2: float, Rb: float, ca, cb, sa, sb):
+    """d-d overlap 5x5 block (jcall 6, qn3 d - qn3 d). Slater-Koster outer
+    product of the (sigma, pi1, pi2, delta1, delta2) projection vectors weighted
+    by S331/S332/S333 — except the dyz-dxy cross term di[7,8]=di[8,7], whose
+    delta component does not factor rank-1 and is written explicitly."""
+    al = 0.5 * Rb * (zd1 + zd2)
+    be = 0.5 * Rb * (zd1 - zd2)
+    A = _aintgs(al)
+    B = _bintgs(be)
+    w = zd2 ** 3.5 * zd1 ** 3.5 * Rb ** 7
+    s333 = w * (((A[2] - 2 * A[4] + A[6]) * (B[0] - 2 * B[2] + B[4]))
+                - ((A[0] - 2 * A[2] + A[4]) * (B[2] - 2 * B[4] + B[6]))) / 768.0
+    s332 = -w * ((A[2] * (B[2] - B[0]) + A[4] * (B[0] - B[4]) - A[6] * (B[2] - B[4]))
+                 - (A[0] * (B[4] - B[2]) + A[2] * (B[2] - B[6]) - A[4] * (B[4] - B[6]))) / 192.0
+    s331 = w * ((A[2] * (9 * B[0] - 6 * B[2] + B[4]) - 2 * A[4] * (3 * B[0] - 2 * B[2] + 3 * B[4])
+                 + A[6] * (B[0] - 6 * B[2] + 9 * B[4]))
+                - (A[0] * (9 * B[2] - 6 * B[4] + B[6]) - 2 * A[2] * (3 * B[2] - 2 * B[4] + 3 * B[6])
+                   + A[4] * (B[2] - 6 * B[4] + 9 * B[6]))) / 1152.0
+    s3 = math.sqrt(3.0)
+    s34 = math.sqrt(0.75)
+    t = 2 * ca ** 2 - 1
+    sig = [s34 * t * sb ** 2, s3 * ca * sb * cb, cb ** 2 - 0.5 * sb ** 2, s3 * sa * sb * cb, s3 * sa * ca * sb ** 2]
+    p1 = [sb * cb * t, ca * (2 * cb ** 2 - 1), -s3 * sb * cb, sa * (2 * cb ** 2 - 1), 2 * sa * ca * sb * cb]
+    p2 = [2 * sa * ca * sb, sa * cb, 0.0, -ca * cb, -t * sb]
+    d1 = [t * (cb ** 2 + 0.5 * sb ** 2), -ca * sb * cb, s34 * sb ** 2, -sa * sb * cb, 2 * sa * ca * cb ** 2 + sa * ca * sb ** 2]
+    d2 = [2 * sa * ca * cb, -sa * sb, 0.0, ca * sb, -cb * t]
+    M = [[s331 * sig[i] * sig[j] + s332 * (p1[i] * p1[j] + p2[i] * p2[j])
+          + s333 * (d1[i] * d1[j] + d2[i] * d2[j]) for j in range(5)] for i in range(5)]
+    e78 = (s331 * (s3 * sa * sb * cb) * (s3 * sa * ca * sb ** 2)
+           + s332 * ((sa * (2 * cb ** 2 - 1)) * (2 * sa * ca * sb * cb) + (ca * cb) * ((2 * ca ** 2 - 1) * sb))
+           + s333 * (-(sa * sb * cb) * (2 * sa * ca * cb ** 2 + sa * ca * sb ** 2) + ca * sb * cb * (2 * ca ** 2 - 1)))
+    M[3][4] = e78
+    M[4][3] = e78
+    return M
+
+
 def _angles(cB, R):
     v = [c / R for c in cB]
     xy = math.hypot(v[0], v[1])
@@ -140,13 +176,17 @@ def main() -> int:
             mine = dp_block(ZETA_D[zA], ZETA_P_TBL[zB], Rb, ca, cb, sa, sb)
             d = max(abs(mine[i][j] - S[4 + i][1 + j]) for i in range(5) for j in range(3))
             label = "d-p"
+        elif zB in ZETA_D:  # d-d block (heavy-d to heavy-d)
+            mine = dd_block(ZETA_D[zA], ZETA_D[zB], Rb, ca, cb, sa, sb)
+            d = max(abs(mine[i][j] - S[4 + i][4 + j]) for i in range(5) for j in range(5))
+            label = "d-d"
         else:
-            continue  # d-d (heavy-heavy) block: remaining work
+            continue
         worst = max(worst, d)
         fails += 0 if d < 1e-6 else 1
         print(f"{zA}-{zB} {label}  max|dS|={d:.2e}  {'OK' if d < 1e-6 else '** FAIL'}")
 
-    print(f"\nd-s + d-p blocks worst |dS| = {worst:.2e}  "
+    print(f"\nd-s + d-p + d-d blocks worst |dS| = {worst:.2e}  "
           f"({'bit-exact vs oracle golden' if fails == 0 else f'{fails} FAILED'})")
     return 1 if fails else 0
 
