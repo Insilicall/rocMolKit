@@ -47,6 +47,10 @@ NVMOLKIT_HD inline bool dChargeSeparations(int z, double& dp, double& ds, double
     dp = 0.75100923; ds = 1.10740952; dd = 1.51053979;
     rho3 = 0.30216047; rho4 = 1.03731998; rho5 = 2.34288535; rho6 = 0.72430196;
   } else {
+    // Br (35) and I (53) also carry d-orbitals, but their qn4/qn5 diatomic
+    // overlap radials (and, for I, a corrected parameter row) are not yet
+    // ported; see docs. The charge separations themselves are known and could be
+    // baked here once the overlap lands.
     return false;
   }
   return true;
