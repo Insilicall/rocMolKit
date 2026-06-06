@@ -50,14 +50,23 @@ int pm6ValenceElectrons(int z) {
   if (z == 30 || z == 48 || z == 80) {  // Zn, Cd, Hg (group-12, d10 core -> sp, 2 s valence)
     return 2;
   }
-  // Active-d transition metals: tore = group number (s + d valence electrons),
-  // matching MOPAC/PYSEQM tore. Only metals whose one-center d W (onecenter_d_data.h)
-  // AND charge separations (two_center_d_device.h dChargeSeparations) are baked can
-  // run the SCF -- currently Sc(21), a d0 closed-shell case (ScF3). The remaining
-  // active-d metals need their W + charge separations baked before being enabled.
-  if (z == 21) {                   // Sc -> 3 (4s^2 3d^1, tore=3)
-    return 3;
-  }
+  // Active-d transition metals (tore = group number, s + d valence electrons):
+  // NOT YET ENABLED. The qnD=qn-1 OVERLAP is bit-exact to MOPAC (validate_pm6d_tm)
+  // and every SCALAR input to the d two-center two-electron build matches MOPAC
+  // 23.2.5 bit-exact for Sc -- the d charge separations (dp/ds/dd), the additive
+  // radii (rho3..rho6 via POIJ), the sp dipole/quadrupole multipoles (da/qa/rho0..2,
+  // qn_sp=4) and the one-center d W (qn_d=3). H_core (overlap*beta + the e1b
+  // electron-core monopole) reproduces MOPAC's dumped one-electron matrix to the
+  // EV-truncation floor. BUT the d-orbital two-center two-ELECTRON Fock is wrong:
+  // ||[F,P]|| at MOPAC's converged density is 1.26 for ScF3 vs 0.0017 for the
+  // validated main-group H2S, so MOPAC's density is not stationary for the engine's
+  // Fock and the SCF converges to Sc=+1.350 vs MOPAC +1.246. The error is in the
+  // integrals coupling the metal's 3d orbitals to a ligand's p-multipoles (these do
+  // NOT enter e1b/H_core, which is why H_core matched) -- riLocalYX/the d-multipole
+  // assembly (PYSEQM-derived) diverges from MOPAC's MNDO-d reppd2/rijkl/charg only
+  // when qn_sp != qn_d (the active-d case); it is bit-exact for main-group d-atoms
+  // (P/S/Cl/Br/I, qn_sp=qn_d). Enabling Sc would be silent-wrong, so tore stays 0
+  // until the d two-electron two-center matches MOPAC. See validate_pm6d_tm.py.
   if (z >= 31 && z <= 36) {        // Ga..Kr
     return z - 28;
   }

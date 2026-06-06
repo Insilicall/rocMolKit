@@ -173,15 +173,28 @@ if __name__ == "__main__":
     print(f"\nworst |dS| = {worst:.2e}  "
           f"{'OK (active-d TM overlap reproduced bit-exact)' if ok else '** MISMATCH'}")
 
-    # Diagnostic: the active-d TM SCF (charges) is NOT yet bit-exact -- only Sc has
-    # W + charge separations baked, and the d-block SCF still differs from the
-    # PYSEQM oracle. This section reports the gap honestly; it does not gate the
-    # exit code (the OVERLAP groundwork above is the validated deliverable).
+    # The active-d TM OVERLAP (above) is bit-exact to MOPAC and is the validated
+    # deliverable. The SCF CHARGES are NOT yet bit-exact, so the active-d metals
+    # stay DISABLED in pm6ValenceElectrons (tore=0 -> the SCF refuses them) to avoid
+    # silent-wrong output. Root cause, localized for Sc/ScF3:
+    #   * overlap, d charge separations (dp/ds/dd), additive radii (rho3..rho6),
+    #     sp multipoles (da/qa/rho0..2, qn_sp=4) and the one-center d W (qn_d=3) all
+    #     match MOPAC 23.2.5 bit-exact; H_core matches MOPAC's dumped one-electron
+    #     matrix to the EV-truncation floor;
+    #   * but the d two-center two-ELECTRON Fock is wrong: ||[F,P]|| at MOPAC's
+    #     converged density is ~1.26 for ScF3 vs ~0.0017 for the validated main-group
+    #     H2S, so the SCF converges to Sc=+1.350 (MOPAC +1.246). The error is in the
+    #     integrals coupling the 3d orbitals to a ligand's p-multipoles (these never
+    #     enter e1b/H_core); riLocalYX (PYSEQM-derived) diverges from MOPAC's MNDO-d
+    #     reppd2/rijkl/charg only when qn_sp != qn_d (active-d), being bit-exact for
+    #     main-group d-atoms (P/S/Cl/Br/I, qn_sp=qn_d).
+    # The driver call below reports the gap honestly; with Sc disabled it returns
+    # ok=0 (the SCF refuses the metal). It does not gate the exit code.
     drv = os.environ.get("DRV_TM", "/tmp/drv_tm")
     if os.path.exists(drv):
         import subprocess
-        print("\n--- ScF3 SCF charge diagnostic (NOT bit-exact yet) ---")
-        print("reference  Sc=+1.24554 (MOPAC) / +1.27242 (PYSEQM oracle), F~-0.42")
+        print("\n--- ScF3 SCF charge diagnostic (active-d DISABLED: ok=0 expected) ---")
+        print("reference  Sc=+1.24554 (MOPAC); engine (when forced on) gave +1.350")
         stdin = ("4 0 1\n21 0.0 0.0 0.0\n9 1.91 0.0 0.0\n"
                  "9 -0.955 1.654 0.0\n9 -0.955 -1.654 0.0\n")
         r = subprocess.run([drv], input=stdin, capture_output=True, text=True)
