@@ -28,6 +28,7 @@
 #include "device_macros.h"
 #include "overlap_device.h"  // ovdetail::aintgs / bintgs / kOvAngToBohr
 #include "overlap_d_interhalide_device.h"  // interhalideOverlapDDev (mixed heavy halogens)
+#include "overlap_mopac_device.h"  // mopacovl::mopDiat (general MOPAC Slater overlap)
 
 namespace nvMolKit {
 namespace semiempirical {
@@ -363,85 +364,20 @@ NVMOLKIT_HD inline int diatomOverlapDDev(const AtomIntParams& pA, const double c
   const int nA = pA.nOrb, nB = pB.nOrb;
   if (nA == 0 || nB == 0) return 0;
 
-  if (nA < nB) {  // ensure the d-bearing / larger atom is A; transpose at the end
-    double tmp[81];
-    diatomOverlapDDev(pB, coordB, pA, coordA, tmp);
-    for (int i = 0; i < nA; ++i)
-      for (int j = 0; j < nB; ++j) out[i * nB + j] = tmp[j * nA + i];
-    return nA * nB;
-  }
-
-  // Heteronuclear d-d pair whose d shells have DIFFERENT principal quantum
-  // numbers (mixed heavy halogens: Br-Cl/Br-S, I-Cl/I-S, I-Br, and P/S-with-
-  // heavier-halogen). The reverse-dsBlock trick can't express the s-d/p-d block
-  // of such a pair (e.g. I-Cl would need a jcallds(dqn=3, partner qn=5) formula
-  // PYSEQM never tabulates), so build the full 9x9 from the faithful transpiled
-  // interhalide kernel. Atom A must be the heavier-qn atom (dqn_A >= dqn_B) to
-  // match the jcall derivation; transpose when the caller's pA is the lighter.
-  if (nA == 9 && nB == 9 && pA.qnD != pB.qnD) {
-    const bool aHi = pA.qn >= pB.qn;
-    const AtomIntParams& hi = aHi ? pA : pB;
-    const AtomIntParams& lo = aHi ? pB : pA;
-    const double* chi = aHi ? coordA : coordB;
-    const double* clo = aHi ? coordB : coordA;
-    int jc = (hi.qn == 5 && lo.qn == 4) ? 9 : (hi.qn == 5) ? 853 : 7;  // (5,3)->853,(4,3)->7
-    const double za[3] = {hi.zetaS, hi.zetaP, hi.zetaD};
-    const double zb[3] = {lo.zetaS, lo.zetaP, lo.zetaD};
-    const double Rvec[3] = {clo[0] - chi[0], clo[1] - chi[1], clo[2] - chi[2]};
-    const double R = std::sqrt(Rvec[0] * Rvec[0] + Rvec[1] * Rvec[1] + Rvec[2] * Rvec[2]);
-    const double Rb = R * ovdetail::kOvAngToBohr;
-    const double v[3] = {Rvec[0] / R, Rvec[1] / R, Rvec[2] / R};
-    double ca, cb, sa, sb;
-    bondAngles(v, ca, cb, sa, sb);
-    double di[81];
-    interhalideOverlapDDev(za, zb, Rb, jc, ca, cb, sa, sb, di);  // [hi-orb, lo-orb]
-    if (aHi)
-      for (int i = 0; i < 81; ++i) out[i] = di[i];
-    else
-      for (int i = 0; i < 9; ++i)
-        for (int j = 0; j < 9; ++j) out[i * 9 + j] = di[j * 9 + i];
-    return nA * nB;
-  }
-
-  // sp rows/cols (d positions left zero) in the nA x nB layout.
-  diatomOverlapSpDev(pA, coordA, pB, coordB, out);
-  if (nA < 9) return nA * nB;  // A has no d shell -> done
-
-  const double Rvec[3] = {coordB[0] - coordA[0], coordB[1] - coordA[1], coordB[2] - coordA[2]};
-  const double R = std::sqrt(Rvec[0] * Rvec[0] + Rvec[1] * Rvec[1] + Rvec[2] * Rvec[2]);
-  const double Rb = R * ovdetail::kOvAngToBohr;
-  const double v[3] = {Rvec[0] / R, Rvec[1] / R, Rvec[2] / R};
-  double ca, cb, sa, sb;
-  bondAngles(v, ca, cb, sa, sb);
-
-  // A's d rows (4..8) against B's s / p / d columns.
-  double ds[5];
-  dsBlockDev(pA.zetaD, pB.zetaS, Rb, pA.qnD, pB.qn, ca, cb, sa, sb, ds);
-  for (int m = 0; m < 5; ++m) out[(4 + m) * nB + 0] = ds[m];
-  if (nB >= 4) {
-    double dp[15];
-    dpBlockDev(pA.zetaD, pB.zetaP, Rb, pA.qnD, pB.qn, ca, cb, sa, sb, dp);
-    for (int m = 0; m < 5; ++m)
-      for (int q = 0; q < 3; ++q) out[(4 + m) * nB + (1 + q)] = dp[m * 3 + q];
-  }
-  if (nB == 9) {
-    double dd[25];
-    ddBlockDev(pA.zetaD, pB.zetaD, Rb, pA.qnD, ca, cb, sa, sb, dd);
-    for (int m = 0; m < 5; ++m)
-      for (int n = 0; n < 5; ++n) out[(4 + m) * nB + (4 + n)] = dd[m * 5 + n];
-    // A's sp rows (s,p) against B's d columns: S(s/p_A, d_B) = the d-s/d-p block
-    // of the reversed pair (B's d with A's s/p), bond B->A = -v.
-    const double vr[3] = {-v[0], -v[1], -v[2]};
-    double car, cbr, sar, sbr;
-    bondAngles(vr, car, cbr, sar, sbr);
-    double dsr[5];
-    dsBlockDev(pB.zetaD, pA.zetaS, Rb, pB.qnD, pA.qn, car, cbr, sar, sbr, dsr);
-    for (int m = 0; m < 5; ++m) out[0 * nB + (4 + m)] = dsr[m];
-    double dpr[15];
-    dpBlockDev(pB.zetaD, pA.zetaP, Rb, pB.qnD, pA.qn, car, cbr, sar, sbr, dpr);
-    for (int m = 0; m < 5; ++m)
-      for (int q = 0; q < 3; ++q) out[(1 + q) * nB + (4 + m)] = dpr[m * 3 + q];
-  }
+  // General analytic Slater overlap, ported bit-exact from MOPAC (mopDiat): one
+  // routine for any (n, l) incl. d, so every sp/d combination is handled --
+  // including metal-sp(qn 4/5/6) x ligand-d(qn 3), which the per-jcall
+  // dsBlock/dpBlock/ddBlock + interhalide tables below could not express. Same
+  // orbital order (s, px, py, pz, dx2-y2, dxz, dz2, dyz, dxy). Validated bit-exact
+  // to MOPAC's OVERLAP_MATRIX (validate_mopac_overlap_port.py). The legacy block
+  // builders (dsBlockDev/dpBlockDev/ddBlockDev/interhalideOverlapDDev) are kept
+  // for the component validators but no longer drive the SCF.
+  double di[81];
+  const double xj[3] = {coordB[0] - coordA[0], coordB[1] - coordA[1], coordB[2] - coordA[2]};
+  mopacovl::mopDiat(pA.qn, pA.zetaS, pA.zetaP, pA.zetaD, nA,
+                    pB.qn, pB.zetaS, pB.zetaP, pB.zetaD, nB, xj, di);
+  for (int i = 0; i < nA; ++i)
+    for (int j = 0; j < nB; ++j) out[i * nB + j] = di[i * 9 + j];
   return nA * nB;
 }
 
