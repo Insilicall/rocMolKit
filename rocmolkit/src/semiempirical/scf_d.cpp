@@ -88,11 +88,17 @@ bool pm6dCharges(int nAtoms, const int* atoms, const double* coords, double* q,
       ecom(n2), diisF(kScfDiisMax * n2), diisE(kScfDiisMax * n2);
   buildCoreHamiltonianDDev(nBasis, nAtoms, ap.data(), start.data(), norb.data(), coords, H.data());
 
+  // Two-center integral cache (computed once, reused every SCF iteration).
+  const int nPairs = nAtoms * (nAtoms - 1) / 2;
+  std::vector<int> intMeta(static_cast<size_t>(nPairs) * kPairMetaInts);
+  std::vector<double> intBlob(static_cast<size_t>(pm6dIntCacheDoubles(nAtoms, norb.data())));
+
   int conv = 0, niter = 0;
   double eElec = 0.0;
   scfLoopDDev(nBasis, nAtoms, ap.data(), start.data(), norb.data(), coords, H.data(), nElec / 2,
               maxIter, convTol, density.data(), eval.data(), F.data(), eigA.data(), C.data(),
-              Pnew.data(), ecom.data(), diisF.data(), diisE.data(), &conv, &niter, &eElec);
+              Pnew.data(), ecom.data(), diisF.data(), diisE.data(), &conv, &niter, &eElec,
+              intMeta.data(), intBlob.data());
   if (!conv) return false;
 
   for (int a = 0; a < nAtoms; ++a) {
@@ -147,11 +153,17 @@ bool pm6dGradient(int nAtoms, const int* atoms, const double* coords, double* gr
       ecom(n2), diisF(kScfDiisMax * n2), diisE(kScfDiisMax * n2);
   buildCoreHamiltonianDDev(nBasis, nAtoms, ap.data(), start.data(), norb.data(), coords, H.data());
 
+  // Two-center integral cache (computed once, reused every SCF iteration).
+  const int nPairs = nAtoms * (nAtoms - 1) / 2;
+  std::vector<int> intMeta(static_cast<size_t>(nPairs) * kPairMetaInts);
+  std::vector<double> intBlob(static_cast<size_t>(pm6dIntCacheDoubles(nAtoms, norb.data())));
+
   int conv = 0, niter = 0;
   double eElec = 0.0;
   scfLoopDDev(nBasis, nAtoms, ap.data(), start.data(), norb.data(), coords, H.data(), nElec / 2,
               maxIter, convTol, density.data(), eval.data(), F.data(), eigA.data(), C.data(),
-              Pnew.data(), ecom.data(), diisF.data(), diisE.data(), &conv, &niter, &eElec);
+              Pnew.data(), ecom.data(), diisF.data(), diisE.data(), &conv, &niter, &eElec,
+              intMeta.data(), intBlob.data());
   if (!conv) return false;
 
   if (energyEv != nullptr)

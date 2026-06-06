@@ -40,8 +40,13 @@ NVMOLKIT_HD inline void scfLoopDDev(int nBasis, int nAtoms, const AtomIntParams*
                                     const double* H, int nOcc, int maxIter, double convTol,
                                     double* density, double* eval, double* F, double* eigA,
                                     double* C, double* Pnew, double* ecom, double* diisF,
-                                    double* diisE, int* conv, int* niter, double* eElec) {
+                                    double* diisE, int* conv, int* niter, double* eElec,
+                                    int* intMeta, double* intBlob) {
   const int n2 = nBasis * nBasis;
+  // Hoist the geometry/param-only two-center integrals out of the SCF loop: they
+  // are identical every iteration, so compute them ONCE into the cache here and
+  // reuse via buildFockDDevCached below (pure arithmetic hoist, byte-identical).
+  precomputeTwoCenterDDev(nAtoms, ap, start, norb, coords, intMeta, intBlob);
   // Initial guess: diagonalize H_core with the d-orbital diagonals shifted far up
   // so d MOs are virtual at iteration 0 (matching the oracle) — this keeps the
   // SCF in the sp-occupied basin instead of collapsing into a d-occupied one.
@@ -58,7 +63,7 @@ NVMOLKIT_HD inline void scfLoopDDev(int nBasis, int nAtoms, const AtomIntParams*
   bool converged = false;
   int it = 0;
   for (it = 0; it < maxIter; ++it) {
-    buildFockDDev(nBasis, nAtoms, ap, start, norb, coords, H, density, F);
+    buildFockDDevCached(nBasis, nAtoms, ap, start, norb, intMeta, intBlob, H, density, F);
 
     // Pulay DIIS (same as the sp scfLoopDev) — extrapolate the Fock from the
     // commutator-error history. This resolves the d-orbital SCF to the oracle's
@@ -146,7 +151,7 @@ NVMOLKIT_HD inline void scfLoopDDev(int nBasis, int nAtoms, const AtomIntParams*
   *niter = it + 1;
 
   // Final Fock + electronic energy E_elec = 0.5 sum(P .* (H + F)).
-  buildFockDDev(nBasis, nAtoms, ap, start, norb, coords, H, density, F);
+  buildFockDDevCached(nBasis, nAtoms, ap, start, norb, intMeta, intBlob, H, density, F);
   double e = 0.0;
   for (int i = 0; i < n2; ++i) e += 0.5 * density[i] * (H[i] + F[i]);
   *eElec = e;

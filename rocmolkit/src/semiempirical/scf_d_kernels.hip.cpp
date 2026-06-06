@@ -52,7 +52,8 @@ __global__ void scfBatchDKernelCoop(int nMol, const AtomIntParams* ap, const int
                                     const int* norb, const double* coords, const int* atomOff,
                                     const int* nAtomsArr, const int* nBasisArr,
                                     const int* nOccArr, const long* scratchOff, double* scratch,
-                                    const int* ringOff, int* ringScratch, double* chargesOut,
+                                    const int* ringOff, int* ringScratch, const int* metaOff,
+                                    int* metaScratch, double* chargesOut,
                                     int* convOut, double* hofOut, double* hofPm6Out, int maxIter,
                                     double convTol) {
   const int m = blockIdx.x;  // one block (warp) per molecule
@@ -75,9 +76,12 @@ __global__ void scfBatchDKernelCoop(int nMol, const AtomIntParams* ap, const int
   double* diisF = ecom + n2;
   double* diisE = diisF + kScfDiisMax * n2;
   double* cs = diisE + kScfDiisMax * n2;  // per-pair (c,s) for the parallel Jacobi
+  double* intBlob = cs + (nB + 2);        // two-center integral cache (doubles)
 
-  // Round-robin tournament ring (ints) lives in a separate per-molecule buffer.
+  // Round-robin tournament ring (ints) + integral-cache meta (ints) live in
+  // separate per-molecule buffers.
   int* ring = &ringScratch[ringOff[m]];
+  int* intMeta = &metaScratch[metaOff[m]];
 
   // Core Hamiltonian: lane 0 builds it (O(nAtoms^2), cheap vs the SCF).
   if (lane == 0)
@@ -88,7 +92,7 @@ __global__ void scfBatchDKernelCoop(int nMol, const AtomIntParams* ap, const int
   double eElec = 0.0;
   scfLoopDDevCoop(nB, na, &ap[ao], &start[ao], &norb[ao], &coords[3 * ao], H, nOccArr[m],
                   maxIter, convTol, density, eval, F, eigA, C, Pnew, ecom, diisF, diisE,
-                  &conv, &niter, &eElec, lane, nLanes, sh, ring, cs);
+                  &conv, &niter, &eElec, lane, nLanes, sh, ring, cs, intMeta, intBlob);
 
   // Outputs: lane 0 emits charges + heats of formation (all small, O(nAtoms)).
   if (lane == 0) {
@@ -114,46 +118,63 @@ bool scfBatchDGpu(int nMol, const int* molNAtoms, const int* molNBasis,
                   int maxIter, double convTol, double* hofPm6All, const int* molCharge) {
   if (nMol <= 0) return true;
 
-  std::vector<int> atomOff(nMol), nOcc(nMol), ringOff(nMol);
+  std::vector<int> atomOff(nMol), nOcc(nMol), ringOff(nMol), metaOff(nMol);
   std::vector<long> scratchOff(nMol);
   int totAtoms = 0;
-  long totScratch = 0, totRing = 0;
-  for (int m = 0; m < nMol; ++m) {
-    atomOff[m] = totAtoms;
-    scratchOff[m] = totScratch;
-    ringOff[m] = static_cast<int>(totRing);
-    const long nB = molNBasis[m];
-    totAtoms += molNAtoms[m];
-    // H,density,F,eigA,C,Pnew,ecom (7 n^2) + diisF,diisE (2*kScfDiisMax n^2)
-    // + eval (n) + cs (per-pair cos/sin for the parallel Jacobi: nB+2 doubles).
-    totScratch += (7 + 2 * kScfDiisMax) * nB * nB + nB + (nB + 2);
-    // Tournament ring: (nB+1)&~1 ints, padded to nB+2 for safety.
-    totRing += nB + 2;
-  }
+  for (int m = 0; m < nMol; ++m) totAtoms += molNAtoms[m];
 
-  // Gather PM6_D params (nOrb up to 9) + molecule-local start/norb.
+  // Gather PM6_D params (nOrb up to 9) + molecule-local start/norb FIRST, so the
+  // per-molecule integral-cache blob size (which depends on per-atom norb) is
+  // known when sizing the device scratch below.
   std::vector<AtomIntParams> ap(totAtoms);
   std::vector<int> start(totAtoms), norb(totAtoms);
-  for (int m = 0; m < nMol; ++m) {
-    const int na = molNAtoms[m], ao = atomOff[m];
-    int off = 0, nElec = 0;
-    for (int a = 0; a < na; ++a) {
-      AtomIntParams& o = ap[ao + a];
-      if (!gatherAtomIntParamsD(atomsAll[ao + a], o)) return false;
-      start[ao + a] = off;
-      norb[ao + a] = o.nOrb;
-      off += o.nOrb;
-      nElec += o.valence;
+  {
+    int ao = 0;
+    for (int m = 0; m < nMol; ++m) {
+      const int na = molNAtoms[m];
+      int off = 0, nElec = 0;
+      for (int a = 0; a < na; ++a) {
+        AtomIntParams& o = ap[ao + a];
+        if (!gatherAtomIntParamsD(atomsAll[ao + a], o)) return false;
+        start[ao + a] = off;
+        norb[ao + a] = o.nOrb;
+        off += o.nOrb;
+        nElec += o.valence;
+      }
+      nElec -= molCharge ? molCharge[m] : 0;  // cation (+) removes electrons
+      if (nElec <= 0 || nElec % 2 != 0) return false;  // open shell / invalid
+      nOcc[m] = nElec / 2;
+      ao += na;
     }
-    nElec -= molCharge ? molCharge[m] : 0;  // cation (+) removes electrons
-    if (nElec <= 0 || nElec % 2 != 0) return false;  // open shell / invalid
-    nOcc[m] = nElec / 2;
+  }
+
+  long totScratch = 0, totRing = 0, totMeta = 0;
+  {
+    int ao = 0;
+    for (int m = 0; m < nMol; ++m) {
+      atomOff[m] = ao;
+      scratchOff[m] = totScratch;
+      ringOff[m] = static_cast<int>(totRing);
+      metaOff[m] = static_cast<int>(totMeta);
+      const long nB = molNBasis[m];
+      const int na = molNAtoms[m];
+      const long nPairs = static_cast<long>(na) * (na - 1) / 2;
+      const long blobDoubles = pm6dIntCacheDoubles(na, &norb[ao]);
+      // H,density,F,eigA,C,Pnew,ecom (7 n^2) + diisF,diisE (2*kScfDiisMax n^2)
+      // + eval (n) + cs (per-pair cos/sin: nB+2) + intBlob (integral cache).
+      totScratch += (7 + 2 * kScfDiisMax) * nB * nB + nB + (nB + 2) + blobDoubles;
+      // Tournament ring: (nB+1)&~1 ints, padded to nB+2 for safety.
+      totRing += nB + 2;
+      // Integral-cache meta: kPairMetaInts ints per pair.
+      totMeta += nPairs * kPairMetaInts;
+      ao += na;
+    }
   }
 
   AtomIntParams* dAp = nullptr;
   int *dStart = nullptr, *dNorb = nullptr, *dAtomOff = nullptr, *dNAtoms = nullptr,
       *dNBasis = nullptr, *dNOcc = nullptr, *dConv = nullptr, *dRingOff = nullptr,
-      *dRing = nullptr;
+      *dRing = nullptr, *dMetaOff = nullptr, *dMeta = nullptr;
   long* dScratchOff = nullptr;
   double *dCoords = nullptr, *dScratch = nullptr, *dCharges = nullptr, *dHof = nullptr,
          *dHofPm6 = nullptr;
@@ -176,6 +197,8 @@ bool scfBatchDGpu(int nMol, const int* molNAtoms, const int* molNBasis,
   need(hipMalloc(&dHofPm6, sizeof(double) * nMol));
   need(hipMalloc(&dRingOff, sizeof(int) * nMol));
   need(hipMalloc(&dRing, sizeof(int) * (totRing > 0 ? totRing : 1)));
+  need(hipMalloc(&dMetaOff, sizeof(int) * nMol));
+  need(hipMalloc(&dMeta, sizeof(int) * (totMeta > 0 ? totMeta : 1)));
 
   if (ok) {
     hipMemcpy(dAp, ap.data(), sizeof(AtomIntParams) * totAtoms, hipMemcpyHostToDevice);
@@ -187,6 +210,7 @@ bool scfBatchDGpu(int nMol, const int* molNAtoms, const int* molNBasis,
     hipMemcpy(dNOcc, nOcc.data(), sizeof(int) * nMol, hipMemcpyHostToDevice);
     hipMemcpy(dScratchOff, scratchOff.data(), sizeof(long) * nMol, hipMemcpyHostToDevice);
     hipMemcpy(dRingOff, ringOff.data(), sizeof(int) * nMol, hipMemcpyHostToDevice);
+    hipMemcpy(dMetaOff, metaOff.data(), sizeof(int) * nMol, hipMemcpyHostToDevice);
     hipMemcpy(dCoords, coordsAll, sizeof(double) * 3 * totAtoms, hipMemcpyHostToDevice);
 
     // The YY Fock branch materializes a 9x9x9x9 (52 KB) tensor per thread, on top
@@ -211,7 +235,8 @@ bool scfBatchDGpu(int nMol, const int* molNAtoms, const int* molNBasis,
     const int grid = nMol;
     scfBatchDKernelCoop<<<grid, block>>>(nMol, dAp, dStart, dNorb, dCoords, dAtomOff, dNAtoms,
                                          dNBasis, dNOcc, dScratchOff, dScratch, dRingOff, dRing,
-                                         dCharges, dConv, dHof, dHofPm6, maxIter, convTol);
+                                         dMetaOff, dMeta, dCharges, dConv, dHof, dHofPm6, maxIter,
+                                         convTol);
     if (hipDeviceSynchronize() != hipSuccess) ok = false;
   }
   if (ok) {
@@ -225,7 +250,7 @@ bool scfBatchDGpu(int nMol, const int* molNAtoms, const int* molNBasis,
   hipFree(dAp); hipFree(dStart); hipFree(dNorb); hipFree(dAtomOff); hipFree(dNAtoms);
   hipFree(dNBasis); hipFree(dNOcc); hipFree(dConv); hipFree(dScratchOff);
   hipFree(dCoords); hipFree(dScratch); hipFree(dCharges); hipFree(dHof); hipFree(dHofPm6);
-  hipFree(dRingOff); hipFree(dRing);
+  hipFree(dRingOff); hipFree(dRing); hipFree(dMetaOff); hipFree(dMeta);
   return ok;
 }
 

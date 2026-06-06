@@ -232,6 +232,258 @@ NVMOLKIT_HD inline void buildFockDDev(int nBasis, int nAtoms, const AtomIntParam
   }
 }
 
+// ===========================================================================
+// Integral-cache split of buildFockDDev.
+//
+// The two-center integral tensors (sp-sp w/e1b/e2a, YH 9x9 W, YX 9x9x4x4 W,
+// YY 9x9x9x9 W) depend ONLY on geometry + params, NOT on the density P, so they
+// are identical across all SCF iterations. precomputeTwoCenterDDev() computes
+// them ONCE per molecule into a packed cache; buildFockDDevCached() then reads
+// the cache and contracts with the current P. This is a pure arithmetic hoist:
+// the contraction below is byte-for-byte the same code as buildFockDDev's
+// branches, just sourcing W from the cache instead of recomputing it.
+//
+// Cache layout (per molecule):
+//   - meta[]   : kPairMetaInts ints per unordered pair (i<j), in the same (i,j)
+//                double-loop order as buildFockDDev. Fields:
+//                  [0] kind  (0 none/skip, 1 YY, 2 YX, 3 YH, 4 spsp)
+//                  [1] a-atom index (d-atom for YX/YH; atom i for YY/spsp)
+//                  [2] b-atom index (sp/H atom for YX/YH; atom j for YY/spsp)
+//                  [3] nA (spsp capped orbs of a) -- spsp only
+//                  [4] nB (spsp capped orbs of b) -- spsp only
+//                  [5] doff  (offset into the doubles blob for this pair's W)
+//   - blob[]   : packed doubles; each pair consumes only its kind's tensor size
+//                (spsp 256, YH 81, YX 1296, YY 6561; 0 for skipped pairs).
+// ===========================================================================
+
+enum {
+  kPmPairNone = 0,
+  kPmPairYY = 1,
+  kPmPairYX = 2,
+  kPmPairYH = 3,
+  kPmPairSpsp = 4,
+  kPairMetaInts = 6,
+};
+
+// Doubles consumed in the cache blob by a pair of the given kind.
+NVMOLKIT_HD inline int pm6dPairBlobSize(int kind) {
+  switch (kind) {
+    case kPmPairYY: return 9 * 9 * 9 * 9;  // 6561
+    case kPmPairYX: return 9 * 9 * 4 * 4;  // 1296
+    case kPmPairYH: return 81;
+    case kPmPairSpsp: return 256;
+    default: return 0;
+  }
+}
+
+// Classify an unordered atom pair (i<j) into its Fock two-center kind, without
+// computing any integrals. Mirrors the branch selection in buildFockDDev.
+NVMOLKIT_HD inline int pm6dPairKind(int norbi, int norbj) {
+  if (norbi == 9 && norbj == 9) return kPmPairYY;
+  if ((norbi == 9 && norbj == 4) || (norbi == 4 && norbj == 9)) return kPmPairYX;
+  if ((norbi == 9 && norbj == 1) || (norbi == 1 && norbj == 9)) return kPmPairYH;
+  return kPmPairSpsp;
+}
+
+// Upper bound on the cache blob doubles for one molecule (every pair sized for
+// its kind, before the YH-skip is known). Used for scratch sizing; the actual
+// fill may consume fewer doubles when a YH pair is skipped.
+NVMOLKIT_HD inline long pm6dIntCacheDoubles(int nAtoms, const int* norb) {
+  long tot = 0;
+  for (int i = 0; i < nAtoms; ++i)
+    for (int j = i + 1; j < nAtoms; ++j)
+      tot += pm6dPairBlobSize(pm6dPairKind(norb[i], norb[j]));
+  return tot;
+}
+
+// Fill the integral cache (meta + blob) for one molecule. Walks the (i<j) pairs
+// in the SAME order as buildFockDDev, assigns each a blob offset, and computes
+// its W tensor once. A YH pair whose d-charge separations aren't baked is marked
+// kPmPairNone (skipped in the contraction, exactly as the original `continue`).
+NVMOLKIT_HD inline void precomputeTwoCenterDDev(int nAtoms, const AtomIntParams* ap,
+                                                const int* start, const int* norb,
+                                                const double* coords, int* meta, double* blob) {
+  (void)start;
+  int pid = 0;
+  long doff = 0;
+  for (int i = 0; i < nAtoms; ++i) {
+    for (int j = i + 1; j < nAtoms; ++j, ++pid) {
+      int* md = &meta[pid * kPairMetaInts];
+      const int kind = pm6dPairKind(norb[i], norb[j]);
+      md[1] = i; md[2] = j; md[3] = 0; md[4] = 0; md[5] = static_cast<int>(doff);
+
+      if (kind == kPmPairYY) {
+        yyWMolecular(ap[i], &coords[3 * i], ap[j], &coords[3 * j], &blob[doff]);
+        md[0] = kPmPairYY;
+        doff += 9 * 9 * 9 * 9;
+      } else if (kind == kPmPairYX) {
+        const int yxD = (norb[i] == 9) ? i : j;
+        const int yxS = (norb[i] == 9) ? j : i;
+        yxWMolecular(ap[yxD], &coords[3 * yxD], ap[yxS], &coords[3 * yxS], &blob[doff]);
+        md[0] = kPmPairYX;
+        md[1] = yxD; md[2] = yxS;
+        doff += 9 * 9 * 4 * 4;
+      } else if (kind == kPmPairYH) {
+        const int dA = (norb[i] == 9) ? i : j;
+        const int hB = (norb[i] == 9) ? j : i;
+        if (yhWMolecular(ap[dA], &coords[3 * dA], ap[hB], &coords[3 * hB], &blob[doff])) {
+          md[0] = kPmPairYH;
+          md[1] = dA; md[2] = hB;
+          doff += 81;
+        } else {
+          md[0] = kPmPairNone;  // skipped: consumes no blob bytes
+        }
+      } else {  // sp..sp
+        const AtomIntParams pi = spCapped(ap[i]);
+        const AtomIntParams pj = spCapped(ap[j]);
+        double e1b[16], e2a[16];
+        twoCenterMolecularDev(pi, &coords[3 * i], pj, &coords[3 * j], &blob[doff], e1b, e2a);
+        md[0] = kPmPairSpsp;
+        md[3] = pi.nOrb; md[4] = pj.nOrb;
+        doff += 256;
+      }
+    }
+  }
+}
+
+// Build the PM6_D Fock matrix from a precomputed integral cache. The one-center
+// blocks (density-dependent) are recomputed here; the two-center contraction
+// reads each pair's W from the cache. Byte-identical to buildFockDDev given the
+// same cache contents.
+NVMOLKIT_HD inline void buildFockDDevCached(int nBasis, int nAtoms, const AtomIntParams* ap,
+                                            const int* start, const int* norb,
+                                            const int* meta, const double* blob,
+                                            const double* H, const double* P, double* F) {
+  for (int t = 0; t < nBasis * nBasis; ++t) F[t] = H[t];
+
+  // One-center: sp Slater-Condon, plus the d block for 9-orbital atoms.
+  for (int a = 0; a < nAtoms; ++a) {
+    const int s = start[a], spn = (norb[a] >= 4) ? 4 : norb[a];
+    fockOneCenterSp(nBasis, ap[a], s, spn, P, F);
+    if (norb[a] == 9) fockOneCenterD(nBasis, ap[a].z, s, P, F);
+  }
+
+  // Two-center Coulomb/exchange, contracting the cached W with P.
+  int pid = 0;
+  for (int i = 0; i < nAtoms; ++i) {
+    for (int j = i + 1; j < nAtoms; ++j, ++pid) {
+      const int* md = &meta[pid * kPairMetaInts];
+      const int kind = md[0];
+      const double* W = &blob[md[5]];
+
+      if (kind == kPmPairYY) {
+        const int sA = start[md[1]], sB = start[md[2]];
+        auto Wd = [&](int mu, int nu, int lam, int sig) {
+          return W[((mu * 9 + nu) * 9 + lam) * 9 + sig];
+        };
+        for (int mu = 0; mu < 9; ++mu)
+          for (int nu = 0; nu < 9; ++nu) {
+            double acc = 0.0;
+            for (int lam = 0; lam < 9; ++lam)
+              for (int sig = 0; sig < 9; ++sig)
+                acc += P[(sB + lam) * nBasis + (sB + sig)] * Wd(mu, nu, lam, sig);
+            F[(sA + mu) * nBasis + (sA + nu)] += acc;
+          }
+        for (int lam = 0; lam < 9; ++lam)
+          for (int sig = 0; sig < 9; ++sig) {
+            double acc = 0.0;
+            for (int mu = 0; mu < 9; ++mu)
+              for (int nu = 0; nu < 9; ++nu)
+                acc += P[(sA + mu) * nBasis + (sA + nu)] * Wd(mu, nu, lam, sig);
+            F[(sB + lam) * nBasis + (sB + sig)] += acc;
+          }
+        for (int mu = 0; mu < 9; ++mu)
+          for (int lam = 0; lam < 9; ++lam) {
+            double acc = 0.0;
+            for (int nu = 0; nu < 9; ++nu)
+              for (int sig = 0; sig < 9; ++sig)
+                acc += Wd(mu, nu, lam, sig) * P[(sA + nu) * nBasis + (sB + sig)];
+            acc *= -0.5;
+            F[(sA + mu) * nBasis + (sB + lam)] += acc;
+            F[(sB + lam) * nBasis + (sA + mu)] += acc;
+          }
+      } else if (kind == kPmPairYX) {
+        const int sA = start[md[1]], sB = start[md[2]];
+        auto Wd = [&](int mu, int nu, int lam, int sig) {
+          return W[((mu * 9 + nu) * 4 + lam) * 4 + sig];
+        };
+        for (int mu = 0; mu < 9; ++mu)
+          for (int nu = 0; nu < 9; ++nu) {
+            double acc = 0.0;
+            for (int lam = 0; lam < 4; ++lam)
+              for (int sig = 0; sig < 4; ++sig)
+                acc += P[(sB + lam) * nBasis + (sB + sig)] * Wd(mu, nu, lam, sig);
+            F[(sA + mu) * nBasis + (sA + nu)] += acc;
+          }
+        for (int lam = 0; lam < 4; ++lam)
+          for (int sig = 0; sig < 4; ++sig) {
+            double acc = 0.0;
+            for (int mu = 0; mu < 9; ++mu)
+              for (int nu = 0; nu < 9; ++nu)
+                acc += P[(sA + mu) * nBasis + (sA + nu)] * Wd(mu, nu, lam, sig);
+            F[(sB + lam) * nBasis + (sB + sig)] += acc;
+          }
+        for (int mu = 0; mu < 9; ++mu)
+          for (int lam = 0; lam < 4; ++lam) {
+            double acc = 0.0;
+            for (int nu = 0; nu < 9; ++nu)
+              for (int sig = 0; sig < 4; ++sig)
+                acc += Wd(mu, nu, lam, sig) * P[(sA + nu) * nBasis + (sB + sig)];
+            acc *= -0.5;
+            F[(sA + mu) * nBasis + (sB + lam)] += acc;
+            F[(sB + lam) * nBasis + (sA + mu)] += acc;
+          }
+      } else if (kind == kPmPairYH) {
+        const int sA = start[md[1]], sB = start[md[2]];
+        const double Phh = P[sB * nBasis + sB];
+        double sumP = 0.0;
+        for (int mu = 0; mu < 9; ++mu)
+          for (int nu = 0; nu < 9; ++nu) {
+            F[(sA + mu) * nBasis + (sA + nu)] += Phh * W[mu * 9 + nu];
+            sumP += P[(sA + mu) * nBasis + (sA + nu)] * W[mu * 9 + nu];
+          }
+        F[sB * nBasis + sB] += sumP;
+        for (int mu = 0; mu < 9; ++mu) {
+          double ks = 0.0;
+          for (int nu = 0; nu < 9; ++nu) ks += W[mu * 9 + nu] * P[(sA + nu) * nBasis + sB];
+          ks *= -0.5;
+          F[(sA + mu) * nBasis + sB] += ks;
+          F[sB * nBasis + (sA + mu)] += ks;
+        }
+      } else if (kind == kPmPairSpsp) {
+        const int nA = md[3], nB = md[4], sA = start[i], sB = start[j];
+        for (int mu = 0; mu < nA; ++mu)
+          for (int nu = 0; nu < nA; ++nu) {
+            double acc = 0.0;
+            for (int lam = 0; lam < nB; ++lam)
+              for (int sig = 0; sig < nB; ++sig)
+                acc += P[(sB + lam) * nBasis + (sB + sig)] * W[detail::wIdxDev(mu, nu, lam, sig)];
+            F[(sA + mu) * nBasis + (sA + nu)] += acc;
+          }
+        for (int lam = 0; lam < nB; ++lam)
+          for (int sig = 0; sig < nB; ++sig) {
+            double acc = 0.0;
+            for (int mu = 0; mu < nA; ++mu)
+              for (int nu = 0; nu < nA; ++nu)
+                acc += P[(sA + mu) * nBasis + (sA + nu)] * W[detail::wIdxDev(mu, nu, lam, sig)];
+            F[(sB + lam) * nBasis + (sB + sig)] += acc;
+          }
+        for (int mu = 0; mu < nA; ++mu)
+          for (int lam = 0; lam < nB; ++lam) {
+            double acc = 0.0;
+            for (int nu = 0; nu < nA; ++nu)
+              for (int sig = 0; sig < nB; ++sig)
+                acc += W[detail::wIdxDev(mu, nu, lam, sig)] * P[(sA + nu) * nBasis + (sB + sig)];
+            acc *= -0.5;
+            F[(sA + mu) * nBasis + (sB + lam)] += acc;
+            F[(sB + lam) * nBasis + (sA + mu)] += acc;
+          }
+      }
+      // kPmPairNone: skipped (matches the original yhWMolecular==false `continue`).
+    }
+  }
+}
+
 }  // namespace semiempirical
 }  // namespace nvMolKit
 

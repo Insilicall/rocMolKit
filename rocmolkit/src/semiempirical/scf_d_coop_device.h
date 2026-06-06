@@ -274,17 +274,41 @@ __device__ inline void buildDensityDevCoop(const double* C, int n, int nOcc, dou
   __syncthreads();
 }
 
+// Cooperative precompute of the two-center integral cache. The YY (52 KB) and YX
+// (10 KB) W tensors materialize a large stack frame inside yyWMolecular /
+// yxWMolecular, so -- exactly like the Fock build itself -- they are computed
+// SERIALLY on lane 0 to keep the per-thread stack footprint bounded (the 192 KB
+// stack reservation in scfBatchDGpu is sized for one lane doing this). This is a
+// once-per-molecule pass, so serializing it is cheap; the win is not repeating it
+// every SCF iteration. Uses the shared serial precomputeTwoCenterDDev so the
+// cache is byte-identical to the CPU reference.
+__device__ inline void precomputeTwoCenterDDevCoop(int nAtoms, const AtomIntParams* ap,
+                                                   const int* start, const int* norb,
+                                                   const double* coords, int* meta, double* blob,
+                                                   int lane, int nLanes) {
+  (void)nLanes;
+  if (lane == 0)
+    precomputeTwoCenterDDev(nAtoms, ap, start, norb, coords, meta, blob);
+  __syncthreads();
+}
+
 // Full cooperative PM6_D SCF for one molecule, run by a 32-thread block.
 // Same scratch layout / semantics as scfLoopDDev; `sh` is a >=kCoopWarp-double
-// block-local reduction scratch.
+// block-local reduction scratch. `intMeta`/`intBlob` are the per-molecule
+// two-center integral cache (precomputed once below, reused every iteration).
 __device__ inline void scfLoopDDevCoop(int nBasis, int nAtoms, const AtomIntParams* ap,
                                        const int* start, const int* norb, const double* coords,
                                        const double* H, int nOcc, int maxIter, double convTol,
                                        double* density, double* eval, double* F, double* eigA,
                                        double* C, double* Pnew, double* ecom, double* diisF,
                                        double* diisE, int* conv, int* niter, double* eElec,
-                                       int lane, int nLanes, double* sh, int* ring, double* cs) {
+                                       int lane, int nLanes, double* sh, int* ring, double* cs,
+                                       int* intMeta, double* intBlob) {
   const int n2 = nBasis * nBasis;
+
+  // Hoist the geometry/param-only two-center integrals: compute ONCE, cooperatively
+  // (one pair per lane), then reuse via buildFockDDevCached every SCF iteration.
+  precomputeTwoCenterDDevCoop(nAtoms, ap, start, norb, coords, intMeta, intBlob, lane, nLanes);
 
   // Initial guess: H_core with d diagonals shifted up so d MOs start virtual.
   for (int i = lane; i < n2; i += nLanes) eigA[i] = H[i];
@@ -304,8 +328,9 @@ __device__ inline void scfLoopDDevCoop(int nBasis, int nAtoms, const AtomIntPara
   int it = 0;
   for (it = 0; it < maxIter; ++it) {
     // Fock build: serial on lane 0 (O(nAtoms^2), cheap vs the diagonalization).
+    // Reads the precomputed integral cache instead of recomputing W each iter.
     if (lane == 0)
-      buildFockDDev(nBasis, nAtoms, ap, start, norb, coords, H, density, F);
+      buildFockDDevCached(nBasis, nAtoms, ap, start, norb, intMeta, intBlob, H, density, F);
     __syncthreads();
 
     if (it >= 2) {
@@ -426,7 +451,7 @@ __device__ inline void scfLoopDDevCoop(int nBasis, int nAtoms, const AtomIntPara
   }
 
   // Final Fock + electronic energy.
-  if (lane == 0) buildFockDDev(nBasis, nAtoms, ap, start, norb, coords, H, density, F);
+  if (lane == 0) buildFockDDevCached(nBasis, nAtoms, ap, start, norb, intMeta, intBlob, H, density, F);
   __syncthreads();
   double ep = 0.0;
   for (int i = lane; i < n2; i += nLanes) ep += 0.5 * density[i] * (H[i] + F[i]);

@@ -67,10 +67,13 @@ void cpuRun(const Mol& mol, std::vector<double>& q, double& hof, int& conv) {
                            H.data());
   int niter = 0;
   double eElec = 0.0;
+  const int nPairs = n * (n - 1) / 2;
+  std::vector<int> intMeta(static_cast<size_t>(nPairs) * kPairMetaInts);
+  std::vector<double> intBlob(static_cast<size_t>(pm6dIntCacheDoubles(n, norb.data())));
   scfLoopDDev(nBasis, n, ap.data(), start.data(), norb.data(), mol.coords.data(), H.data(),
               nElec / 2, 800, 1e-10, density.data(), eval.data(), F.data(), eigA.data(),
               C.data(), Pnew.data(), ecom.data(), diisF.data(), diisE.data(), &conv, &niter,
-              &eElec);
+              &eElec, intMeta.data(), intBlob.data());
   const double eNuc = nuclearRepulsionAm1Dev(n, ap.data(), mol.coords.data());
   hof = heatOfFormationKcalDev(eElec, eNuc, n, ap.data());
   q.assign(n, 0.0);
