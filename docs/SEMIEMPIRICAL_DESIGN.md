@@ -1,9 +1,47 @@
 # Semi-empirical SCF on AMD (HIP/ROCm) — design & roadmap
 
-Status: **Phase 1 complete — full SCF runs 100% on the GPU**, bit-exact to
-PYSEQM (branch `feature/pm6-semiempirical`). New feature, not a port of nvMolKit —
-nvMolKit has no quantum chemistry. We build an NDDO semi-empirical SCF engine from
-scratch in HIP.
+A from-scratch NDDO **PM6 / PM6_D** semi-empirical SCF engine in HIP — not a port
+of nvMolKit (which has no quantum chemistry). The entire SCF runs **on the GPU**
+(one `__host__ __device__` codebase feeds both the CPU reference and the HIP
+kernels, so GPU == CPU by construction), validated **bit-exact to MOPAC 23.2.5**.
+
+## Current status (PM6_D)
+
+**Validated bit-exact to MOPAC** — charges, on CPU and GPU (the detailed history,
+provenance, and method are in the sections below):
+
+| Capability | Coverage | Validator |
+| --- | --- | --- |
+| Closed-shell RHF SCF + Mulliken charges | all elements below | `validate_pm6d`, `validate_pm6_mopac` |
+| d-orbitals (sp+d, 9-orbital) | P, S, Cl, Br, I + the metals | `validate_pm6d`, `validate_doverlap` |
+| **General MOPAC Slater overlap** (any n,l) | every pair incl. metal-sp×ligand-d | `validate_mopac_overlap_port` |
+| Ions (net charge) | NH4⁺, OH⁻, CN⁻, Cl⁻, … | `validate_pm6d_ions` |
+| **Open-shell UHF** (sp + d radicals) | 12 radicals incl. NO₂•, ClO•, O₂ | `validate_pm6d_uhf` |
+| **Group-12 metals** | Zn, Cd, Hg (+ halides) | `validate_pm6d_metals` |
+| **Active-d transition metals** (d⁰) | **Sc, Ti, V, Cr** | `validate_pm6d_tm` (CPU+GPU) |
+| Canonical PM6 **heat of formation** | 19 elements (see below) | `validate_pm6_mopac`, `validate_pm6d_hof_pwcct` |
+| Energy gradient + L-BFGS geometry opt | all supported | `validate_pm6d_gradient`, `validate_pm6d_optimize` |
+| PM6-D3H4 (D3 + H4 + H-H) post-SCF | light + halides | (in the binding) |
+
+**Supported elements** (Mulliken charges bit-exact to MOPAC, 23 elements):
+H, B, C, N, O, F, Al, Si, P, S, Cl, Sc, Ti, V, Cr, Zn, Ga, Ge, Br, Cd, Sn, I, Hg.
+
+**Heat of formation** (canonical PM6, ≤~1 kcal/mol of MOPAC, 19 elements):
+H, B, C, N, O, F, Al, Si, P, S, Cl, Zn, Ga, Ge, Br, Cd, Sn, I, Hg. (The d⁰ TM
+Sc/Ti/V/Cr have bit-exact charges but their HoF is reported NaN — EISOL/PWCCT not
+yet calibrated; the NaN guard keeps it honest, never a wrong number.)
+
+**Not yet supported** (fail cleanly — never a wrong/crashing result): Mn–Cu
+(populated-d TM, two-center d-electron residual being closed), As/Sb (d-basis
+present, W not yet baked — the Al/Si treatment applies), heavier TM (Y–Cd, La–Hg
+param stubs), and the open-shell GPU batch (UHF runs on the CPU path).
+
+**Performance.** The batched GPU SCF (`scfBatchDGpu`) is correctness-first
+(one-block-per-molecule, bit-exact); at drug sizes it is currently ~4× slower than
+the CPU loop — cooperative per-block diagonalization is the optimization lever. See
+the **Benchmarks** section at the bottom.
+
+---
 
 ## Progress
 
