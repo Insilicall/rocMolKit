@@ -37,7 +37,17 @@ namespace semiempirical {
 // Returns false if z has no d parameters in this set.
 NVMOLKIT_HD inline bool dChargeSeparations(int z, double& dp, double& ds, double& dd,
                                            double& rho3, double& rho4, double& rho5, double& rho6) {
-  if (z == 15) {  // P
+  if (z == 13) {  // Al (qn3 sp, qnD3 d) — derived from the MOPAC PM6 CSV tail
+                  // exponents (4.74234, 4.66963, 7.13114) via pyseqm_d_params;
+                  // PYSEQM/mlxmolkit have no Al entry, so these come straight from
+                  // MOPAC's parameter set (see tools/semiempirical/gen_pm6d_chargesep.py).
+    dp = 0.94828440; ds = 1.25286620; dd = 1.57557233;
+    rho3 = 0.27161832; rho4 = 0.57631046; rho5 = 0.44796295; rho6 = 0.70819641;
+  } else if (z == 14) {  // Si (qn3 sp, qnD3 d) — MOPAC PM6 CSV tail exponents
+                         // (8.38811, 1.84305, 0.70860). rho5 hits the POIJ ceiling (5.0).
+    dp = 0.70768770; ds = 1.36284126; dd = 0.93958912;
+    rho3 = 2.73348617; rho4 = 1.60785370; rho5 = 5.00000000; rho6 = 1.07941668;
+  } else if (z == 15) {  // P
     dp = 0.90744734; ds = 1.38477069; dd = 1.62554049;
     rho3 = 0.27098714; rho4 = 1.36916053; rho5 = 0.38883255; rho6 = 0.71981849;
   } else if (z == 16) {  // S

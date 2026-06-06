@@ -70,7 +70,9 @@ double pm6Eisol(int z) {
   double c[7] = {0, 0, 0, 0, 0, 0, 0};
   switch (z) {
     case 1:  c[0] = 1.0; break;                                              // H
-    case 6:  c[0] = 2; c[1] = 2; c[2] = 1; c[3] = -0.5; c[4] = 4;  c[5] = 1.5; c[6] = -2; break;  // C
+    case 13: c[0] = 2; c[1] = 1; c[2] = 1; c[3] = 0;    c[4] = 2;  c[5] = 0;   c[6] = 0; break;   // Al (s^2 p^1)
+    case 6:                                                                  // C / Si
+    case 14: c[0] = 2; c[1] = 2; c[2] = 1; c[3] = -0.5; c[4] = 4;  c[5] = 1.5; c[6] = -2; break;  // (s^2 p^2)
     case 7:                                                                  // N / P
     case 15: c[0] = 2; c[1] = 3; c[2] = 1; c[3] = -1.5; c[4] = 6;  c[5] = 4.5; c[6] = -3; break;
     case 8:                                                                  // O / S
@@ -88,6 +90,8 @@ double pm6Eisol(int z) {
 double pm6Eheat(int z) {
   switch (z) {
     case 1:  return 52.102;
+    case 13: return 78.800;   // Al (canonical PM6 atomic heat of formation)
+    case 14: return 108.390;  // Si
     case 6:  return 170.89;
     case 7:  return 113.0;
     case 8:  return 59.559;

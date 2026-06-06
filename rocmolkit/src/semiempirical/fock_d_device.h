@@ -176,7 +176,9 @@ NVMOLKIT_HD inline void buildFockDDev(int nBasis, int nAtoms, const AtomIntParam
           }
       } else if (dA >= 0) {  // YH d two-center: J on both atoms + cross K
         double W[81];
-        yhWMolecular(ap[dA], &coords[3 * dA], ap[hB], &coords[3 * hB], W);
+        // Skip if zA's d charge separations aren't baked: yhWMolecular leaves W
+        // uninitialized on false, which would poison the Fock with NaN.
+        if (!yhWMolecular(ap[dA], &coords[3 * dA], ap[hB], &coords[3 * hB], W)) continue;
         const int sA = start[dA], sB = start[hB];
         const double Phh = P[sB * nBasis + sB];
         double sumP = 0.0;
