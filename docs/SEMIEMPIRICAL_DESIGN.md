@@ -209,17 +209,21 @@ with `Fσ = H + J(Pα+Pβ) − K(Pσ)`. The closed-shell NDDO Fock bakes a facto
 each two-electron term; the UHF Fock (`scf_uhf_device.h`) decomposes every sp term
 into a pure Coulomb J (total density) and a pure exchange K (same-spin). The
 electron count is `nα=(nElec+2S)/2, nβ=nElec−nα`; charges come from Pα+Pβ.
-Validated **bit-exact to MOPAC UHF** (`validate_pm6d_uhf.py`): CH3•, NO•, OH•,
-NH2•, CN• (doublets) and **O₂ (triplet)** — worst |Δq| = 1e-4, HoF within 0.3
-kcal/mol. Closed-shell RHF is unchanged.
+The SCF starts from MOPAC's **diagonal atomic-density guess** (each atom's core
+charge spread over its orbitals, split by the α/β ratio) and applies a **decaying
+level shift** on the virtual orbitals (`Fσ' = Fσ + λ(I−Pσ)`, λ: 8→4→1→0.1 eV).
+The shift pins the aufbau filling without moving the SCF fixed point, steering UHF
+multi-solution cases to MOPAC's ground state. Validated **bit-exact to MOPAC UHF**
+(`validate_pm6d_uhf.py`): CH3•, NO•, OH•, NH2•, CN•, **NO₂•** (the hard
+multi-solution case — H_core guess lands 44 kcal/mol too high; the diagonal guess
+fixes it), NF2•, CH3O• (doublets) and **O₂ (triplet)** — worst |Δq| = 1e-4, HoF
+within 0.56 kcal/mol. Closed-shell RHF is unchanged.
 
 **Pending on the UHF path:** (1) the **d-orbital** UHF — the one-center d `W`
 packing folds J and K together, so d-bearing open-shell atoms still return false
-(needed for active-d transition metals); (2) **robust convergence** — the simple
-damped-mixing SCF mis-converges hard UHF multi-solution cases (e.g. NO₂•, which
-lands on a different UHF minimum than MOPAC); a per-spin DIIS / level-shift is the
-fix; (3) **GPU + the Python binding** — UHF runs on the CPU `pm6dCharges`; the
-batched `scfBatchDGpu` and the RDKit binding still need the open-shell routing.
+(needed for active-d transition metals); (2) **GPU + the Python binding** — UHF
+runs on the CPU `pm6dCharges`; the batched `scfBatchDGpu` and the RDKit binding
+still need the open-shell routing.
 
 UHF unblocks the **active-d transition metals** (Sc–Cu, Z=21–29; mostly
 open-shell), which additionally need `qnD = qn−1` (3d, vs the current `qnD = qn`)

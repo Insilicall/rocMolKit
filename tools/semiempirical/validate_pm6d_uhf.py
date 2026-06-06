@@ -37,9 +37,13 @@ RADICALS = [
     ("NH2.", 2, [(7, 0, 0, 0), (1, 0.80, 0, 0.58), (1, -0.80, 0, 0.58)]),
     ("CN.", 2, [(6, 0, 0, 0), (7, 0, 0, 1.17)]),
     ("O2", 3, [(8, 0, 0, 0), (8, 0, 0, 1.21)]),  # triplet ground state
-    # NO2. is a known hard UHF multi-solution case: the simple damped-mixing SCF
-    # converges to a different (higher) UHF minimum than MOPAC's. Robust DIIS /
-    # level-shifting for such cases is future work (see SEMIEMPIRICAL_DESIGN.md).
+    # NO2. is a UHF multi-solution case: the H_core guess traps the SCF in a higher
+    # excited solution. The diagonal atomic guess + decaying virtual level shift now
+    # converge it to MOPAC's ground state (see scf_uhf_device.h scfLoopUHFsp).
+    ("NO2.", 2, [(7, 0, 0, 0), (8, 1.10, 0, 0.62), (8, -1.10, 0, 0.62)]),
+    ("NF2.", 2, [(7, 0, 0, 0), (9, 1.15, 0, 0.55), (9, -1.15, 0, 0.55)]),
+    ("CH3O.", 2, [(8, 0, 0, 0), (6, 0, 0, 1.41), (1, 0.51, 0.88, 1.77),
+                   (1, 0.51, -0.88, 1.77), (1, -1.02, 0, 1.77)]),
 ]
 
 
