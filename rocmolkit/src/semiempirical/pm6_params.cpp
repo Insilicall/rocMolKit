@@ -47,6 +47,9 @@ int pm6ValenceElectrons(int z) {
   if (z == 19 || z == 20) {        // K, Ca
     return z - 18;
   }
+  if (z == 30 || z == 48 || z == 80) {  // Zn, Cd, Hg (group-12, d10 core -> sp, 2 s valence)
+    return 2;
+  }
   if (z >= 31 && z <= 36) {        // Ga..Kr
     return z - 28;
   }

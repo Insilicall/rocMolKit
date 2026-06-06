@@ -316,47 +316,11 @@ NVMOLKIT_HD inline void ddBlockDev(double zd1, double zd2, double Rb, int dqn,
   out[4 * 5 + 3] = e78;
 }
 
-// Full molecular-frame overlap block (nA x nB, orbital order [s,px,py,pz,d...])
-// between atoms A and B, including d-orbitals. The sp rows/cols come from the
-// validated diatomOverlapSpDev (which already lays them out in the nOrb-strided
-// block with the d positions zeroed); the d rows are filled from the validated
-// ds/dp/dd blocks. To keep one code path, the heavier (more orbitals) atom is
-// always treated as A: if nA < nB the (B,A) block is built and transposed.
-// Returns nA*nB. NOTE: only the A-has-d rows are filled (d-s, d-p, d-d); the
-// sp-row x B-d-col entries (s-d, p-d when only B has d) are handled by the
-// transpose path, so a pair where BOTH atoms carry d (YY) leaves the A-sp x B-d
-// block unfilled — that case is gated out until the YY two-center is validated.
-// Whether the d-shell overlap (dsBlockDev / dpBlockDev) has a faithful formula
-// for a d atom with d principal qn `dqn` against an sp partner with principal qn
-// `spqn`. The blocks tabulate sigma/pi polynomials only for the combinations
-// below; any other (dqn, spqn) silently falls through to a same-qn formula
-// (e.g. p6 for dqn3, jcall8 for dqn4) and would give a WRONG overlap. Callers
-// gate on this so an unsupported molecule fails cleanly instead of silently.
-// (d-d pairs with differing qnD are handled by the interhalide kernel, which has
-// its own (5,4)/(5,3)/(4,3) coverage.) Supported: dqn3 x {1,2,3}, dqn4 x {1,2,4},
-// dqn5 x {1,2,5}. Missing: e.g. a qn>=4 sp metal (Zn/Cd/Hg, Ga/Ge/Se, In/Sn/Te)
-// next to a qn3 d ligand -- the metal-sp x ligand-d Slater overlap family that
-// PYSEQM never tabulates (a from-scratch derivation; see SEMIEMPIRICAL_DESIGN.md).
-NVMOLKIT_HD inline bool dSpOverlapSupported(int dqn, int spqn) {
-  if (dqn == 3) return spqn >= 1 && spqn <= 3;
-  if (dqn == 4) return spqn == 1 || spqn == 2 || spqn == 4;
-  if (dqn == 5) return spqn == 1 || spqn == 2 || spqn == 5;
-  return false;
-}
-
-// Whole-molecule gate: false if any d-atom pairs with an sp atom whose qn the
-// d-shell overlap can't faithfully express (so callers fail cleanly instead of
-// returning a silently wrong overlap). d-d pairs are covered elsewhere (the
-// interhalide kernel for differing qnD, same-qn formulas otherwise).
-NVMOLKIT_HD inline bool dSpOverlapPairsSupported(int nAtoms, const AtomIntParams* ap) {
-  for (int i = 0; i < nAtoms; ++i)
-    for (int j = 0; j < nAtoms; ++j) {
-      if (i == j) continue;
-      if (ap[i].nOrb == 9 && ap[j].nOrb < 9 && !dSpOverlapSupported(ap[i].qnD, ap[j].qn))
-        return false;
-    }
-  return true;
-}
+// Full molecular-frame overlap block (nA x nB, orbital order
+// [s, px, py, pz, dx2-y2, dxz, dz2, dyz, dxy]) between atoms A and B, via the
+// general MOPAC Slater overlap (mopDiat). Returns nA*nB. One routine for any
+// (n, l) incl. d -- handles every sp/d combination, so metal-sp x ligand-d
+// (group-12) and qn>=4 sp x d-ligand pairs work natively.
 
 NVMOLKIT_HD inline int diatomOverlapDDev(const AtomIntParams& pA, const double coordA[3],
                                          const AtomIntParams& pB, const double coordB[3],

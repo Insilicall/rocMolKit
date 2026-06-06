@@ -116,7 +116,6 @@ bool scfBatchDGpu(int nMol, const int* molNAtoms, const int* molNBasis,
       off += o.nOrb;
       nElec += o.valence;
     }
-    if (!dSpOverlapPairsSupported(na, &ap[ao])) return false;  // unsupported d-sp overlap
     nElec -= molCharge ? molCharge[m] : 0;  // cation (+) removes electrons
     if (nElec <= 0 || nElec % 2 != 0) return false;  // open shell / invalid
     nOcc[m] = nElec / 2;
