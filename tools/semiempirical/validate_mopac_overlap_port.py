@@ -206,13 +206,14 @@ CASES=[
   ("HBr","Br 0 1 0 1 0 1\nH 0 1 0 1 1.41 1",[9,1],[[0,0,0],[0,0,1.41]]),
   ("HI","I 0 1 0 1 0 1\nH 0 1 0 1 1.609 1",[9,1],[[0,0,0],[0,0,1.609]]),
 ]
-if not os.path.exists(MOP): sys.exit(f"set MOPAC_DIR (no mopac at {MOP})")
-worst=0.0
-for name,geom,nat,coords in CASES:
-    zeta,pqn,ovv=run_mopac(name,geom)
-    n=sum(nat); S=build(atoms_from_aux(zeta,pqn,nat),coords); Sm=tri_to_full(ovv,n)
-    d=np.max(np.abs(S-Sm)); worst=max(worst,d)
-    print(f"{name:7} nAO={n:3} worst |dS| = {d:.2e}")
-print(f"\nworst |dS| = {worst:.2e}  "
-      f"{'OK (general MOPAC overlap reproduced bit-exact)' if worst<1e-12 else '** MISMATCH'}")
-sys.exit(0 if worst<1e-12 else 1)
+if __name__ == "__main__":
+    if not os.path.exists(MOP): sys.exit(f"set MOPAC_DIR (no mopac at {MOP})")
+    worst=0.0
+    for name,geom,nat,coords in CASES:
+        zeta,pqn,ovv=run_mopac(name,geom)
+        n=sum(nat); S=build(atoms_from_aux(zeta,pqn,nat),coords); Sm=tri_to_full(ovv,n)
+        d=np.max(np.abs(S-Sm)); worst=max(worst,d)
+        print(f"{name:7} nAO={n:3} worst |dS| = {d:.2e}")
+    print(f"\nworst |dS| = {worst:.2e}  "
+          f"{'OK (general MOPAC overlap reproduced bit-exact)' if worst<1e-12 else '** MISMATCH'}")
+    sys.exit(0 if worst<1e-12 else 1)

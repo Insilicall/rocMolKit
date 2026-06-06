@@ -338,8 +338,8 @@ NVMOLKIT_HD inline int diatomOverlapDDev(const AtomIntParams& pA, const double c
   // for the component validators but no longer drive the SCF.
   double di[81];
   const double xj[3] = {coordB[0] - coordA[0], coordB[1] - coordA[1], coordB[2] - coordA[2]};
-  mopacovl::mopDiat(pA.qn, pA.zetaS, pA.zetaP, pA.zetaD, nA,
-                    pB.qn, pB.zetaS, pB.zetaP, pB.zetaD, nB, xj, di);
+  mopacovl::mopDiat(pA.qn, pA.qnD, pA.zetaS, pA.zetaP, pA.zetaD, nA,
+                    pB.qn, pB.qnD, pB.zetaS, pB.zetaP, pB.zetaD, nB, xj, di);
   for (int i = 0; i < nA; ++i)
     for (int j = 0; j < nB; ++j) out[i * nB + j] = di[i * 9 + j];
   return nA * nB;

@@ -68,9 +68,20 @@ bool gatherAtomIntParams(int z, AtomIntParams& o) {
   o.eheat = pm6Eheat(z);
   o.z = z;
   o.qn = principalQn(z);
-  // PYSEQM treats the valence d shell as 3d for P/S/Cl (qn3), but 4d for Br
-  // (qn4) and 5d for I (qn5) — the d principal qn tracks the sp shell for qn>=4.
-  o.qnD = (o.qn >= 4) ? o.qn : 3;
+  // d-shell principal quantum number (qnD), matching MOPAC's npq(Z,3) table
+  // (parameters_C.F90). For main-group d-bearing atoms the d shell tracks the
+  // sp shell: P/S/Cl (qn3) -> 3d, Br (qn4) -> 4d, I (qn5) -> 5d, Sb (qn5) -> 5d.
+  // For the ACTIVE-d transition metals the valence d shell is one principal
+  // number BELOW the 4s/4p (5s/5p, 6s/6p) sp shell, i.e. qnD = qn - 1:
+  //   Sc-Cu (21-29): sp qn4, d 3d  -> qnD=3
+  //   Y -Ag (39-47): sp qn5, d 4d  -> qnD=4
+  //   Hf-Au (72-79): sp qn6, d 5d  -> qnD=5
+  // This MUST NOT alter Br(35)/I(53)/Sb(51) which keep qnD=qn.
+  if ((z >= 21 && z <= 29) || (z >= 39 && z <= 47) || (z >= 72 && z <= 79)) {
+    o.qnD = o.qn - 1;
+  } else {
+    o.qnD = (o.qn >= 4) ? o.qn : 3;
+  }
   o.valence = pm6ValenceElectrons(z);
   o.nOrb = spCount(z);
   return true;
