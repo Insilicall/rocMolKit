@@ -236,13 +236,17 @@ bool scfBatchDGpu(int nMol, const int* molNAtoms, const int* molNBasis,
     // per-molecule SCF, splitting the O(nB^2)/O(nB^3) inner length-nB loops (Jacobi
     // sweep, density, commutator, DIIS) across the lanes. Moving the YY/YX W
     // temporaries off the per-lane stack (kYWScrDoubles) dropped the kernel's
-    // private footprint ~13x, which is what makes multi-wavefront blocks viable --
-    // a 96-lane (3-wavefront) block no longer risks a scratch page fault and is the
-    // measured sweet spot on drug-like nB<=~25 molecules (gfx1200: 102 -> 121 mol/s
-    // vs the old 32-lane default; 128+ lanes regress as the extra waves idle past
-    // nB and add barrier/occupancy cost). Override via ROCMOLKIT_PM6D_BLOCK for
-    // larger basis sizes.
-    int block = 96;
+    // private footprint ~13x, which is what makes multi-wavefront blocks even
+    // VIABLE (they previously risked a scratch page fault). Wider blocks are
+    // measurably faster on drug-like molecules (gfx1200: 102 -> ~120 mol/s at 96
+    // lanes), BUT they widen the cross-lane sum reductions, which relaxes the
+    // GPU-vs-CPU agreement: on the numerically stiff TiCl4 SCF the converged
+    // charge gap grows 7.9e-11 (32 lanes) -> 8.0e-10 (64) -> 1.1e-9 (96), and the
+    // hard correctness bar is GPU==CPU <= 1e-9. So the DEFAULT stays a single
+    // 32-lane wavefront (bit-tight, validated across the full MOPAC + GPU/CPU
+    // suite). Throughput-first callers who can accept the larger (still ~1e-9) SCF
+    // relaxation set ROCMOLKIT_PM6D_BLOCK=64/96 to opt into the wider blocks.
+    int block = 32;
     if (const char* e = std::getenv("ROCMOLKIT_PM6D_BLOCK")) {
       int b = std::atoi(e);
       if (b >= 32 && b <= kCoopMaxBlock && (b % 32) == 0) block = b;
