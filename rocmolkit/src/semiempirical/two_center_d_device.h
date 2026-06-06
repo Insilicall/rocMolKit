@@ -37,7 +37,13 @@ namespace semiempirical {
 // Returns false if z has no d parameters in this set.
 NVMOLKIT_HD inline bool dChargeSeparations(int z, double& dp, double& ds, double& dd,
                                            double& rho3, double& rho4, double& rho5, double& rho6) {
-  if (z == 15) {  // P
+  if (z == 21) {  // Sc -- active-d TM (qn4 sp, qnD3 d). Charge separations from
+                  // PYSEQM pyseqm_d_params category "A" (qn0=4, d shell qn0-1=3),
+                  // tail exps zsn/zpn/zdn + orbital zetas, G2SD override. Generated
+                  // by tools/semiempirical/gen_tm_chargesep.py (bit-exact to PYSEQM).
+    dp = 0.80054436; ds = 1.61979427; dd = 1.07584029;
+    rho3 = 2.45378389; rho4 = 1.60058077; rho5 = 0.85490281; rho6 = 1.15821944;
+  } else if (z == 15) {  // P
     dp = 0.90744734; ds = 1.38477069; dd = 1.62554049;
     rho3 = 0.27098714; rho4 = 1.36916053; rho5 = 0.38883255; rho6 = 0.71981849;
   } else if (z == 16) {  // S

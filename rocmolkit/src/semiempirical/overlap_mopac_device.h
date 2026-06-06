@@ -167,9 +167,15 @@ NVMOLKIT_HD inline int mopIval(int i, int k) {
 // Full diatomic overlap block di[9*9] (row-major, engine/MOPAC orbital order)
 // between atom A (natA orbitals, principal qn nA, exponents zs/zp/zd) and atom B,
 // with B at displacement xj relative to A. Mirrors MOPAC diat.F90 exactly.
-NVMOLKIT_HD inline void mopDiat(int nA, double zsA, double zpA, double zdA, int natA, int nB,
-                                double zsB, double zpB, double zdB, int natB, const double xj[3],
-                                double* di) {
+//
+// nDA/nDB are the d-shell principal quantum numbers (MOPAC npq(Z,3)). For
+// main-group d-bearing atoms nD == nsp, but for the active-d transition metals
+// (Sc-Cu, Y-Ag, Hf-Au) the valence d shell sits one principal number below the
+// sp shell (e.g. Sc: sp 4s/4p, d 3d) so nD = nsp - 1. MOPAC takes the principal
+// qn per shell via npq(ni,i) -> pi = max(npq(ni,i), iss); we mirror that exactly.
+NVMOLKIT_HD inline void mopDiat(int nA, int nDA, double zsA, double zpA, double zdA, int natA,
+                                int nB, int nDB, double zsB, double zpB, double zdB, int natB,
+                                const double xj[3], double* di) {
   for (int i = 0; i < 81; ++i) di[i] = 0.0;
   const double x2 = xj[0], y2 = xj[1], z2 = xj[2];
   const double r = std::sqrt(x2 * x2 + y2 * y2 + z2 * z2);
@@ -180,6 +186,10 @@ NVMOLKIT_HD inline void mopDiat(int nA, double zsA, double zpA, double zdA, int 
   const int ibN = natB >= 5 ? 3 : (natB >= 2 ? 2 : 1);
   const double ulA[3] = {zsA, zpA, (zdA > 0.3 ? zdA : 0.3)};
   const double ulB[3] = {zsB, zpB, (zdB > 0.3 ? zdB : 0.3)};
+  // Per-shell principal quantum number (MOPAC npq(ni,i)): s and p track the sp
+  // qn; the d shell uses nDA/nDB (= sp qn for main-group, sp-1 for active-d TM).
+  const int npqA[3] = {nA, nA, nDA};
+  const int npqB[3] = {nB, nB, nDB};
   const int nk1 = (iaN - 1 < ibN - 1 ? iaN - 1 : ibN - 1) + 1;
   double s[4][4][4];
   for (int i = 0; i < 64; ++i) (&s[0][0][0])[i] = 0.0;
@@ -187,7 +197,8 @@ NVMOLKIT_HD inline void mopDiat(int nA, double zsA, double zpA, double zdA, int 
     for (int j = 1; j <= ibN; ++j)
       for (int k = 1; k <= nk1; ++k) {
         if (k > i || k > j) continue;
-        const int pi = (nA > i ? nA : i), pj = (nB > j ? nB : j);
+        const int pi = (npqA[i - 1] > i ? npqA[i - 1] : i);
+        const int pj = (npqB[j - 1] > j ? npqB[j - 1] : j);
         s[i][j][k] = mopSs(pi, pj, i, j, k, ulA[i - 1], ulB[j - 1], r);
       }
   for (int i = 1; i <= iaN; ++i) {

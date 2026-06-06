@@ -50,6 +50,14 @@ int pm6ValenceElectrons(int z) {
   if (z == 30 || z == 48 || z == 80) {  // Zn, Cd, Hg (group-12, d10 core -> sp, 2 s valence)
     return 2;
   }
+  // Active-d transition metals: tore = group number (s + d valence electrons),
+  // matching MOPAC/PYSEQM tore. Only metals whose one-center d W (onecenter_d_data.h)
+  // AND charge separations (two_center_d_device.h dChargeSeparations) are baked can
+  // run the SCF -- currently Sc(21), a d0 closed-shell case (ScF3). The remaining
+  // active-d metals need their W + charge separations baked before being enabled.
+  if (z == 21) {                   // Sc -> 3 (4s^2 3d^1, tore=3)
+    return 3;
+  }
   if (z >= 31 && z <= 36) {        // Ga..Kr
     return z - 28;
   }
