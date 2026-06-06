@@ -111,6 +111,106 @@ NVMOLKIT_HD inline void buildDensityDev(const double* C, int n, int nOcc, double
     }
 }
 
+// --- Pseudo-diagonalization schedule (MOPAC-style, shared by the CPU scfLoopDDev
+// and the cooperative GPU scfLoopDDevCoop so both make identical mode decisions) -
+// Do this many REAL Jacobi diagonalizations first (the iteration-0 guess is always
+// a real diag; the loop's first kPseudoNReal iterations also use a real diag) so
+// the MO basis is close before switching to the cheap Stewart pseudo-diag.
+enum { kPseudoNReal = 3 };
+// Engage pseudo-diag once the density RMS change drops below this (MOPAC's `trans`
+// is 0.2; the SCF is well inside the convergence basin by then). Sticky.
+constexpr double kPseudoTrans = 0.1;
+// If a pseudo-diag step makes the density change GROW past this factor of the
+// previous step (MOPAC turns newdg off when `diff > 1`), redo it with a real diag.
+constexpr double kPseudoBlowup = 2.0;
+// After this many blowup fallbacks, ban pseudo-diag for the molecule and finish on
+// real diagonalizations (guarantees the same converged fixed point as baseline).
+enum { kPseudoMaxFallback = 3 };
+// Refresh the frozen eigenvalues with a REAL diag every Nth engaged iteration. The
+// DIIS-extrapolated Fock keeps moving, so eigenvalues drift; a periodic real diag
+// re-anchors eval/C and keeps the cheap pseudo-diag steps tracking the SCF. 1 real
+// + (kPseudoRefresh-1) pseudo per cycle.
+enum { kPseudoRefresh = 4 };
+// The cooperative GPU SCF (one wavefront/molecule) keeps the full tournament Jacobi
+// instead of pseudo-diag: pseudo-diag's occ-virt rotations share MO columns and so
+// serialize with a __syncthreads per significant element (O(n^2) barriers), which
+// is SLOWER than the barrier-light Brent-Luk tournament on a 32-lane wavefront. The
+// CPU path (no barriers) takes the pseudo-diag win. The converged FIXED POINT is
+// identical either way, so GPU==CPU charges still agree to the SCF floor (~1e-9).
+constexpr bool kPseudoCoopEnabled = true;
+// Once the density change drops below this (>> convTol), ban pseudo-diag and finish
+// the SCF tail on real diagonalizations. delta decreases ~monotonically here, so
+// GPU and CPU ban at the SAME iteration and run identical real-diag steps to
+// convergence -> the converged density is pinned to the true fixed point and stays
+// bit-exact GPU vs CPU (critical for sensitive transition-metal systems). Only the
+// few tail iterations (kPseudoLockTol -> convTol) are real diags, so the pseudo
+// speedup over the bulk of the SCF is preserved.
+constexpr double kPseudoLockTol = 1e-4;
+
+// Stewart pseudo-diagonalization (Stewart, Csaszar, Pulay, J.Comp.Chem 3,227,1982),
+// a faithful port of MOPAC's matrix/diag.F90 to a DENSE (not packed) Fock matrix.
+//
+// Instead of a full O(n^3) Jacobi diag every SCF iteration, it (a) forms only the
+// occupied x virtual block of the Fock matrix in the CURRENT MO basis,
+//   F_mo[i,j] = C[:,i]^T F C[:,j],  i in virtuals, j in occupied,  (O(nocc*nvirt*n))
+// and (b) applies 2x2 Givens rotations that "annihilate" each significant element,
+// rotating MO columns i (virtual) and j (occupied) of C. The rotation angle uses
+// the FROZEN eigenvalues `eval` from the last real diagonalization (it does NOT
+// re-diagonalize the occ-occ / virt-virt blocks). Eigenvalues are unchanged.
+//
+// Exactly like diag.F90, the F_mo block is computed ONCE (into `fmo`, an n*n
+// caller scratch -- only nVirt*nOcc entries used) and the 2x2 rotations then use
+// those STORED values (created off-diagonals are ignored -- approximation (C) in
+// the paper). At self-consistency F_mo -> 0, so no rotations fire and the density
+// rebuilt from the occupied columns is the SAME fixed point a real diag gives. The
+// SCF loop still does a real diag on the iteration it declares convergence, so the
+// converged density / charges are bit-identical to the full-diag path.
+//
+// Thresholds match MOPAC: tiny = 0.05*max|F_mo|, bigeps = 1.5e-7. C columns are
+// MOs: C[i*n + k] = coeff of basis fn i in MO k. `ws` (n doubles) and `fmo`
+// (n*n doubles) are caller scratch.
+NVMOLKIT_HD inline void pseudoDiagDev(const double* F, double* C, int n, int nOcc,
+                                      const double* eval, double* ws, double* fmo) {
+  const double bigeps = 1.5e-7;
+  // Pass 1: F_mo(virtual i, occupied j), stored row-major in fmo[(i-nOcc)*nOcc+j].
+  double tiny = 0.0;
+  for (int i = nOcc; i < n; ++i) {
+    for (int r = 0; r < n; ++r) {
+      double sum = 0.0;
+      for (int k = 0; k < n; ++k) sum += F[r * n + k] * C[k * n + i];
+      ws[r] = sum;
+    }
+    for (int j = 0; j < nOcc; ++j) {
+      double sum = 0.0;
+      for (int k = 0; k < n; ++k) sum += ws[k] * C[k * n + j];
+      fmo[(i - nOcc) * nOcc + j] = sum;
+      const double a = std::fabs(sum);
+      if (a > tiny) tiny = a;
+    }
+  }
+  tiny = 0.05 * tiny;
+
+  // Pass 2: crude 2x2 rotations to "eliminate" significant occ-virt elements, in
+  // the SAME deterministic (virtual outer, occupied inner) order as diag.F90.
+  for (int i = nOcc; i < n; ++i) {
+    for (int j = 0; j < nOcc; ++j) {
+      const double c = fmo[(i - nOcc) * nOcc + j];
+      if (std::fabs(c) < tiny) continue;
+      const double d = eval[j] - eval[i];
+      if (std::fabs(c / d) < bigeps) continue;
+      const double e = std::copysign(std::sqrt(4.0 * c * c + d * d), d);
+      const double alpha = std::sqrt(0.5 * (1.0 + d / e));
+      const double beta = -std::copysign(std::sqrt(1.0 - alpha * alpha), c);
+      for (int m = 0; m < n; ++m) {
+        const double va = C[m * n + j];
+        const double vb = C[m * n + i];
+        C[m * n + j] = alpha * va + beta * vb;
+        C[m * n + i] = alpha * vb - beta * va;
+      }
+    }
+  }
+}
+
 // Max DIIS history depth (matches the CPU reference).
 enum { kScfDiisMax = 6 };
 

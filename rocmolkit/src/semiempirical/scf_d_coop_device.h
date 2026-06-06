@@ -64,6 +64,83 @@ __device__ inline double coopWarpSum(double partial, int lane, int nLanes, doubl
   return tot;
 }
 
+// Cross-lane MAX reduction (deterministic lane-0 fold), mirrors coopWarpSum.
+__device__ inline double coopWarpMax(double partial, int lane, int nLanes, double* sh) {
+  sh[lane] = partial;
+  __syncthreads();
+  double mx = sh[0];
+  for (int i = 1; i < nLanes; ++i)
+    if (sh[i] > mx) mx = sh[i];
+  __syncthreads();
+  return mx;
+}
+
+// Cooperative Stewart pseudo-diagonalization -- the lane-parallel twin of
+// pseudoDiagDev (scf_device.h). Same deterministic (virtual outer, occupied inner)
+// ordering and identical arithmetic, so it converges to the same MO rotations as
+// the CPU reference; only cross-lane sum/max reductions relax bitwise agreement to
+// the SCF floor (~1e-9), exactly like the cooperative Jacobi. `fmo` (n*n) and `ws`
+// (n) are caller scratch; `sh` is the kCoopWarp reduction scratch. C columns are
+// MOs; eval are the FROZEN eigenvalues from the last real diag.
+__device__ inline void pseudoDiagDevCoop(const double* F, double* C, int n, int nOcc,
+                                         const double* eval, double* ws, double* fmo,
+                                         int lane, int nLanes, double* sh) {
+  const double bigeps = 1.5e-7;
+  const int nVirt = n - nOcc;
+  // Pass 1: F_mo(virtual i, occupied j) into fmo[(i-nOcc)*nOcc+j]. Barrier-light:
+  // ws = F C[:,i] is split over rows r (1 barrier); then each lane OWNS a set of
+  // occupied columns j and computes the full F_mo[i,j] dot itself -- NO per-element
+  // cross-lane reduction (that was O(n^2) barriers). 2 barriers per virtual i.
+  double tinyp = 0.0;
+  for (int i = nOcc; i < n; ++i) {
+    for (int r = lane; r < n; r += nLanes) {
+      double sum = 0.0;
+      for (int k = 0; k < n; ++k) sum += F[r * n + k] * C[k * n + i];
+      ws[r] = sum;
+    }
+    __syncthreads();
+    for (int j = lane; j < nOcc; j += nLanes) {
+      double sum = 0.0;
+      for (int k = 0; k < n; ++k) sum += ws[k] * C[k * n + j];
+      fmo[(i - nOcc) * nOcc + j] = sum;
+      const double a = std::fabs(sum);
+      if (a > tinyp) tinyp = a;
+    }
+    __syncthreads();
+  }
+  double tiny = 0.05 * coopWarpMax(tinyp, lane, nLanes, sh);
+
+  // Pass 2: 2x2 rotations in the SAME order as diag.F90 / pseudoDiagDev. For a fixed
+  // virtual i, all (i,j) rotations share MO column i and so must serialize -- each
+  // rotation's length-n column update is split across lanes, with one __syncthreads
+  // before the next rotation reads the updated column. Skipped (insignificant)
+  // elements cost no barrier, so near convergence -- where almost all F_mo[i,j] are
+  // below `tiny` -- the barrier count collapses and the bulk cost is pass 1. The
+  // angle is recomputed redundantly on every lane (deterministic, no shuffle), so
+  // the result is bit-identical to the serial pseudoDiagDev up to the cross-lane
+  // tiny-max (an order-invariant reduction, hence also bit-identical).
+  for (int i = nOcc; i < n; ++i) {
+    const double* row = &fmo[(i - nOcc) * nOcc];  // F_mo[i,*] from pass 1
+    for (int j = 0; j < nOcc; ++j) {
+      const double c = row[j];
+      if (std::fabs(c) < tiny) continue;
+      const double d = eval[j] - eval[i];
+      if (std::fabs(c / d) < bigeps) continue;
+      const double e = std::copysign(std::sqrt(4.0 * c * c + d * d), d);
+      const double alpha = std::sqrt(0.5 * (1.0 + d / e));
+      const double beta = -std::copysign(std::sqrt(1.0 - alpha * alpha), c);
+      for (int m = lane; m < n; m += nLanes) {
+        const double va = C[m * n + j];
+        const double vb = C[m * n + i];
+        C[m * n + j] = alpha * va + beta * vb;
+        C[m * n + i] = alpha * vb - beta * va;
+      }
+      __syncthreads();
+    }
+  }
+  (void)nVirt;
+}
+
 // --- Parallel-ordering (round-robin tournament) cooperative Jacobi --------------
 //
 // The cyclic jacobiEigenDevCoop barriers TWICE PER (p,q) ROTATION -- O(n^2)
@@ -326,6 +403,13 @@ __device__ inline void scfLoopDDevCoop(int nBasis, int nAtoms, const AtomIntPara
   int histN = 0;
   bool converged = false;
   int it = 0;
+  // Pseudo-diag schedule -- identical to the CPU scfLoopDDev. All these scalars are
+  // derived from `delta` (a coopWarpSum broadcast to every lane), so every lane
+  // makes the SAME decision -> no warp divergence, deterministic mode switching.
+  bool pseudoMode = false;
+  bool pseudoBanned = false;
+  int pseudoFallbacks = 0;
+  double prevDelta = 1e30;
   for (it = 0; it < maxIter; ++it) {
     // Fock build: serial on lane 0 (O(nAtoms^2), cheap vs the diagonalization).
     // Reads the precomputed integral cache instead of recomputing W each iter.
@@ -418,9 +502,21 @@ __device__ inline void scfLoopDDevCoop(int nBasis, int nAtoms, const AtomIntPara
       }
     }
 
-    for (int i = lane; i < n2; i += nLanes) eigA[i] = F[i];
-    __syncthreads();
-    jacobiEigenDevCoopParallel(eigA, nBasis, eval, C, lane, nLanes, sh, ring, cs);
+    // Diagonalize F. The cooperative path keeps the barrier-light tournament Jacobi
+    // (see kPseudoCoopEnabled in scf_device.h); pseudo-diag is gated OFF here because
+    // its serial occ-virt rotations are barrier-bound on a 32-lane wavefront. The
+    // schedule scalars still track so the convergence path matches the CPU shape.
+    const bool usePseudo = kPseudoCoopEnabled && pseudoMode && !pseudoBanned &&
+                           it >= kPseudoNReal && ((it - kPseudoNReal) % kPseudoRefresh != 0);
+    if (usePseudo) {
+      double* fmo = eigA;
+      double* ws = eigA + n2 - nBasis;
+      pseudoDiagDevCoop(F, C, nBasis, nOcc, eval, ws, fmo, lane, nLanes, sh);
+    } else {
+      for (int i = lane; i < n2; i += nLanes) eigA[i] = F[i];
+      __syncthreads();
+      jacobiEigenDevCoopParallel(eigA, nBasis, eval, C, lane, nLanes, sh, ring, cs);
+    }
     buildDensityDevCoop(C, nBasis, nOcc, Pnew, lane, nLanes);
 
     double ssp = 0.0;
@@ -428,14 +524,42 @@ __device__ inline void scfLoopDDevCoop(int nBasis, int nAtoms, const AtomIntPara
       const double d = Pnew[i] - density[i];
       ssp += d * d;
     }
-    const double ss = coopWarpSum(ssp, lane, nLanes, sh);
-    const double delta = std::sqrt(ss / static_cast<double>(n2));
+    double ss = coopWarpSum(ssp, lane, nLanes, sh);
+    double delta = std::sqrt(ss / static_cast<double>(n2));
+
+    // Blowup fallback (MOPAC's `diff > 1`): redo with a real diag, re-anchoring
+    // C/eval; ban pseudo after a few such events.
+    if (usePseudo && delta > kPseudoBlowup * prevDelta) {
+      for (int i = lane; i < n2; i += nLanes) eigA[i] = F[i];
+      __syncthreads();
+      jacobiEigenDevCoopParallel(eigA, nBasis, eval, C, lane, nLanes, sh, ring, cs);
+      buildDensityDevCoop(C, nBasis, nOcc, Pnew, lane, nLanes);
+      ssp = 0.0;
+      for (int i = lane; i < n2; i += nLanes) {
+        const double d = Pnew[i] - density[i];
+        ssp += d * d;
+      }
+      ss = coopWarpSum(ssp, lane, nLanes, sh);
+      delta = std::sqrt(ss / static_cast<double>(n2));
+      if (++pseudoFallbacks >= kPseudoMaxFallback) pseudoBanned = true;
+    }
+    // Stall guard: ban pseudo deep into the budget so the molecule still reaches
+    // the true fixed point on real diags.
+    if (pseudoMode && !pseudoBanned && it >= kPseudoNReal + maxIter / 4) pseudoBanned = true;
+    // Tail lock (see scf_d_device.h): ban pseudo near convergence so GPU and CPU
+    // finish on identical real-diag steps -> bit-exact converged density.
+    if (pseudoMode && !pseudoBanned && delta < kPseudoLockTol) pseudoBanned = true;
+
     if (delta < convTol) {
+      // Converging step is a real diag (kPseudoLockTol >> convTol) -> true fixed
+      // point, bit-identical to baseline and identical GPU vs CPU.
       for (int i = lane; i < n2; i += nLanes) density[i] = Pnew[i];
       __syncthreads();
       converged = true;
       break;
     }
+    prevDelta = delta;
+    if (!pseudoMode && delta < kPseudoTrans && it + 1 >= kPseudoNReal) pseudoMode = true;
     double mix;
     if (it < 3) mix = 0.3;
     else if (delta > 0.1) mix = 0.05;

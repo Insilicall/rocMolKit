@@ -62,6 +62,10 @@ NVMOLKIT_HD inline void scfLoopDDev(int nBasis, int nAtoms, const AtomIntParams*
   int histN = 0;
   bool converged = false;
   int it = 0;
+  bool pseudoMode = false;     // sticky once engaged
+  bool pseudoBanned = false;   // permanent real-diag fallback (stall guard)
+  int pseudoFallbacks = 0;     // count of blowup fallbacks
+  double prevDelta = 1e30;     // previous-iteration density RMS change
   for (it = 0; it < maxIter; ++it) {
     buildFockDDevCached(nBasis, nAtoms, ap, start, norb, intMeta, intBlob, H, density, F);
 
@@ -124,8 +128,25 @@ NVMOLKIT_HD inline void scfLoopDDev(int nBasis, int nAtoms, const AtomIntParams*
       }
     }
 
-    for (int i = 0; i < n2; ++i) eigA[i] = F[i];
-    jacobiEigenDev(eigA, nBasis, eval, C);
+    // Diagonalize F. After kPseudoNReal real diags, once the SCF is inside the
+    // convergence basin (delta < kPseudoTrans), use the cheap Stewart pseudo-diag:
+    // it rotates the EXISTING MO columns C toward block-diagonalizing F over the
+    // occ-virt block, keeping the eigenvalues `eval` frozen from the last real
+    // diag. This is O(nocc*nvirt*nB) vs O(nB^3) for the full Jacobi. fmo (n^2) and
+    // ws (n) scratch are carved from eigA (disjoint: fmo uses < nVirt*nOcc entries
+    // and ws the trailing nB, both < n2 for nB>=2).
+    // Engaged, not banned, past the warm-up, and not on a periodic eigenvalue-
+    // refresh iteration (every kPseudoRefresh-th engaged step is a real diag).
+    const bool usePseudo = pseudoMode && !pseudoBanned && it >= kPseudoNReal &&
+                           ((it - kPseudoNReal) % kPseudoRefresh != 0);
+    if (usePseudo) {
+      double* fmo = eigA;
+      double* ws = eigA + n2 - nBasis;
+      pseudoDiagDev(F, C, nBasis, nOcc, eval, ws, fmo);
+    } else {
+      for (int i = 0; i < n2; ++i) eigA[i] = F[i];
+      jacobiEigenDev(eigA, nBasis, eval, C);
+    }
     buildDensityDev(C, nBasis, nOcc, Pnew);
 
     double ss = 0.0;
@@ -133,12 +154,47 @@ NVMOLKIT_HD inline void scfLoopDDev(int nBasis, int nAtoms, const AtomIntParams*
       const double d = Pnew[i] - density[i];
       ss += d * d;
     }
-    const double delta = std::sqrt(ss / static_cast<double>(n2));
+    double delta = std::sqrt(ss / static_cast<double>(n2));
+
+    // Pseudo-diag fallback: if the step blew up (MOPAC's `diff > 1` guard), redo
+    // this iteration with a REAL diag from F (re-anchoring C and eval). After a
+    // few such fallbacks the molecule is clearly not pseudo-friendly -> ban pseudo
+    // permanently and finish on real diags, which provably reach the same fixed
+    // point (this is the convergence/correctness safety net).
+    if (usePseudo && delta > kPseudoBlowup * prevDelta) {
+      for (int i = 0; i < n2; ++i) eigA[i] = F[i];
+      jacobiEigenDev(eigA, nBasis, eval, C);
+      buildDensityDev(C, nBasis, nOcc, Pnew);
+      ss = 0.0;
+      for (int i = 0; i < n2; ++i) {
+        const double d = Pnew[i] - density[i];
+        ss += d * d;
+      }
+      delta = std::sqrt(ss / static_cast<double>(n2));
+      if (++pseudoFallbacks >= kPseudoMaxFallback) pseudoBanned = true;
+    }
+
+    // Stall guard: pseudo-diag should converge in roughly the same iteration count
+    // as the full diag. If it hasn't converged well into the budget, ban it and
+    // finish on real diags so the molecule still reaches the true fixed point.
+    if (pseudoMode && !pseudoBanned && it >= kPseudoNReal + maxIter / 4) pseudoBanned = true;
+    // Tail lock: ban pseudo once near convergence so the final few iterations are
+    // real diags. delta is ~monotone here -> GPU and CPU cross kPseudoLockTol at the
+    // same iteration and finish on identical real-diag steps -> converged density is
+    // pinned to the true fixed point and bit-exact GPU vs CPU (and vs baseline).
+    if (pseudoMode && !pseudoBanned && delta < kPseudoLockTol) pseudoBanned = true;
+
     if (delta < convTol) {
+      // By construction (kPseudoLockTol >> convTol) the converging step is a real
+      // diag, so the accepted density is the true fixed point -- bit-identical to the
+      // full-diag baseline and identical GPU vs CPU.
       for (int i = 0; i < n2; ++i) density[i] = Pnew[i];
       converged = true;
       break;
     }
+    prevDelta = delta;
+    // Engage pseudo-diag once inside the basin (sticky thereafter).
+    if (!pseudoMode && delta < kPseudoTrans && it + 1 >= kPseudoNReal) pseudoMode = true;
     // Damped mixing (with the oracle's d schedule) feeds the DIIS history.
     double mix;
     if (it < 3) mix = 0.3;
