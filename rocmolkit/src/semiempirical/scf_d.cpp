@@ -49,6 +49,7 @@ bool pm6dCharges(int nAtoms, const int* atoms, const double* coords, double* q,
     nBasis += norb[a];
     nElec += pm6ValenceElectrons(atoms[a]);
   }
+  if (!dSpOverlapPairsSupported(nAtoms, ap.data())) return false;  // unsupported d-sp overlap
   nElec -= charge;  // cation (+) removes electrons; anion (-) adds them
   if (nBasis == 0 || nElec <= 0) return false;
   const int n2 = nBasis * nBasis;
@@ -140,6 +141,7 @@ bool pm6dGradient(int nAtoms, const int* atoms, const double* coords, double* gr
     nBasis += norb[a];
     nElec += pm6ValenceElectrons(atoms[a]);
   }
+  if (!dSpOverlapPairsSupported(nAtoms, ap.data())) return false;  // unsupported d-sp overlap
   if (nBasis == 0 || nElec % 2 != 0) return false;  // unsupported / open shell
 
   const int n2 = nBasis * nBasis;

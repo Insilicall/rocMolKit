@@ -242,13 +242,32 @@ above; both charge distributions symmetric). Matching MOPAC's exact converger
 (Camp-King) for such pathological cases is future work; the open-shell GPU kernel
 is likewise deferred (UHF is sp+d but cheap enough on the CPU).
 
+### Transition metals + the d-shell overlap coverage gate
+
 UHF unblocks the **active-d transition metals** (Sc–Cu, Z=21–29; mostly
 open-shell), which additionally need `qnD = qn−1` (3d, vs the current `qnD = qn`)
-and a **metal-sp(qn 4/5/6) × ligand-d(qn 3) overlap** formula (the historical
-sp-partners were qn ≤ 2). The closed-shell **group-12** metals (Zn/Cd/Hg, d¹⁰
-core → sp) already match MOPAC for sp ligands (ZnF₂ Δq = 0) but need that same
-metal-sp × ligand-d overlap for the halides. Heavier TM (Y–Cd, La–Hg) are param
-stubs to be regenerated from the canonical PYSEQM/MOPAC CSV.
+and a **metal-sp(qn 4/5/6) × ligand-d(qn 3) overlap** formula. This last piece is
+the gating blocker: the `dsBlockDev`/`dpBlockDev` Slater polynomials only cover
+**dqn3 × {1,2,3}, dqn4 × {1,2,4}, dqn5 × {1,2,5}** (sigma/pi for the parameterized
+main-group pairs); PYSEQM never tabulates the metal-sp × ligand-d combinations
+(its table is `qni ≥ qnj` only), so they need a from-scratch derivation + MOPAC
+validation. The closed-shell **group-12** metals (Zn/Cd/Hg, d¹⁰ core → sp) match
+MOPAC for sp-only ligands (ZnF₂) but hit exactly this gap for the d-ligand halides
+(ZnCl₂ etc.), so they stay unsupported (`pm6ValenceElectrons → 0`).
+
+**Correctness gate (shipped).** The same gap silently affected *already-enabled*
+main-group elements: a qn≥4 sp atom (Ga/Ge/Se, In/Sn/Te) or qn3 sp atom next to a
+qn3/4/5 **d** ligand fell through to a same-qn formula (e.g. `p6`/`jcall8`) and
+returned a **wrong** overlap — and a qn≥4 sp atom next to a lower-qn d atom
+**stack-overflowed** a `tmp[16]` scratch in `diatomOverlapSpDev`. Both are now
+fixed: the scratch is sized for a d partner, and `dSpOverlapPairsSupported`
+(`overlap_d_device.h`) gates every molecule on the CPU (`pm6dCharges`,
+`pm6dGradient`) and GPU (`scfBatchDGpu`) paths, so an unsupported d-sp pair now
+**fails cleanly (returns false / None) instead of crashing or lying**. No
+validated molecule is affected (light + halides + interhalides all pass).
+
+Heavier TM (Y–Cd, La–Hg) are param stubs to be regenerated from the canonical
+PYSEQM/MOPAC CSV.
 
 ## Two-step methodology
 

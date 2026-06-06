@@ -122,7 +122,11 @@ NVMOLKIT_HD inline int diatomOverlapSpDev(const AtomIntParams& pA, const double 
   }
 
   if (pA.qn < pB.qn) {  // PYSEQM convention: heavier (higher qn) atom first.
-    double tmp[16];
+    // Sized for a d-bearing partner (nOrb up to 9): the sp helper lays the sp
+    // overlap into the full nOrb-strided block (d slots zeroed), so the swapped
+    // product can be up to 9*9. (Was tmp[16] -- a stack overflow when the
+    // lower-qn atom carries d, e.g. a qn>=4 sp metal next to a qn3 d ligand.)
+    double tmp[81];
     diatomOverlapSpDev(pB, coordB, pA, coordA, tmp);
     for (int i = 0; i < nA; ++i)
       for (int j = 0; j < nB; ++j) outBlock[i * nB + j] = tmp[j * nA + i];
