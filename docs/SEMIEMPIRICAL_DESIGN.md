@@ -219,6 +219,16 @@ multi-solution case — H_core guess lands 44 kcal/mol too high; the diagonal gu
 fixes it), NF2•, CH3O• (doublets) and **O₂ (triplet)** — worst |Δq| = 1e-4, HoF
 within 0.56 kcal/mol. Closed-shell RHF is unchanged.
 
+**d-orbital UHF.** The baked one-center d `W` folds Coulomb and exchange together
+(`W = intg[rep] − ¼intg[rf1] − ¼intg[rf2]`). Splitting it gives a pure Coulomb
+`W_J = intg[rep]` (contracts with the total density) and exchange
+`W_Kfold = ¼(intg[rf1]+intg[rf2])`; the UHF d Fock is
+`Fσ = ΣW_J·Pt − 2·ΣW_Kfold·Pσ`, which reduces to the closed-shell `W` at
+`Pσ = Pt/2`. `W_J − W_Kfold` reproduces the oracle to ~1e-15. `fock_d_uhf_device.h`
+mirrors `buildFockDDev` branch-for-branch in UHF form, so d-bearing radicals work:
+**ClO•, PO• (doublets), SO (triplet) bit-exact to MOPAC** (`validate_pm6d_uhf.py`).
+The closed-shell RHF (`kW`) and GPU paths are untouched.
+
 The **Python binding** (`PM6DCharges`) classifies each molecule from its formal
 charge + RDKit radical electrons: closed-shell molecules go into one GPU batch
 (`scfBatchDGpu`), open-shell ones fall back to the CPU UHF `pm6dCharges`, and the
@@ -226,10 +236,11 @@ results are scattered back into the original order — so radicals are usable
 through the binding. Validated on gfx1200: a mixed batch routes correctly (closed
 GPU charges match CPU to <1e-14, radicals solved on CPU UHF).
 
-**Pending on the UHF path:** the **d-orbital** UHF — the one-center d `W`
-packing folds J and K together, so d-bearing open-shell atoms still return false
-(needed for active-d transition metals). The GPU kernel itself stays closed-shell
-(open-shell is sp-only and cheap on the CPU).
+**Known hard case:** `ClO2•` is a UHF multi-solution system where the engine
+converges to a higher symmetric UHF solution than MOPAC's (HoF ~25 kcal/mol
+above; both charge distributions symmetric). Matching MOPAC's exact converger
+(Camp-King) for such pathological cases is future work; the open-shell GPU kernel
+is likewise deferred (UHF is sp+d but cheap enough on the CPU).
 
 UHF unblocks the **active-d transition metals** (Sc–Cu, Z=21–29; mostly
 open-shell), which additionally need `qnD = qn−1` (3d, vs the current `qnD = qn`)
