@@ -33,11 +33,14 @@ namespace semiempirical {
 //   convergedAll (out)  : 1/0 per molecule (length nMol)
 //   hofPm6All (out)     : per-molecule canonical (MOPAC-aligned) PM6 heat of
 //                         formation (kcal/mol), length nMol; may be nullptr to skip.
+//   molCharge (in)      : per-molecule net charge (length nMol); nullptr = all
+//                         neutral. Electron count is sum(valence) - charge.
 // Returns false on an unsupported element or odd-electron (open-shell) molecule.
 bool scfBatchDGpu(int nMol, const int* molNAtoms, const int* molNBasis,
                   const int* atomsAll, const double* coordsAll,
                   double* chargesAll, double* hofAll, int* convergedAll,
-                  int maxIter = 800, double convTol = 1e-10, double* hofPm6All = nullptr);
+                  int maxIter = 800, double convTol = 1e-10, double* hofPm6All = nullptr,
+                  const int* molCharge = nullptr);
 
 }  // namespace semiempirical
 }  // namespace nvMolKit

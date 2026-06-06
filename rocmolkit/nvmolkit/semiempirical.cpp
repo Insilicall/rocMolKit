@@ -44,31 +44,35 @@ boost::python::object pm6dChargesBatch(const boost::python::list& mols) {
   for (int m = 0; m < nMol; ++m)
     molsVec[m] = extract<const RDKit::ROMol*>(boost::python::object(mols[m]));
 
-  std::vector<int> molNAtoms(nMol), molNBasis(nMol), atomsAll;
+  std::vector<int> molNAtoms(nMol), molNBasis(nMol), molCharge(nMol), atomsAll;
   std::vector<double> coordsAll;
   for (int m = 0; m < nMol; ++m) {
     const RDKit::ROMol* mol = molsVec[m];
     const int na = static_cast<int>(mol->getNumAtoms());
     const RDKit::Conformer& conf = mol->getConformer();  // throws if none
     molNAtoms[m] = na;
-    int nb = 0;
+    int nb = 0, charge = 0;
     for (int a = 0; a < na; ++a) {
-      const int z = static_cast<int>(mol->getAtomWithIdx(a)->getAtomicNum());
+      const RDKit::Atom* atom = mol->getAtomWithIdx(a);
+      const int z = static_cast<int>(atom->getAtomicNum());
       atomsAll.push_back(z);
       nb += nvMolKit::semiempirical::pm6NumOrbitals(z);
+      charge += atom->getFormalCharge();
       const RDGeom::Point3D& p = conf.getAtomPos(a);
       coordsAll.push_back(p.x);
       coordsAll.push_back(p.y);
       coordsAll.push_back(p.z);
     }
     molNBasis[m] = nb;
+    molCharge[m] = charge;  // net formal charge -> ionic electron count
   }
 
   std::vector<double> chargesAll(atomsAll.size()), hofAll(nMol), hofPm6All(nMol);
   std::vector<int> convAll(nMol);
   const bool ok = nvMolKit::semiempirical::scfBatchDGpu(
       nMol, molNAtoms.data(), molNBasis.data(), atomsAll.data(), coordsAll.data(),
-      chargesAll.data(), hofAll.data(), convAll.data(), 800, 1e-10, hofPm6All.data());
+      chargesAll.data(), hofAll.data(), convAll.data(), 800, 1e-10, hofPm6All.data(),
+      molCharge.data());
 
   boost::python::list out;
   int off = 0, coff = 0;

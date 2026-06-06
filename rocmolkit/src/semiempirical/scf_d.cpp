@@ -34,7 +34,8 @@ namespace nvMolKit {
 namespace semiempirical {
 
 bool pm6dCharges(int nAtoms, const int* atoms, const double* coords, double* q,
-                 double* hofKcal, int maxIter, double convTol, double* hofPm6Kcal) {
+                 double* hofKcal, int maxIter, double convTol, double* hofPm6Kcal,
+                 int charge) {
   if (nAtoms <= 0) return false;
 
   std::vector<AtomIntParams> ap(nAtoms);
@@ -47,7 +48,8 @@ bool pm6dCharges(int nAtoms, const int* atoms, const double* coords, double* q,
     nBasis += norb[a];
     nElec += pm6ValenceElectrons(atoms[a]);
   }
-  if (nBasis == 0 || nElec % 2 != 0) return false;  // unsupported / open shell
+  nElec -= charge;  // cation (+) removes electrons; anion (-) adds them
+  if (nBasis == 0 || nElec <= 0 || nElec % 2 != 0) return false;  // unsupported / open shell
 
   const int n2 = nBasis * nBasis;
   std::vector<double> H(n2), density(n2), eval(nBasis), F(n2), eigA(n2), C(n2), Pnew(n2),

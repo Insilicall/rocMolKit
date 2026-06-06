@@ -192,6 +192,15 @@ overlap) is verified **GPU == CPU on real gfx1200 hardware** to floating-point
 rounding by `validate_gpu_cpu.py` (worst |Δq| = 2.2e-14, |ΔHoF| = 1.6e-11,
 |ΔHoF_pm6| = 1.9e-11 kcal/mol).
 
+**Charged species (ions).** `pm6dCharges` and `scfBatchDGpu` take a net molecular
+charge (the Python binding reads it from each RDKit molecule's formal charges):
+the electron count is `sum(valence) - charge`, so a cation removes electrons and
+an anion adds them, and the converged Mulliken charges sum to the net charge.
+Closed-shell ions match MOPAC bit-exact on charges (worst |Δq| = 1e-4) with HoF
+within ~0.4 kcal/mol — `validate_pm6d_ions.py` (NH4⁺, CH3NH3⁺, OH⁻, CN⁻, Cl⁻,
+HCOO⁻); GPU == CPU to FP rounding. Open-shell (odd-electron) systems still return
+false (RHF only).
+
 ## Two-step methodology
 
 1. **CPU oracle first.** Rather than write our own NumPy SCF, we reuse the

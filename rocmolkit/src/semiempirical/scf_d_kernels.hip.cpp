@@ -86,7 +86,7 @@ __global__ void scfBatchDKernel(int nMol, const AtomIntParams* ap, const int* st
 bool scfBatchDGpu(int nMol, const int* molNAtoms, const int* molNBasis,
                   const int* atomsAll, const double* coordsAll,
                   double* chargesAll, double* hofAll, int* convergedAll,
-                  int maxIter, double convTol, double* hofPm6All) {
+                  int maxIter, double convTol, double* hofPm6All, const int* molCharge) {
   if (nMol <= 0) return true;
 
   std::vector<int> atomOff(nMol), nOcc(nMol);
@@ -116,7 +116,8 @@ bool scfBatchDGpu(int nMol, const int* molNAtoms, const int* molNBasis,
       off += o.nOrb;
       nElec += o.valence;
     }
-    if (nElec % 2 != 0) return false;  // open shell not handled
+    nElec -= molCharge ? molCharge[m] : 0;  // cation (+) removes electrons
+    if (nElec <= 0 || nElec % 2 != 0) return false;  // open shell / invalid
     nOcc[m] = nElec / 2;
   }
 
