@@ -254,32 +254,35 @@ above; both charge distributions symmetric). Matching MOPAC's exact converger
 (Camp-King) for such pathological cases is future work; the open-shell GPU kernel
 is likewise deferred (UHF is sp+d but cheap enough on the CPU).
 
-### Transition metals + the d-shell overlap coverage gate
+### General Slater overlap (MOPAC port) + group-12 metals
 
-UHF unblocks the **active-d transition metals** (Sc–Cu, Z=21–29; mostly
-open-shell), which additionally need `qnD = qn−1` (3d, vs the current `qnD = qn`)
-and a **metal-sp(qn 4/5/6) × ligand-d(qn 3) overlap** formula. This last piece is
-the gating blocker: the `dsBlockDev`/`dpBlockDev` Slater polynomials only cover
-**dqn3 × {1,2,3}, dqn4 × {1,2,4}, dqn5 × {1,2,5}** (sigma/pi for the parameterized
-main-group pairs); PYSEQM never tabulates the metal-sp × ligand-d combinations
-(its table is `qni ≥ qnj` only), so they need a from-scratch derivation + MOPAC
-validation. The closed-shell **group-12** metals (Zn/Cd/Hg, d¹⁰ core → sp) match
-MOPAC for sp-only ligands (ZnF₂) but hit exactly this gap for the d-ligand halides
-(ZnCl₂ etc.), so they stay unsupported (`pm6ValenceElectrons → 0`).
+The per-jcall overlap (`overlap_device.h` + `dsBlockDev`/`dpBlockDev`/`ddBlockDev`
++ the interhalide kernel) only tabulated specific (dqn, partner-qn) combinations:
+**dqn3 × {1,2,3}, dqn4 × {1,2,4}, dqn5 × {1,2,5}**. Anything else (a qn≥4 sp atom
+— Zn/Cd/Hg, Ga/Ge/Se, In/Sn/Te — next to a qn3 d ligand) either fell through to a
+**wrong** same-qn formula or **stack-overflowed** a `tmp[16]` scratch. We first
+shipped a gate (fail-clean) for these, then **solved it properly**: MOPAC is open
+source (openmopac/mopac, Apache-2.0) and its diatomic overlap is a *single general
+analytic Slater routine* (`ss` + `bfn` + `coe` + `diat` assembly) valid for **any**
+principal/angular quantum number. We ported it to `overlap_mopac_device.h`
+(`mopDiat`), validated it **bit-exact to MOPAC's `OVERLAP_MATRIX`**
+(`validate_mopac_overlap_port.py`: HCl/H2S/HBr/HI/ZnCl₂ to ~1e-15, incl. the
+metal-sp × ligand-d block), and routed the d-path core Hamiltonian through it.
+The per-jcall path and the gate are gone from the SCF; the legacy block builders
+remain only for the component validators.
 
-**Correctness gate (shipped).** The same gap silently affected *already-enabled*
-main-group elements: a qn≥4 sp atom (Ga/Ge/Se, In/Sn/Te) or qn3 sp atom next to a
-qn3/4/5 **d** ligand fell through to a same-qn formula (e.g. `p6`/`jcall8`) and
-returned a **wrong** overlap — and a qn≥4 sp atom next to a lower-qn d atom
-**stack-overflowed** a `tmp[16]` scratch in `diatomOverlapSpDev`. Both are now
-fixed: the scratch is sized for a d partner, and `dSpOverlapPairsSupported`
-(`overlap_d_device.h`) gates every molecule on the CPU (`pm6dCharges`,
-`pm6dGradient`) and GPU (`scfBatchDGpu`) paths, so an unsupported d-sp pair now
-**fails cleanly (returns false / None) instead of crashing or lying**. No
-validated molecule is affected (light + halides + interhalides all pass).
+**Group-12 metals (Zn/Cd/Hg) — shipped.** With the general overlap the metal-sp ×
+ligand-d block is exact, and the two-electron integrals + PWCCT core-core already
+handled the metals, so the overlap was the *sole* blocker. `pm6ValenceElectrons`
+returns 2 for Zn/Cd/Hg; charges are **bit-exact to MOPAC** (`validate_pm6d_metals.py`:
+ZnCl₂/ZnBr₂/CdCl₂/HgCl₂/ZnClBr and the formerly silently-wrong **GaCl₃**, worst
+Δq = 1e-4), on the CPU and the GPU batch (GPU == CPU). Their HoF is reported NaN
+(group-12 EISOL is uncalibrated). Hg (Z=80) exceeds `kPwcctMaxZ`, so the HoF
+lookups bound-check the index (NaN, no out-of-range read).
 
-Heavier TM (Y–Cd, La–Hg) are param stubs to be regenerated from the canonical
-PYSEQM/MOPAC CSV.
+**Still open: active-d transition metals** (Sc–Cu, Z=21–29) need `qnD = qn−1`
+(3d) and are mostly open-shell (UHF d is done); heavier TM (Y–Cd, La–Hg) are
+param stubs. The overlap — historically the hard blocker — is no longer one.
 
 ## Two-step methodology
 
