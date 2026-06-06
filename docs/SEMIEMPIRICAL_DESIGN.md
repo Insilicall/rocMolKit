@@ -18,23 +18,27 @@ provenance, and method are in the sections below):
 | Ions (net charge) | NH4⁺, OH⁻, CN⁻, Cl⁻, … | `validate_pm6d_ions` |
 | **Open-shell UHF** (sp + d radicals) | 12 radicals incl. NO₂•, ClO•, O₂ | `validate_pm6d_uhf` |
 | **Group-12 metals** | Zn, Cd, Hg (+ halides) | `validate_pm6d_metals` |
-| **Active-d transition metals** (d⁰) | **Sc, Ti, V, Cr** | `validate_pm6d_tm` (CPU+GPU) |
+| **Active-d transition metals** (full 3d row) | **Sc–Cu** (Sc Ti V Cr Mn Fe Co Ni Cu) | `validate_pm6d_tm` (CPU+GPU) |
 | Canonical PM6 **heat of formation** | 19 elements (see below) | `validate_pm6_mopac`, `validate_pm6d_hof_pwcct` |
 | Energy gradient + L-BFGS geometry opt | all supported | `validate_pm6d_gradient`, `validate_pm6d_optimize` |
 | PM6-D3H4 (D3 + H4 + H-H) post-SCF | light + halides | (in the binding) |
 
-**Supported elements** (Mulliken charges bit-exact to MOPAC, 23 elements):
-H, B, C, N, O, F, Al, Si, P, S, Cl, Sc, Ti, V, Cr, Zn, Ga, Ge, Br, Cd, Sn, I, Hg.
+**Supported elements** (Mulliken charges bit-exact to MOPAC, 28 elements):
+H, B, C, N, O, F, Al, Si, P, S, Cl, Sc, Ti, V, Cr, Mn, Fe, Co, Ni, Cu, Zn, Ga, Ge,
+Br, Cd, Sn, I, Hg — the **whole first transition row Sc–Cu**. The d⁰/d¹⁰ TM
+(Sc/Ti/V/Cr/Cu) run closed-shell on CPU **and** GPU; the open-shell TM (Mn/Fe/Co/Ni,
+high-spin) run via UHF on the CPU.
 
 **Heat of formation** (canonical PM6, ≤~1 kcal/mol of MOPAC, 19 elements):
 H, B, C, N, O, F, Al, Si, P, S, Cl, Zn, Ga, Ge, Br, Cd, Sn, I, Hg. (The d⁰ TM
 Sc/Ti/V/Cr have bit-exact charges but their HoF is reported NaN — EISOL/PWCCT not
 yet calibrated; the NaN guard keeps it honest, never a wrong number.)
 
-**Not yet supported** (fail cleanly — never a wrong/crashing result): Mn–Cu
-(populated-d TM, two-center d-electron residual being closed), As/Sb (d-basis
-present, W not yet baked — the Al/Si treatment applies), heavier TM (Y–Cd, La–Hg
-param stubs), and the open-shell GPU batch (UHF runs on the CPU path).
+**Not yet supported** (fail cleanly — never a wrong/crashing result): open-shell
+metal + d-ligand (e.g. MnCl₂ — the UHF YY two-center d contraction; the metal
+*fluorides* are bit-exact), As/Sb (d-basis present, W not yet baked — the Al/Si
+treatment applies), heavier TM (Y–Cd, La–Hg param stubs), and the open-shell GPU
+batch (UHF runs on the CPU path).
 
 **Performance.** The batched GPU SCF (`scfBatchDGpu`) is correctness-first
 (one-block-per-molecule, bit-exact); at drug sizes it is currently ~4× slower than
