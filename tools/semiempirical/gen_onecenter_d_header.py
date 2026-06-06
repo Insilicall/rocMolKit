@@ -121,6 +121,31 @@ def main() -> None:
         out.append(f"\nconstexpr double kW{z}[243] = {{{body}}};\n")
         wswitch.append(f"  if (z == {z}) return kW{z};")
 
+    # Per-element J/K split for the open-shell (UHF) path: W = W_J - W_Kfold.
+    # W_J[j] = intg[rep] (pure Coulomb, contracts with the total density);
+    # W_Kfold[j] = 1/4*(intg[rf1]+intg[rf2]) (exchange). The UHF d Fock is
+    #   F^sigma = sum W_J * Pp_total  -  2 * sum W_Kfold * Pp_sigma,
+    # which reduces to the closed-shell W (Pp_sigma = Pp_total/2). Validated
+    # bit-exact to the oracle compute_w_integrals (W reproduced to ~1e-15).
+    if "W_J" in d and "W_Kfold" in d:
+        jswitch, kswitch = [], []
+        for zk in d["W_J"]:
+            z = int(zk)
+            bj = ", ".join(repr(float(v)) for v in d["W_J"][zk])
+            bk = ", ".join(repr(float(v)) for v in d["W_Kfold"][zk])
+            out.append(f"\nconstexpr double kWJ{z}[243] = {{{bj}}};\n")
+            out.append(f"constexpr double kWK{z}[243] = {{{bk}}};\n")
+            jswitch.append(f"  if (z == {z}) return kWJ{z};")
+            kswitch.append(f"  if (z == {z}) return kWK{z};")
+        out.append(
+            "\n// Coulomb-only W_J (* total density) for the UHF one-center d Fock.\n"
+            "NVMOLKIT_HD inline const double* oneCenterDWJ(int z) {\n"
+            + "\n".join(jswitch) + "\n  return nullptr;\n}\n")
+        out.append(
+            "\n// Exchange W_Kfold (UHF uses 2x * the same-spin density) for the d Fock.\n"
+            "NVMOLKIT_HD inline const double* oneCenterDWK(int z) {\n"
+            + "\n".join(kswitch) + "\n  return nullptr;\n}\n")
+
     out.append(FOOTER % {"WSWITCH": "\n".join(wswitch)})
     SRC.write_text("".join(out))
     print(f"wrote {SRC.relative_to(ROOT)}  ({len(d['W'])} elements, kFlN={len(wi)})")

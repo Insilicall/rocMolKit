@@ -1,13 +1,14 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025 InsilicAll. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Open-shell (UHF) PM6 SCF for sp-only molecules (radicals: doublets, triplets,
-// ...). Two spin densities Pa/Pb with two Focks Fs = H + J(Pa+Pb) - K(Ps). The
+// Open-shell (UHF) PM6_D SCF (radicals: doublets, triplets, ...). Two spin
+// densities Pa/Pb with two Focks Fs = H + J(Pa+Pb) - K(Ps) built by
+// buildFockDUHFDev (fock_d_uhf_device.h), which handles sp AND d atoms. The
 // closed-shell NDDO Fock bakes a factor 1/2 into each two-electron term; here the
 // Coulomb J uses the total density and the exchange K the same-spin density
-// (closed shell is the special case Ps = 1/2 (Pa+Pb)). d-orbital atoms are not
-// yet supported on this path (the one-center d W folds J and K together). The sp
-// Fock split is validated bit-exact to MOPAC UHF (CH3., NO., OH.).
+// (closed shell is the special case Ps = 1/2 (Pa+Pb)). The diagonal atomic guess
+// + decaying level shift converge UHF multi-solution cases (NO2.) to MOPAC.
+// Validated bit-exact to MOPAC UHF (sp + d radicals; validate_pm6d_uhf.py).
 
 #ifndef NVMOLKIT_SEMIEMPIRICAL_SCF_UHF_DEVICE_H
 #define NVMOLKIT_SEMIEMPIRICAL_SCF_UHF_DEVICE_H
@@ -16,81 +17,11 @@
 #include <vector>
 
 #include "device_macros.h"
+#include "fock_d_uhf_device.h"   // buildFockDUHFDev (sp + d UHF Fock)
 #include "scf_d_device.h"        // jacobiEigenDev, buildDensityDev
-#include "two_center_device.h"   // twoCenterMolecularDev, detail::wIdxDev
 
 namespace nvMolKit {
 namespace semiempirical {
-
-// One-center sp two-electron contribution for spin sigma: J(Ptot) - K(Pspin).
-NVMOLKIT_HD inline void fockOneCenterSpUHFDev(int nB, const AtomIntParams& p, int s, int norb,
-                                              const double* Pt, const double* Ps, double* F) {
-  const double Tss = Pt[s * nB + s], Sss = Ps[s * nB + s];
-  if (norb == 1) {
-    F[s * nB + s] += Tss * p.gss - Sss * p.gss;  // J - K
-    return;
-  }
-  const int p0 = s + 1, p1 = s + 2, p2 = s + 3;
-  const double Tpp = Pt[p0 * nB + p0] + Pt[p1 * nB + p1] + Pt[p2 * nB + p2];
-  const double Spp = Ps[p0 * nB + p0] + Ps[p1 * nB + p1] + Ps[p2 * nB + p2];
-  F[s * nB + s] += (Tss * p.gss + Tpp * p.gsp) - (Sss * p.gss + Spp * p.hsp);
-  for (int k = 1; k <= 3; ++k) {
-    const int pk = s + k;
-    const double Tpk = Pt[pk * nB + pk], Spk = Ps[pk * nB + pk];
-    F[pk * nB + pk] += (Tss * p.gsp + Tpk * p.gpp + (Tpp - Tpk) * p.gp2)
-                       - (Sss * p.hsp + Spk * p.gpp + (Spp - Spk) * 0.5 * (p.gpp - p.gp2));
-    const double off = 2.0 * Pt[s * nB + pk] * p.hsp - Ps[s * nB + pk] * (p.gsp + p.hsp);
-    F[s * nB + pk] += off;
-    F[pk * nB + s] += off;
-  }
-  for (int k = 1; k <= 3; ++k)
-    for (int l = k + 1; l <= 3; ++l) {
-      const int pk = s + k, pl = s + l;
-      const double v = Pt[pk * nB + pl] * (p.gpp - p.gp2) - 0.5 * Ps[pk * nB + pl] * (p.gpp + p.gp2);
-      F[pk * nB + pl] += v;
-      F[pl * nB + pk] += v;
-    }
-}
-
-// Full sp-only UHF Fock for spin sigma: F = H + J(Pt) - K(Ps).
-NVMOLKIT_HD inline void buildFockSpUHFDev(int nB, int nA, const AtomIntParams* ap,
-                                          const int* start, const int* norb, const double* coords,
-                                          const double* H, const double* Pt, const double* Ps,
-                                          double* F) {
-  for (int t = 0; t < nB * nB; ++t) F[t] = H[t];
-  for (int a = 0; a < nA; ++a) fockOneCenterSpUHFDev(nB, ap[a], start[a], norb[a], Pt, Ps, F);
-  for (int i = 0; i < nA; ++i)
-    for (int j = i + 1; j < nA; ++j) {
-      double w[256], e1b[16], e2a[16];
-      twoCenterMolecularDev(ap[i], &coords[3 * i], ap[j], &coords[3 * j], w, e1b, e2a);
-      const int na = ap[i].nOrb, nb = ap[j].nOrb, sA = start[i], sB = start[j];
-      for (int mu = 0; mu < na; ++mu)            // J on A from total density of B
-        for (int nu = 0; nu < na; ++nu) {
-          double acc = 0.0;
-          for (int lam = 0; lam < nb; ++lam)
-            for (int sig = 0; sig < nb; ++sig)
-              acc += Pt[(sB + lam) * nB + (sB + sig)] * w[detail::wIdxDev(mu, nu, lam, sig)];
-          F[(sA + mu) * nB + (sA + nu)] += acc;
-        }
-      for (int lam = 0; lam < nb; ++lam)         // J on B from total density of A
-        for (int sig = 0; sig < nb; ++sig) {
-          double acc = 0.0;
-          for (int mu = 0; mu < na; ++mu)
-            for (int nu = 0; nu < na; ++nu)
-              acc += Pt[(sA + mu) * nB + (sA + nu)] * w[detail::wIdxDev(mu, nu, lam, sig)];
-          F[(sB + lam) * nB + (sB + sig)] += acc;
-        }
-      for (int mu = 0; mu < na; ++mu)            // K cross (same spin), UHF factor -1
-        for (int lam = 0; lam < nb; ++lam) {
-          double acc = 0.0;
-          for (int nu = 0; nu < na; ++nu)
-            for (int sig = 0; sig < nb; ++sig)
-              acc += w[detail::wIdxDev(mu, nu, lam, sig)] * Ps[(sA + nu) * nB + (sB + sig)];
-          F[(sA + mu) * nB + (sB + lam)] += -acc;
-          F[(sB + lam) * nB + (sA + mu)] += -acc;
-        }
-    }
-}
 
 // Build the diagonal atomic-density spin guess: each atom's `valence` core charge
 // is spread evenly over its orbitals, then split by the alpha/beta ratio. This is
@@ -142,10 +73,10 @@ inline void scfLoopUHFsp(int nB, int nA, const AtomIntParams* ap, const int* sta
   bool converged = false;
   for (int it = 0; it < maxIter; ++it) {
     for (int i = 0; i < n2; ++i) Pt[i] = Pa[i] + Pb[i];
-    buildFockSpUHFDev(nB, nA, ap, start, norb, coords, H, Pt.data(), Pa, Fa.data());
-    buildFockSpUHFDev(nB, nA, ap, start, norb, coords, H, Pt.data(), Pb, Fb.data());
-    // Level shift large while far from convergence, tapering to zero so the final
-    // density is an unshifted SCF fixed point.
+    buildFockDUHFDev(nB, nA, ap, start, norb, coords, H, Pt.data(), Pa, Fa.data());
+    buildFockDUHFDev(nB, nA, ap, start, norb, coords, H, Pt.data(), Pb, Fb.data());
+    // Level shift large while far from convergence, tapering toward zero so the
+    // final density is an unshifted SCF fixed point.
     const double shift = (it < 8) ? 8.0 : (it < 20) ? 4.0 : (it < 40) ? 1.0 : 0.1;
     diagShiftedDev(nB, Fa.data(), Pa, nAlpha, shift, Pan.data(), eig.data(), C.data(), ev.data());
     diagShiftedDev(nB, Fb.data(), Pb, nBeta, shift, Pbn.data(), eig.data(), C.data(), ev.data());
@@ -169,8 +100,8 @@ inline void scfLoopUHFsp(int nB, int nA, const AtomIntParams* ap, const int* sta
     }
   }
   for (int i = 0; i < n2; ++i) Pt[i] = Pa[i] + Pb[i];
-  buildFockSpUHFDev(nB, nA, ap, start, norb, coords, H, Pt.data(), Pa, Fa.data());
-  buildFockSpUHFDev(nB, nA, ap, start, norb, coords, H, Pt.data(), Pb, Fb.data());
+  buildFockDUHFDev(nB, nA, ap, start, norb, coords, H, Pt.data(), Pa, Fa.data());
+  buildFockDUHFDev(nB, nA, ap, start, norb, coords, H, Pt.data(), Pb, Fb.data());
   double e = 0.0;
   for (int i = 0; i < n2; ++i) e += 0.5 * (Pa[i] * (H[i] + Fa[i]) + Pb[i] * (H[i] + Fb[i]));
   *eElec = e;

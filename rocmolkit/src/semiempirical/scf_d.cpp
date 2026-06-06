@@ -53,13 +53,15 @@ bool pm6dCharges(int nAtoms, const int* atoms, const double* coords, double* q,
   if (nBasis == 0 || nElec <= 0) return false;
   const int n2 = nBasis * nBasis;
 
-  // Open-shell (radicals, mult>1, or odd electrons) -> UHF. Sp-only for now (the
-  // one-center d W folds J and K together, so the d path stays RHF/closed-shell).
+  // Open-shell (radicals, mult>1, or odd electrons) -> UHF. Handles sp AND d
+  // atoms: buildFockDUHFDev splits the one-center d W into J (W_J * total) and K
+  // (2*W_Kfold * same-spin), see fock_d_uhf_device.h.
   const int nUnpaired = mult - 1;
   if (nUnpaired < 0 || nUnpaired > nElec || (nElec - nUnpaired) % 2 != 0) return false;  // bad mult
   if (mult > 1 || nElec % 2 != 0) {
     for (int a = 0; a < nAtoms; ++a)
-      if (ap[a].nOrb == 9) return false;  // UHF d-orbital path not yet supported
+      if (ap[a].nOrb == 9 && onecenterd::oneCenterDWJ(ap[a].z) == nullptr)
+        return false;  // d-atom without the baked J/K split (e.g. transition-metal stub)
     std::vector<double> Hu(n2), Pa(n2), Pb(n2);
     buildCoreHamiltonianDDev(nBasis, nAtoms, ap.data(), start.data(), norb.data(), coords,
                              Hu.data());

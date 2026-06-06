@@ -26,7 +26,7 @@ HERE = Path(__file__).resolve().parent
 SRC = HERE.parent.parent / "rocmolkit" / "src" / "semiempirical"
 DRV = "/tmp/pm6d_uhf_drv"
 WORK = tempfile.mkdtemp(prefix="pm6d_uhf_")
-SYM = {1: "H", 6: "C", 7: "N", 8: "O", 9: "F"}
+SYM = {1: "H", 6: "C", 7: "N", 8: "O", 9: "F", 15: "P", 16: "S", 17: "Cl"}
 SPIN = {2: "DOUBLET", 3: "TRIPLET", 4: "QUARTET"}
 
 # name, mult (2S+1), [(Z, x, y, z), ...]  (sp-only open-shell radicals)
@@ -44,6 +44,13 @@ RADICALS = [
     ("NF2.", 2, [(7, 0, 0, 0), (9, 1.15, 0, 0.55), (9, -1.15, 0, 0.55)]),
     ("CH3O.", 2, [(8, 0, 0, 0), (6, 0, 0, 1.41), (1, 0.51, 0.88, 1.77),
                    (1, 0.51, -0.88, 1.77), (1, -1.02, 0, 1.77)]),
+    # d-bearing radicals: exercise the UHF one-center d J/K split (W_J / W_Kfold).
+    ("ClO.", 2, [(17, 0, 0, 0), (8, 0, 0, 1.57)]),
+    ("PO.", 2, [(15, 0, 0, 0), (8, 0, 0, 1.48)]),
+    ("SO", 3, [(16, 0, 0, 0), (8, 0, 0, 1.48)]),  # triplet ground state (12 e-)
+    # ClO2. is a hard UHF multi-solution d case: the engine converges to a higher
+    # symmetric UHF solution than MOPAC's (HoF ~25 kcal/mol above; both q symmetric).
+    # Matching MOPAC's exact converger for such pathological cases is future work.
 ]
 
 
