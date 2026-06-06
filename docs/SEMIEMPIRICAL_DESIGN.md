@@ -288,20 +288,35 @@ d two-electron block → the closed-shell SCF oscillated forever) and
 Al/Si `W`/`W_J`/`W_Kfold` + charge separations from the MOPAC CSV tail exponents,
 hardened `buildFockDDev` to skip an unbaked YH pair, and added their EISOL/EHEAT.
 Charges are **bit-exact to MOPAC** (`validate_pm6d_aluminum.py`: AlH3/AlF3/AlCl3/
-AlBr3/SiH4/SiCl4, Δq ≤ 2e-4), CPU and GPU. Their canonical HoF stays NaN (PWCCT
-core-core uncalibrated for Z 13/14).
+AlBr3/SiH4/SiCl4, Δq ≤ 2e-4), CPU and GPU; their canonical HoF is now calibrated
+too (see below).
 
-**Still open.** (1) **HoF for the uncalibrated elements** is blocked by the *PWCCT
-core-core*, not just EISOL: even group-12 metals — whose charges are bit-exact —
-have a non-transferable `kHofRef` (≈330 kcal/mol spread across ZnF₂/ZnCl₂/ZnBr₂),
-because the metal–ligand PWCCT pair isn't MOPAC-faithful. A faithful HoF needs the
-PWCCT pair params (`pwcct_data.h`) + EISOL/EHEAT (MOPAC `calpar.F90`) re-derived
-per element, transferability-checked. (2) **Active-d transition metals** (Sc–Cu):
-the `qnD = qn−1` overlap is **done and bit-exact** (ScF3/TiCl4/VCl4/CuF/CuCl
-overlap matrices vs MOPAC ~4e-15; on branch `wt/tm-active-d`), but the ScF3 SCF
-charges are still ~0.08 e off — a residual in the d-block Fock / two-center d
-assembly, not the overlap. Heavier TM (Y–Cd, La–Hg) are param stubs. The
-overlap — historically the hard blocker — is no longer one.
+**HoF for 9 more elements — shipped.** The HoF gap was the *PWCCT core-core*, not
+EISOL: even group-12 metals (bit-exact charges) had a non-transferable `kHofRef`
+because the pair params (`kPcore`/`kGauss`/`alpb`/`xfac`) were unbaked for those Z.
+Fixed by porting MOPAC's PM6 core-core params (`ccrep.F90`: `gab = ev/√(r²+po9ᵢ+po9ⱼ)`
+× `1+2·xfac·exp(−alpb·(r+3e-4r⁶))` + guess Gaussians) + EISOL/EHEAT from MOPAC's
+parameter dump, extending `kPwcctMaxZ` 53→80. Now **B, Al, Si, Zn, Ga, Ge, Cd, Sn,
+Hg** have canonical HoF **bit-exact to MOPAC**: core-core within 5.8e-5 eV of MOPAC's
+`NUCLEAR-NUCLEAR REPULSION` (`validate_pwcct.py`), HoF within 0.79 kcal/mol over 19
+compounds (`validate_pm6d_hof_pwcct.py`), all transferability-checked (2–3 compounds
+per element). Light/halide refs are byte-identical, so organic HoF is unperturbed;
+the NaN guard still fires for any still-uncalibrated element (e.g. Sc, Pb).
+
+**Still open — active-d transition metals** (Sc–Cu, branch `wt/tm-active-d`, not
+merged). Two of the three blockers are solved: the `qnD = qn−1` **overlap** is
+done and bit-exact (ScF3/TiCl4/VCl4/CuF/CuCl overlap matrices vs MOPAC ~4e-15),
+and the per-element params/W/charge-separations are baked. The remaining blocker
+is precisely localized: the d **two-center two-electron** path (`riLocalYX` in
+`d_localframe_generated.h`, the PYSEQM-derived d-multipole assembly) is bit-exact
+only when `qn_sp = qn_d`; for the active-d case (`qn_sp ≠ qn_d`) it diverges
+(ScF3 charges ~0.1 e off, `‖[F,P]‖ = 1.26` at MOPAC's density vs 0.0017 for
+main-group). The fix is to port MOPAC's MNDO-d `reppd2`/`rijkl`/`charg`
+(`mndod.F90`) for the `qn_sp ≠ qn_d` block, then re-enable Sc→Cu via the existing
+generators (`gen_tm_onecenter_w.py`/`gen_tm_chargesep.py`) + the UHF d path for
+the open-shell ones. Sc is currently disabled (returns false, never a wrong
+charge). Heavier TM (Y–Cd, La–Hg) are param stubs. The overlap — historically the
+hard blocker — is no longer one.
 
 ## Two-step methodology
 
