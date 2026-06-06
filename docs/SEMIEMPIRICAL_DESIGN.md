@@ -423,9 +423,9 @@ best-of-1 CPU, `maxIter=800`, `convTol=1e-10`.
 
 | path | wall (best) | mol/s | atoms/s |
 |------|------------:|------:|--------:|
-| **GPU batch `scfBatchDGpu`** (cooperative, steady) | 6.02 s | **49.8** | **855** |
-| CPU loop `pm6dCharges` | 8.62 s | 34.8 | 597 |
-| **GPU/CPU speedup** | | **1.43×** | |
+| **GPU batch `scfBatchDGpu`** (cooperative + cached integrals) | 3.25 s | **92.2** | **1581** |
+| CPU loop `pm6dCharges` | 7.81 s | 38.4 | 659 |
+| **GPU/CPU speedup** | | **2.4×** | |
 
 All 300 converge; GPU == CPU bit-exact (worst |Δq| = 1.24e-14); charge
 conservation `max|Σq − Q_net| = 7e-14 e`.
