@@ -80,17 +80,39 @@ int pm6ValenceElectrons(int z) {
     // what MOPAC's mndod spcore does for them). See validate_pm6d_tm.py.
     return z - 18;
   }
-  // Mn..Cu (25..29) and the heavier active-d TM (Y-Ag, Hf-Au) stay DISABLED. Their
-  // params, one-center d W and d charge separations ARE baked (pm6_params_data.h +
-  // gen_tm_*), and the one-center d-block reproduces MOPAC (Cu+ d10 single-ion HoF
-  // 272.99 vs MOPAC 273.53, the EISOL-rounding floor). What is NOT yet bit-exact is
-  // the TWO-CENTER d-block when the metal d-shell is POPULATED: e.g. CuF (Cu d10)
-  // converges to Cu s-pop 0.18 / q=+0.84 instead of MOPAC's s-pop 0.58 / q=+0.50
-  // (our state is ~3 eV lower, so it is a genuine metal-d<->ligand two-center 2e /
-  // electron-core discrepancy, NOT an SCF local minimum). d0 metals (Ti/V/Cr above)
-  // are immune because they have no d electrons; the populated-d metals need the
-  // two-center d path resolved before they can be enabled bit-exact. They are left
-  // disabled to avoid silent-wrong output.
+  if (z >= 25 && z <= 29) {  // Mn, Fe, Co, Ni, Cu -- active-d TM, ENABLED.
+    // tore = group number = Z - 18 (MOPAC parameters_C reference config: Mn s2d5,
+    // Fe s2d6, Co s2d7, Ni s2d8, Cu s1d10 -> tore 7/8/9/10/11). The full PM6 set
+    // (Uss/Upp/Udd, betas, F0SD/G2SD, tail exps) is in pm6_params_data.h; the
+    // one-center d W is baked by gen_tm_onecenter_w.py and the d charge separations
+    // by gen_tm_chargesep.py.
+    //
+    // The blocker for the POPULATED-d metals was a single corrupted parameter:
+    // Cu Uss in pm6_params_mopac.csv was -92.00221 but MOPAC PM6 uss6(29) is
+    // -97.002205 (a transcription error, off by exactly +5.0 eV). With a populated
+    // s-AND-d shell (Cu(I) d10), this biased F[s,s] by +5.0 eV, driving CuF to
+    // Cu s-pop 0.18 / q=+0.84 instead of MOPAC's 0.58 / q=+0.50. The single-ion
+    // Cu+ d10 test had s EMPTY, so it never exercised the s-Fock and the bug hid
+    // inside the EISOL-rounding floor. d0 metals (Ti/V/Cr) were immune (no s/d
+    // population to couple). Frozen-density [F,P] at MOPAC's density localized the
+    // error to F[Cu.s,Cu.s] alone; the single-Cu-atom UHF reconstruction
+    // F_alpha(s,s) = -3.36 (engine) vs -8.36 (MOPAC) pinned it to Uss exactly.
+    //
+    // BIT-EXACT to MOPAC after the fix:
+    //   Closed-shell Cu(I) d10:  CuF q_Cu=+0.5004 vs +0.5003 (dq 1.1e-4),
+    //     CuCl dq 1.0e-4, CuBr dq 8.8e-5 (RHF + GPU batch path).
+    //   Open-shell d5..d8 fluorides (UHF, high-spin): MnF2 (sextet) dq 9.3e-5,
+    //     FeF3 (sextet) dq 6.8e-4, CoF2 (quartet) dq 4.8e-5, NiF2 (triplet) dq
+    //     1.5e-4.
+    // NOTE: open-shell metal + d-ligand (e.g. MnCl2/CoCl2, the YY two-center d
+    // path under UHF) is NOT yet bit-exact (a separate open-shell-YY contraction
+    // gap, independent of this parameter fix) -- validators use sp-ligand
+    // (fluoride) open-shell compounds and closed-shell Cu halides only.
+    // See validate_pm6d_tm.py.
+    return z - 18;
+  }
+  // The heavier active-d TM (Y-Ag, Hf-Au) stay DISABLED (params/W baked but not
+  // yet validated bit-exact end-to-end).
   if (z >= 31 && z <= 36) {        // Ga..Kr
     return z - 28;
   }
