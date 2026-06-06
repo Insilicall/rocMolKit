@@ -300,9 +300,13 @@ NVMOLKIT_HD inline long pm6dIntCacheDoubles(int nAtoms, const int* norb) {
 // in the SAME order as buildFockDDev, assigns each a blob offset, and computes
 // its W tensor once. A YH pair whose d-charge separations aren't baked is marked
 // kPmPairNone (skipped in the contraction, exactly as the original `continue`).
+// `ywScr` (optional, >=kYWScrDoubles doubles) is reused across pairs to hold the
+// large YY/YX 45x45 temporaries off-stack -- only one pair is processed at a time
+// here, so a single buffer suffices. Null keeps them on the stack (CPU reference).
 NVMOLKIT_HD inline void precomputeTwoCenterDDev(int nAtoms, const AtomIntParams* ap,
                                                 const int* start, const int* norb,
-                                                const double* coords, int* meta, double* blob) {
+                                                const double* coords, int* meta, double* blob,
+                                                double* ywScr = nullptr) {
   (void)start;
   int pid = 0;
   long doff = 0;
@@ -313,13 +317,13 @@ NVMOLKIT_HD inline void precomputeTwoCenterDDev(int nAtoms, const AtomIntParams*
       md[1] = i; md[2] = j; md[3] = 0; md[4] = 0; md[5] = static_cast<int>(doff);
 
       if (kind == kPmPairYY) {
-        yyWMolecular(ap[i], &coords[3 * i], ap[j], &coords[3 * j], &blob[doff]);
+        yyWMolecular(ap[i], &coords[3 * i], ap[j], &coords[3 * j], &blob[doff], ywScr);
         md[0] = kPmPairYY;
         doff += 9 * 9 * 9 * 9;
       } else if (kind == kPmPairYX) {
         const int yxD = (norb[i] == 9) ? i : j;
         const int yxS = (norb[i] == 9) ? j : i;
-        yxWMolecular(ap[yxD], &coords[3 * yxD], ap[yxS], &coords[3 * yxS], &blob[doff]);
+        yxWMolecular(ap[yxD], &coords[3 * yxD], ap[yxS], &coords[3 * yxS], &blob[doff], ywScr);
         md[0] = kPmPairYX;
         md[1] = yxD; md[2] = yxS;
         doff += 9 * 9 * 4 * 4;

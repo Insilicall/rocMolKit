@@ -125,8 +125,14 @@ NVMOLKIT_HD inline void generateRotationMatrixD(const double v[3], double* matri
 
 // Apply the YM similarity transform to the local-frame 45x45 WW, producing the
 // molecular-frame 45x45 (row-major). out may not alias WW.
+//
+// `scr` (optional) is caller scratch of >=3*45*45 doubles for the three 45x45
+// temporaries (YM, STEP, FINAL). When null (CPU reference path) they live on the
+// stack -- byte-identical arithmetic either way. The GPU path passes per-molecule
+// GLOBAL scratch so these ~48 KB of arrays do NOT inflate the kernel's per-lane
+// private (scratch) footprint, which is what binds device occupancy.
 NVMOLKIT_HD inline void rotate2Center2ElectronD(const double* WW, const double* matrix,
-                                                double* out) {
+                                                double* out, double* scr = nullptr) {
   const int MET[45] = {1, 2, 3, 2, 3, 3, 2, 3, 3, 3, 4, 5, 5, 5, 6, 4, 5, 5, 5, 6, 6,
                        4, 5, 5, 5, 6, 6, 6, 4, 5, 5, 5, 6, 6, 6, 6, 4, 5, 5, 5, 6, 6, 6, 6, 6};
   const int META[6] = {1, 2, 5, 11, 16, 31};
@@ -138,7 +144,21 @@ NVMOLKIT_HD inline void rotate2Center2ElectronD(const double* WW, const double* 
       {0, 0, 0, 0, 30, 36}, {0, 0, 0, 0, 31, 41}, {0, 0, 0, 0, 32, 42},
       {0, 0, 0, 0, 38, 43}, {0, 0, 0, 0, 39, 44}, {0, 0, 0, 0, 40, 45}};
 
-  double YM[45 * 45];
+  // On the DEVICE, `scr` is always provided (per-molecule global scratch) and the
+  // stack fallback arrays are NOT declared -- declaring them would reserve ~48 KB
+  // of per-lane private memory even when unused (the compiler can't prove the
+  // runtime `scr != nullptr`), which is exactly what was binding occupancy. On the
+  // HOST (CPU reference) `scr` may be null, so the stack arrays remain.
+#ifdef __HIP_DEVICE_COMPILE__
+  double* YM = scr;
+  double* STEP = scr + 45 * 45;
+  double* FINAL = scr + 2 * 45 * 45;
+#else
+  double YMstk[45 * 45], STEPstk[45 * 45], FINALstk[45 * 45];
+  double* YM = scr ? scr : YMstk;
+  double* STEP = scr ? scr + 45 * 45 : STEPstk;
+  double* FINAL = scr ? scr + 2 * 45 * 45 : FINALstk;
+#endif
   for (int i = 0; i < 45 * 45; ++i) YM[i] = 0.0;
   YM[0] = 1.0;  // YM[0][0]
   for (int KL = 1; KL < 45; ++KL) {
@@ -150,14 +170,12 @@ NVMOLKIT_HD inline void rotate2Center2ElectronD(const double* WW, const double* 
 
   // FINAL[i][j] = sum_{k,l} YM[i][k] * WW[l][k] * YM[j][l].
   // STEP[i][l] = sum_k YM[i][k] * WW[l][k];  FINAL[i][j] = sum_l STEP[i][l]*YM[j][l].
-  double STEP[45 * 45];
   for (int i = 0; i < 45; ++i)
     for (int l = 0; l < 45; ++l) {
       double s = 0.0;
       for (int k = 0; k < 45; ++k) s += YM[i * 45 + k] * WW[l * 45 + k];
       STEP[i * 45 + l] = s;
     }
-  double FINAL[45 * 45];
   for (int i = 0; i < 45; ++i)
     for (int j = 0; j < 45; ++j) {
       double s = 0.0;

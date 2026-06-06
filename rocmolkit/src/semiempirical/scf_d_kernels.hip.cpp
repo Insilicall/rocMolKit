@@ -77,6 +77,10 @@ __global__ void scfBatchDKernelCoop(int nMol, const AtomIntParams* ap, const int
   double* diisE = diisF + kScfDiisMax * n2;
   double* cs = diisE + kScfDiisMax * n2;  // per-pair (c,s) for the parallel Jacobi
   double* intBlob = cs + (nB + 2);        // two-center integral cache (doubles)
+  // Per-molecule scratch for the YY/YX 45x45 temporaries, sitting after the
+  // integral-cache blob. Moving these off the per-lane stack is what lifts device
+  // occupancy (see kYWScrDoubles in two_center_yx_device.h).
+  double* ywScr = intBlob + pm6dIntCacheDoubles(na, &norb[ao]);
 
   // Round-robin tournament ring (ints) + integral-cache meta (ints) live in
   // separate per-molecule buffers.
@@ -92,7 +96,7 @@ __global__ void scfBatchDKernelCoop(int nMol, const AtomIntParams* ap, const int
   double eElec = 0.0;
   scfLoopDDevCoop(nB, na, &ap[ao], &start[ao], &norb[ao], &coords[3 * ao], H, nOccArr[m],
                   maxIter, convTol, density, eval, F, eigA, C, Pnew, ecom, diisF, diisE,
-                  &conv, &niter, &eElec, lane, nLanes, sh, ring, cs, intMeta, intBlob);
+                  &conv, &niter, &eElec, lane, nLanes, sh, ring, cs, intMeta, intBlob, ywScr);
 
   // Outputs: lane 0 emits charges + heats of formation (all small, O(nAtoms)).
   if (lane == 0) {
@@ -161,8 +165,10 @@ bool scfBatchDGpu(int nMol, const int* molNAtoms, const int* molNBasis,
       const long nPairs = static_cast<long>(na) * (na - 1) / 2;
       const long blobDoubles = pm6dIntCacheDoubles(na, &norb[ao]);
       // H,density,F,eigA,C,Pnew,ecom (7 n^2) + diisF,diisE (2*kScfDiisMax n^2)
-      // + eval (n) + cs (per-pair cos/sin: nB+2) + intBlob (integral cache).
-      totScratch += (7 + 2 * kScfDiisMax) * nB * nB + nB + (nB + 2) + blobDoubles;
+      // + eval (n) + cs (per-pair cos/sin: nB+2) + intBlob (integral cache)
+      // + ywScr (kYWScrDoubles: YY/YX 45x45 temporaries moved off the per-lane
+      // stack for occupancy).
+      totScratch += (7 + 2 * kScfDiisMax) * nB * nB + nB + (nB + 2) + blobDoubles + kYWScrDoubles;
       // Tournament ring: (nB+1)&~1 ints, padded to nB+2 for safety.
       totRing += nB + 2;
       // Integral-cache meta: kPairMetaInts ints per pair.
@@ -213,20 +219,21 @@ bool scfBatchDGpu(int nMol, const int* molNAtoms, const int* molNBasis,
     hipMemcpy(dMetaOff, metaOff.data(), sizeof(int) * nMol, hipMemcpyHostToDevice);
     hipMemcpy(dCoords, coordsAll, sizeof(double) * 3 * totAtoms, hipMemcpyHostToDevice);
 
-    // The YY Fock branch materializes a 9x9x9x9 (52 KB) tensor per thread, on top
-    // of the recursive e1b frames; bump the per-thread stack well above the
-    // ~1 KB default to hold it.
-    hipDeviceSetLimit(hipLimitStackSize, 192 * 1024);
+    // The YY/YX 45x45 W temporaries now live in per-molecule GLOBAL scratch (see
+    // kYWScrDoubles), not the per-lane stack, so the kernel's measured private
+    // (scratch) footprint dropped from ~108 KB/lane to ~8 KB/lane. The remaining
+    // per-thread stack is just the small recursive twoCenterMolecularDev e1b
+    // frames + scalar spills; a 32 KB reservation is ample and -- by no longer
+    // reserving 192 KB/lane -- frees device scratch memory for more resident
+    // blocks.
+    hipDeviceSetLimit(hipLimitStackSize, 32 * 1024);
 
     // One-WAVEFRONT-per-molecule (32 lanes): the warp cooperatively runs the
     // per-molecule SCF, spreading the O(nB^3) Jacobi diagonalization across the
-    // lanes. 32 (a single RDNA4 wavefront) is the safe default: only lane 0
-    // calls buildFockDDev, whose YY branch materializes a 52 KB tensor on the
-    // stack, so the 192 KB/thread stack reservation above bounds the resident
-    // block count -- a 64-thread (2-warp) block doubles that demand and can
-    // exhaust device scratch (page fault). Larger blocks (ROCMOLKIT_PM6D_BLOCK,
-    // multiple of 32) parallelize the inner length-nB loops further for big
-    // basis sizes, but require the Fock stack footprint to be reduced first.
+    // lanes. 32 (a single RDNA4 wavefront) is the safe default; larger blocks
+    // (ROCMOLKIT_PM6D_BLOCK, multiple of 32) parallelize the inner length-nB loops
+    // further for big basis sizes. Now that the Fock/precompute stack footprint is
+    // small, multi-warp blocks no longer risk a scratch page fault.
     int block = 32;
     if (const char* e = std::getenv("ROCMOLKIT_PM6D_BLOCK")) {
       int b = std::atoi(e);

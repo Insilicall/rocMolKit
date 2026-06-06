@@ -352,20 +352,21 @@ __device__ inline void buildDensityDevCoop(const double* C, int n, int nOcc, dou
 }
 
 // Cooperative precompute of the two-center integral cache. The YY (52 KB) and YX
-// (10 KB) W tensors materialize a large stack frame inside yyWMolecular /
-// yxWMolecular, so -- exactly like the Fock build itself -- they are computed
-// SERIALLY on lane 0 to keep the per-thread stack footprint bounded (the 192 KB
-// stack reservation in scfBatchDGpu is sized for one lane doing this). This is a
-// once-per-molecule pass, so serializing it is cheap; the win is not repeating it
-// every SCF iteration. Uses the shared serial precomputeTwoCenterDDev so the
-// cache is byte-identical to the CPU reference.
+// (10 KB) W tensors materialize a large frame inside yyWMolecular / yxWMolecular,
+// so they are computed SERIALLY on lane 0. Their big 45x45 temporaries are placed
+// in `ywScr` (per-molecule GLOBAL scratch, >=kYWScrDoubles doubles) instead of the
+// per-lane stack, which is what keeps the kernel's private (scratch) footprint
+// small enough for higher device occupancy. This is a once-per-molecule pass, so
+// serializing it is cheap; the win is not repeating it every SCF iteration. Uses
+// the shared serial precomputeTwoCenterDDev so the cache is byte-identical to the
+// CPU reference.
 __device__ inline void precomputeTwoCenterDDevCoop(int nAtoms, const AtomIntParams* ap,
                                                    const int* start, const int* norb,
                                                    const double* coords, int* meta, double* blob,
-                                                   int lane, int nLanes) {
+                                                   int lane, int nLanes, double* ywScr) {
   (void)nLanes;
   if (lane == 0)
-    precomputeTwoCenterDDev(nAtoms, ap, start, norb, coords, meta, blob);
+    precomputeTwoCenterDDev(nAtoms, ap, start, norb, coords, meta, blob, ywScr);
   __syncthreads();
 }
 
@@ -380,12 +381,14 @@ __device__ inline void scfLoopDDevCoop(int nBasis, int nAtoms, const AtomIntPara
                                        double* C, double* Pnew, double* ecom, double* diisF,
                                        double* diisE, int* conv, int* niter, double* eElec,
                                        int lane, int nLanes, double* sh, int* ring, double* cs,
-                                       int* intMeta, double* intBlob) {
+                                       int* intMeta, double* intBlob, double* ywScr) {
   const int n2 = nBasis * nBasis;
 
-  // Hoist the geometry/param-only two-center integrals: compute ONCE, cooperatively
-  // (one pair per lane), then reuse via buildFockDDevCached every SCF iteration.
-  precomputeTwoCenterDDevCoop(nAtoms, ap, start, norb, coords, intMeta, intBlob, lane, nLanes);
+  // Hoist the geometry/param-only two-center integrals: compute ONCE (serially on
+  // lane 0), then reuse via buildFockDDevCached every SCF iteration. `ywScr` keeps
+  // the YY/YX 45x45 temporaries off the per-lane stack -> higher occupancy.
+  precomputeTwoCenterDDevCoop(nAtoms, ap, start, norb, coords, intMeta, intBlob, lane, nLanes,
+                              ywScr);
 
   // Initial guess: H_core with d diagonals shifted up so d MOs start virtual.
   for (int i = lane; i < n2; i += nLanes) eigA[i] = H[i];
