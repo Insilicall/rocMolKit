@@ -40,6 +40,9 @@ struct AtomIntParams {
   double gaussK[4], gaussL[4], gaussM[4];  // AM1/PM3-style core-core Gaussians
   double eisol;                    // isolated-atom electronic energy (eV)
   double eheat;                    // atomic heat of formation (kcal/mol)
+  double rhoCore;                  // MOPAC pocord / po(9): special additive radius for the
+                                   // s-monopole in the electron-core attraction + core-core
+                                   // (0 => fall back to the regular monopole rho0 = 0.5/am).
   int z;         // atomic number (for the N-H/O-H core-core special case)
   int qn;        // principal quantum number of the valence sp shell
   int qnD;       // principal quantum number of the valence d shell (3/4/5)

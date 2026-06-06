@@ -98,6 +98,13 @@ NVMOLKIT_HD inline void buildCoreHamiltonianDDev(int nBasis, int nAtoms, const A
         double w[256], e1b[16], e2a[16];
         twoCenterMolecularDev(pi, &coords[3 * i], pj, &coords[3 * j], w, e1b, e2a);
         const int ni = pi.nOrb;
+        // MOPAC spcore: if the CORE atom j carries pocord (rhoCore), its monopole
+        // additive radius for the electron-core attraction is po(9)=pocord, not the
+        // regular rho0. Rebuild e1b with the pocord-aware reduced integrals; the
+        // rotation is the same. No-op for cores without pocord (all main-group).
+        if (ap[j].rhoCore > 1e-10 && ni > 1) {
+          coreAttractionE1bDev(pi, &coords[3 * i], pj, &coords[3 * j], ap[j].rhoCore, e1b);
+        }
         for (int mo = 0; mo < ni; ++mo)
           for (int no = 0; no < ni; ++no)
             H[(start[i] + mo) * nBasis + (start[i] + no)] += e1b[mo * 4 + no];

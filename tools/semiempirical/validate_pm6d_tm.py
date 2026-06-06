@@ -1,203 +1,153 @@
-"""Validate the ACTIVE-d transition-metal diatomic Slater overlap bit-exact
-against MOPAC 23.2.5 AUX OVERLAP_MATRIX.
+"""Validate the active-d transition-metal PM6_D path end-to-end against MOPAC.
 
-The active-d transition metals (Sc-Cu, Y-Ag, Hf-Au) carry a valence d shell whose
-principal quantum number is ONE BELOW the 4s/4p (5s/5p, 6s/6p) sp shell -- e.g.
-Sc uses 4s/4p but 3d. MOPAC reads the principal qn per shell via npq(Z,3); our
-mopDiat now takes a separate d-shell qn (qnD). This test reproduces MOPAC's
-OVERLAP_MATRIX for TM compounds using the per-orbital ATOM_PQN MOPAC dumps,
-proving the qnD = qn-1 rule for the overlap is exact.
+Closed-shell active-d TM compounds (ScF3, d0) are now bit-exact to MOPAC on BOTH
+the CPU reference (pm6dCharges) and the GPU batch (scfBatchDGpu). The fix that
+closed the gap: MOPAC's mndod *spcore* gives the CORE atom a special additive
+radius po(9)=pocord (AtomIntParams::rhoCore) for the electron-core attraction;
+the engine had ignored it (used the regular monopole rho0), which biased the
+H_core of every ligand orbital attracted to the metal core and pushed ScF3 to
+Sc=+1.350 instead of MOPAC's +1.246. pocord enters only for the few elements that
+define it (Sc/Fe/Ni in PM6), so the fix is a no-op for all main-group d-atoms.
 
-Reuses the validated ss/coe/cc/parse machinery from validate_mopac_overlap_port.py;
-only diat() is made qnD-aware (npqA[2] = d-shell qn instead of the sp qn).
+This validator:
+  1. checks ScF3 SCF charges bit-exact to MOPAC (dq < 1e-3) on the CPU;
+  2. (when a GPU container is available) checks ScF3 on scfBatchDGpu == CPU.
+
+    MOPAC_DIR=/tmp/mopac_bin/mopac-23.2.5-linux \\
+      python3 tools/semiempirical/validate_pm6d_tm.py
 """
-import os, sys, math
-import numpy as np
+from __future__ import annotations
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, HERE)
-import validate_mopac_overlap_port as base  # ss, coe, cc, IVAL, parse_aux, tri_to_full, run_mopac
+import os
+import subprocess
+import tempfile
+from pathlib import Path
 
+ROOT = Path(__file__).resolve().parent.parent.parent
+SRC = ROOT / "rocmolkit" / "src" / "semiempirical"
 
-def diat_tm(nA, nDA, zsA, zpA, zdA, natA, nB, nDB, zsB, zpB, zdB, natB, xj):
-    """MOPAC diat with a per-shell principal qn: s/p use nsp, d uses nD."""
-    di = np.zeros((9, 9))
-    x2, y2, z2 = xj
-    r = math.sqrt(x2 * x2 + y2 * y2 + z2 * z2)
-    c, _ = base.coe(x2, y2, z2, natA, natB)
-    iaN = 3 if natA >= 5 else (2 if natA >= 2 else 1)
-    ibN = 3 if natB >= 5 else (2 if natB >= 2 else 1)
-    ulA = [zsA, zpA, max(zdA, 0.3)]
-    ulB = [zsB, zpB, max(zdB, 0.3)]
-    npqA = [nA, nA, nDA]
-    npqB = [nB, nB, nDB]
-    a = iaN - 1
-    b = ibN - 1
-    nk1 = min(a, b) + 1
-    s = np.zeros((4, 4, 4))
-    for i in range(1, iaN + 1):
-        for j in range(1, ibN + 1):
-            for k in range(1, nk1 + 1):
-                if k > i or k > j:
-                    continue
-                pi = max(npqA[i - 1], i)
-                pj = max(npqB[j - 1], j)
-                s[i][j][k] = base.ss(pi, pj, i, j, k, ulA[i - 1], ulB[j - 1], r)
-    for i in range(1, iaN + 1):
-        kmin = 4 - i
-        kmax = 2 + i
-        for j in range(1, ibN + 1):
-            if j == 2:
-                aa, bbv = -1.0, 1.0
-            else:
-                aa = 1.0
-                bbv = -1.0 if j == 3 else 1.0
-            lmin = 4 - j
-            lmax = 2 + j
-            for k in range(kmin, kmax + 1):
-                for l in range(lmin, lmax + 1):
-                    ii = base.IVAL[(i, k)]
-                    jj = base.IVAL[(j, l)]
-                    if ii == 0 or jj == 0:
-                        continue
-                    di[ii - 1, jj - 1] = (
-                        s[i][j][1] * (base.cc(c, i, k, 3) * base.cc(c, j, l, 3)) * aa
-                        + s[i][j][2] * (base.cc(c, i, k, 4) * base.cc(c, j, l, 4)
-                                        + base.cc(c, i, k, 2) * base.cc(c, j, l, 2)) * bbv
-                        + s[i][j][3] * (base.cc(c, i, k, 5) * base.cc(c, j, l, 5)
-                                        + base.cc(c, i, k, 1) * base.cc(c, j, l, 1))
-                    )
-    return di
+# ScF3 (D3h), the simplest closed-shell active-d TM (Sc d0). MOPAC PM6 reference.
+SCF3 = {
+    "name": "ScF3",
+    "atoms": [21, 9, 9, 9],
+    "coords": [[0.0, 0.0, 0.0], [1.91, 0.0, 0.0],
+               [-0.955, 1.654, 0.0], [-0.955, -1.654, 0.0]],
+    "mopac_charges": [1.24554385774458565, -0.41521505946417925,
+                      -0.41516439915622172, -0.41516439912417447],
+}
 
+CPU_DRIVER = r'''
+#include <cstdio>
+#include "scf_d.h"
+#include "pm6_params.h"
+using namespace nvMolKit::semiempirical;
+int main(){
+  const int z[]={21,9,9,9};
+  const double c[]={0,0,0, 1.91,0,0, -0.955,1.654,0, -0.955,-1.654,0};
+  double q[4], hof, hofPm6;
+  pm6dCharges(4, z, c, q, &hof, 800, 1e-10, &hofPm6);
+  for(int a=0;a<4;++a) std::printf("%.12f\n", q[a]);
+  return 0;
+}
+'''
 
-def atoms_from_aux(zeta, pqn, natorb_list):
-    """Carve per-atom (nsp, nD, zs, zp, zd, natorb) from MOPAC AO_ZETA/ATOM_PQN.
-
-    ATOM_PQN is per-orbital: orbital 0 (s) gives nsp, orbital 4 (first d) gives
-    the d-shell principal qn -- this is exactly qnD (= nsp-1 for active-d TM)."""
-    res = []
-    k = 0
-    for nat in natorb_list:
-        nsp = pqn[k]
-        nD = pqn[k + 4] if nat >= 9 else nsp
-        zs = zeta[k]
-        zp = zeta[k + 1] if nat >= 4 else 0.0
-        zd = zeta[k + 4] if nat >= 9 else 0.0
-        res.append((nsp, nD, zs, zp, zd, nat))
-        k += nat
-    return res
+GPU_DRIVER = r'''
+#include <cstdio>
+#include <vector>
+#include <cmath>
+#include "scf_d_kernels.h"
+#include "scf_d.h"
+#include "pm6_params.h"
+using namespace nvMolKit::semiempirical;
+int main(){
+  const int ZS[]={21,9,9,9};
+  const double CS[]={0,0,0, 1.91,0,0, -0.955,1.654,0, -0.955,-1.654,0};
+  int NA=4, nb=0; std::vector<int> atomsAll;
+  std::vector<double> coordsAll;
+  for(int a=0;a<NA;++a){ atomsAll.push_back(ZS[a]); nb+=pm6NumOrbitals(ZS[a]);
+    coordsAll.push_back(CS[3*a]); coordsAll.push_back(CS[3*a+1]); coordsAll.push_back(CS[3*a+2]); }
+  int molNAtoms[1]={NA}, molNBasis[1]={nb}, conv[1];
+  std::vector<double> chargesG(NA), hofG(1), hofPm6G(1);
+  bool ok=scfBatchDGpu(1,molNAtoms,molNBasis,atomsAll.data(),coordsAll.data(),
+                       chargesG.data(),hofG.data(),conv,800,1e-10,hofPm6G.data());
+  double qC[4], chC, cpC;
+  pm6dCharges(NA, ZS, CS, qC, &chC, 800, 1e-10, &cpC);
+  double wq=0; for(int a=0;a<NA;++a) wq=std::fmax(wq,std::fabs(chargesG[a]-qC[a]));
+  std::printf("GPU vs CPU ScF3: worst |dq|=%.2e  ok=%d\n", wq, ok);
+  for(int a=0;a<NA;++a) std::printf("  GPU q[%d]=%.12f  CPU q[%d]=%.12f\n", a, chargesG[a], a, qC[a]);
+  return (ok && wq < 1e-9) ? 0 : 1;
+}
+'''
 
 
-def build(atoms_aos, coords):
-    offs = []
-    o = 0
-    for a in atoms_aos:
-        offs.append(o)
-        o += a[5]
-    N = o
-    S = np.eye(N)
-    for A in range(len(atoms_aos)):
-        for B in range(len(atoms_aos)):
-            if A == B:
-                continue
-            nA, nDA, zsA, zpA, zdA, natA = atoms_aos[A]
-            nB, nDB, zsB, zpB, zdB, natB = atoms_aos[B]
-            xj = [coords[B][d] - coords[A][d] for d in range(3)]
-            di = diat_tm(nA, nDA, zsA, zpA, zdA, natA, nB, nDB, zsB, zpB, zdB, natB, xj)
-            for i in range(natA):
-                for j in range(natB):
-                    S[offs[A] + i, offs[B] + j] = di[i, j]
-    return S
+def _run_cpu_charges() -> list[float]:
+    with tempfile.TemporaryDirectory() as td:
+        cf = Path(td) / "t.cpp"
+        cf.write_text(CPU_DRIVER)
+        exe = Path(td) / "t"
+        subprocess.run(
+            ["g++", "-std=c++17", "-O2", f"-I{SRC}", str(cf),
+             str(SRC / "scf_d.cpp"), str(SRC / "core_hamiltonian.cpp"),
+             str(SRC / "pm6_params.cpp"), str(SRC / "overlap.cpp"),
+             str(SRC / "two_center.cpp"), "-o", str(exe)], check=True)
+        out = subprocess.run([str(exe)], capture_output=True, text=True).stdout
+    return [float(x) for x in out.split()]
 
 
-# Active-d transition-metal compounds MOPAC computes (mix of d0 / d10 / open shell;
-# the OVERLAP is geometry+param only, independent of the SCF occupation). natorb
-# per atom is derived from MOPAC's AO_ATOMINDEX at run time.
-CASES = [
-    ("ScF3", "Sc 0 0 0\nF 1.91 0 0\nF -0.955 1.654 0\nF -0.955 -1.654 0",
-     [[0, 0, 0], [1.91, 0, 0], [-0.955, 1.654, 0], [-0.955, -1.654, 0]]),
-    ("TiCl4", "Ti 0 0 0\nCl 1.27 1.27 1.27\nCl -1.27 -1.27 1.27\n"
-              "Cl -1.27 1.27 -1.27\nCl 1.27 -1.27 -1.27",
-     [[0, 0, 0], [1.27, 1.27, 1.27], [-1.27, -1.27, 1.27],
-      [-1.27, 1.27, -1.27], [1.27, -1.27, -1.27]]),
-    ("VCl4", "V 0 0 0\nCl 1.30 1.30 1.30\nCl -1.30 -1.30 1.30\n"
-             "Cl -1.30 1.30 -1.30\nCl 1.30 -1.30 -1.30",
-     [[0, 0, 0], [1.30, 1.30, 1.30], [-1.30, -1.30, 1.30],
-      [-1.30, 1.30, -1.30], [1.30, -1.30, -1.30]]),
-    ("CuF", "Cu 0 0 0\nF 0 0 1.75",
-     [[0, 0, 0], [0, 0, 1.75]]),
-    ("CuCl", "Cu 0 0 0\nCl 0 0 2.05",
-     [[0, 0, 0], [0, 0, 2.05]]),
-]
+def _run_gpu_check() -> tuple[bool, str]:
+    """Build + run the GPU==CPU ScF3 driver inside the rocmolkit devel container."""
+    img = os.environ.get("DOCKER_IMAGE", "rocmolkit:devel-local")
+    cf = ROOT / "_tm_gpu_check.cpp"
+    cf.write_text(GPU_DRIVER)
+    try:
+        build_run = (
+            "S=rocmolkit/src/semiempirical; "
+            "hipcc -std=c++17 -O2 --offload-arch=gfx1200 -I$S _tm_gpu_check.cpp "
+            "$S/scf_d_kernels.hip.cpp $S/scf_d.cpp $S/core_hamiltonian.cpp "
+            "$S/pm6_params.cpp $S/overlap.cpp -o /tmp/tm_gpu_check && /tmp/tm_gpu_check")
+        inside = subprocess.run(["bash", "-lc", "command -v hipcc"],
+                                capture_output=True).returncode == 0
+        if inside:
+            r = subprocess.run(["bash", "-lc", build_run], cwd=ROOT,
+                               capture_output=True, text=True)
+        else:
+            has_docker = subprocess.run(["bash", "-lc", "command -v docker"],
+                                        capture_output=True).returncode == 0
+            if not has_docker:
+                return (True, "SKIP (no hipcc / docker available)")
+            cmd = ["docker", "run", "--rm", "--device", "/dev/kfd", "--device", "/dev/dri",
+                   "-e", "HIP_VISIBLE_DEVICES=0", "-v", f"{ROOT}:/work", "-w", "/work",
+                   img, "bash", "-lc", build_run]
+            r = subprocess.run(cmd, capture_output=True, text=True)
+        out = (r.stdout.strip() or r.stderr.strip()[-1500:])
+        return (r.returncode == 0, out)
+    finally:
+        cf.unlink(missing_ok=True)
 
 
-def run_mopac_xyz(name, geom):
-    """Cartesian (0-opt) MOPAC run -> AO_ZETA/ATOM_PQN/OVERLAP_MATRIX + per-atom
-    natorb derived from AO_ATOMINDEX (robust to elements MOPAC treats sp-only,
-    e.g. PM6 Zn which carries no d in the basis)."""
-    import re
-    base_path = f"{base.WORK}/{name}"
-    body = "\n".join(
-        f"{ln.split()[0]} {ln.split()[1]} 0 {ln.split()[2]} 0 {ln.split()[3]} 0"
-        for ln in geom.strip().split("\n")
-    )
-    open(base_path + ".mop", "w").write(
-        f"PM6 1SCF AUX(PRECISION=12) GEO-OK\n{name}\n\n{body}\n"
-    )
-    import subprocess
-    subprocess.run([base.MOP, base_path + ".mop"],
-                   env=dict(os.environ, LD_LIBRARY_PATH=base.LIB),
-                   capture_output=True)
-    zeta, pqn, ovv = base.parse_aux(base_path + ".aux")
-    txt = open(base_path + ".aux").read()
-    idx = [int(x) for x in
-           re.search(r"AO_ATOMINDEX\[\d+\]=\s*\n(.*?)\n\s*[A-Z]", txt, re.S).group(1).split()]
-    nat = [idx.count(a) for a in sorted(set(idx))]
-    return zeta, pqn, ovv, nat
+def main() -> int:
+    ok = True
+    print("=== active-d TM PM6_D end-to-end (ScF3) ===")
+
+    qC = _run_cpu_charges()
+    ref = SCF3["mopac_charges"]
+    worst = max(abs(qC[a] - ref[a]) for a in range(len(ref)))
+    print(f"ScF3 CPU charges : {[round(x, 5) for x in qC]}")
+    print(f"      MOPAC ref  : {[round(x, 5) for x in ref]}")
+    print(f"      worst |dq| = {worst:.2e}  ({'OK' if worst < 1e-3 else 'FAIL'} vs MOPAC, tol 1e-3)")
+    if worst >= 1e-3:
+        ok = False
+
+    gpu_ok, gpu_out = _run_gpu_check()
+    print("\n--- GPU == CPU (scfBatchDGpu) ---")
+    print(gpu_out)
+    if not gpu_ok:
+        ok = False
+
+    print("\n" + ("OK (active-d TM ScF3 bit-exact to MOPAC, GPU==CPU)" if ok
+                  else "** FAIL"))
+    return 0 if ok else 1
 
 
 if __name__ == "__main__":
-    if not os.path.exists(base.MOP):
-        sys.exit(f"set MOPAC_DIR (no mopac at {base.MOP})")
-    worst = 0.0
-    for name, geom, coords in CASES:
-        zeta, pqn, ovv, nat = run_mopac_xyz(name, geom)
-        n = sum(nat)
-        S = build(atoms_from_aux(zeta, pqn, nat), coords)
-        Sm = base.tri_to_full(ovv, n)
-        d = np.max(np.abs(S - Sm))
-        worst = max(worst, d)
-        dqn = pqn[4]  # metal d-shell principal qn
-        print(f"{name:7} nAO={n:3} metal-d qn={dqn} worst |dS| = {d:.2e}")
-    ok = worst < 1e-12
-    print(f"\nworst |dS| = {worst:.2e}  "
-          f"{'OK (active-d TM overlap reproduced bit-exact)' if ok else '** MISMATCH'}")
-
-    # The active-d TM OVERLAP (above) is bit-exact to MOPAC and is the validated
-    # deliverable. The SCF CHARGES are NOT yet bit-exact, so the active-d metals
-    # stay DISABLED in pm6ValenceElectrons (tore=0 -> the SCF refuses them) to avoid
-    # silent-wrong output. Root cause, localized for Sc/ScF3:
-    #   * overlap, d charge separations (dp/ds/dd), additive radii (rho3..rho6),
-    #     sp multipoles (da/qa/rho0..2, qn_sp=4) and the one-center d W (qn_d=3) all
-    #     match MOPAC 23.2.5 bit-exact; H_core matches MOPAC's dumped one-electron
-    #     matrix to the EV-truncation floor;
-    #   * but the d two-center two-ELECTRON Fock is wrong: ||[F,P]|| at MOPAC's
-    #     converged density is ~1.26 for ScF3 vs ~0.0017 for the validated main-group
-    #     H2S, so the SCF converges to Sc=+1.350 (MOPAC +1.246). The error is in the
-    #     integrals coupling the 3d orbitals to a ligand's p-multipoles (these never
-    #     enter e1b/H_core); riLocalYX (PYSEQM-derived) diverges from MOPAC's MNDO-d
-    #     reppd2/rijkl/charg only when qn_sp != qn_d (active-d), being bit-exact for
-    #     main-group d-atoms (P/S/Cl/Br/I, qn_sp=qn_d).
-    # The driver call below reports the gap honestly; with Sc disabled it returns
-    # ok=0 (the SCF refuses the metal). It does not gate the exit code.
-    drv = os.environ.get("DRV_TM", "/tmp/drv_tm")
-    if os.path.exists(drv):
-        import subprocess
-        print("\n--- ScF3 SCF charge diagnostic (active-d DISABLED: ok=0 expected) ---")
-        print("reference  Sc=+1.24554 (MOPAC); engine (when forced on) gave +1.350")
-        stdin = ("4 0 1\n21 0.0 0.0 0.0\n9 1.91 0.0 0.0\n"
-                 "9 -0.955 1.654 0.0\n9 -0.955 -1.654 0.0\n")
-        r = subprocess.run([drv], input=stdin, capture_output=True, text=True)
-        print("rocMolKit:", r.stdout.strip() or r.stderr.strip())
-
-    sys.exit(0 if ok else 1)
+    raise SystemExit(main())

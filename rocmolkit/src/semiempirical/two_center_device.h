@@ -284,6 +284,75 @@ NVMOLKIT_HD inline int twoCenterLocalDev(const AtomIntParams& pA, const AtomIntP
   return 22;
 }
 
+// MOPAC-faithful electron-core attraction monopole/multipole radii for the e1b/e2a
+// terms (mndod spcore): the CORE atom contributes its special additive radius
+// po(9)=pocord (AtomIntParams::rhoCore) in place of the regular monopole rho0 when
+// pocord is defined. Returns the local-frame core-attraction reduced integrals
+// riA[0..3] (A's [s,sigma,pi-sigma,pi-pi] orbitals attracted to the B core) using
+// B's core radius, mirroring how twoCenterLocalDev fills ri[0..3] but with the
+// core monopole. coreRhoB is B's monopole radius (rhoCore if set, else rho0B).
+// When no atom has pocord this reproduces the standard ri[0..3] bit-for-bit, so
+// callers can always route through it without changing existing elements.
+NVMOLKIT_HD inline void detailCoreAttractionRiDev(const AtomIntParams& pA, double R,
+                                                  double coreRhoB, double* riA) {
+  using namespace detail;
+  double daA, qaA, rho0A, rho1A, rho2A;
+  computeMultipoleParamsDev(pA, daA, qaA, rho0A, rho1A, rho2A);
+  const double ev1 = kSemiEV / 2.0, ev2 = kSemiEV / 4.0;
+  // Same multipole-of-A vs monopole-of-B(core) structure as twoCenterLocalDev XH.
+  const double da = daA, qa = qaA * 2.0;
+  const double aee = (rho0A + coreRhoB) * (rho0A + coreRhoB);
+  const double ade = (rho1A + coreRhoB) * (rho1A + coreRhoB);
+  const double aqe = (rho2A + coreRhoB) * (rho2A + coreRhoB);
+  const double ee = kSemiEV / std::sqrt(R * R + aee);
+  riA[0] = ee;
+  riA[1] = ev1 / std::sqrt((R + da) * (R + da) + ade) - ev1 / std::sqrt((R - da) * (R - da) + ade);
+  const double ev1dsqr6 = ev1 / std::sqrt(R * R + aqe);
+  riA[2] = ee + ev2 / std::sqrt((R + qa) * (R + qa) + aqe)
+           + ev2 / std::sqrt((R - qa) * (R - qa) + aqe) - ev1dsqr6;
+  riA[3] = ee + ev1 / std::sqrt(R * R + qa * qa + aqe) - ev1dsqr6;
+}
+
+// Molecular-frame electron-core attraction e1b (4x4) for atom A's sp orbitals
+// attracted to the core of atom B, using B's special core radius coreRhoB
+// (MOPAC pocord). Mirrors the e1b rotation in twoCenterMolecularDev but sources
+// the reduced integrals from detailCoreAttractionRiDev (B monopole = coreRhoB).
+NVMOLKIT_HD inline void coreAttractionE1bDev(const AtomIntParams& pA, const double cA[3],
+                                             const AtomIntParams& pB, const double cB[3],
+                                             double coreRhoB, double* e1b) {
+  using namespace detail;
+  for (int i = 0; i < 16; ++i) e1b[i] = 0.0;
+  const double Rvec[3] = {cB[0] - cA[0], cB[1] - cA[1], cB[2] - cA[2]};
+  const double R = std::sqrt(Rvec[0] * Rvec[0] + Rvec[1] * Rvec[1] + Rvec[2] * Rvec[2]);
+  if (R < 1e-10) return;
+  const double Rb = R * kSemiAngToBohr;
+  double riA[4];
+  detailCoreAttractionRiDev(pA, Rb, coreRhoB, riA);
+  const double ZB = static_cast<double>(pB.valence);
+  const double v[3] = {-Rvec[0] / R, -Rvec[1] / R, -Rvec[2] / R};
+  double rot[3][3];
+  rotationMatrixDev(v, rot);
+  const double* r0 = rot[0];
+  const double* r1 = rot[1];
+  const double* r2 = rot[2];
+  if (pA.nOrb == 1) { e1b[0] = -ZB * riA[0]; return; }
+  e1b[0] = -ZB * riA[0];
+  for (int k = 0; k < 3; ++k) {
+    const double e = -ZB * riA[1] * r0[k];
+    e1b[(k + 1) * 4 + 0] = e;
+    e1b[0 * 4 + (k + 1)] = e;
+  }
+  for (int k = 0; k < 3; ++k) {
+    e1b[(k + 1) * 4 + (k + 1)] =
+        -ZB * (riA[2] * r0[k] * r0[k] + riA[3] * (r1[k] * r1[k] + r2[k] * r2[k]));
+    for (int l = k + 1; l < 3; ++l) {
+      const double e = -ZB * (riA[2] * r0[k] * r0[l] + riA[3] * (r1[k] * r1[l] + r2[k] * r2[l]));
+      e1b[(k + 1) * 4 + (l + 1)] = e;
+      e1b[(l + 1) * 4 + (k + 1)] = e;
+    }
+  }
+}
+
 // Molecular-frame w tensor (flattened 4x4x4x4) + e1b/e2a (4x4) for an sp pair.
 NVMOLKIT_HD inline bool twoCenterMolecularDev(const AtomIntParams& pA, const double cA[3],
                                               const AtomIntParams& pB, const double cB[3],

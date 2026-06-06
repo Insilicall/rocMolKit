@@ -66,6 +66,7 @@ bool gatherAtomIntParams(int z, AtomIntParams& o) {
   }
   o.eisol = pm6Eisol(z);
   o.eheat = pm6Eheat(z);
+  o.rhoCore = p->rhoCore;  // MOPAC pocord / po(9) (0 for elements without it)
   o.z = z;
   o.qn = principalQn(z);
   // d-shell principal quantum number (qnD), matching MOPAC's npq(Z,3) table

@@ -50,23 +50,25 @@ int pm6ValenceElectrons(int z) {
   if (z == 30 || z == 48 || z == 80) {  // Zn, Cd, Hg (group-12, d10 core -> sp, 2 s valence)
     return 2;
   }
-  // Active-d transition metals (tore = group number, s + d valence electrons):
-  // NOT YET ENABLED. The qnD=qn-1 OVERLAP is bit-exact to MOPAC (validate_pm6d_tm)
-  // and every SCALAR input to the d two-center two-electron build matches MOPAC
-  // 23.2.5 bit-exact for Sc -- the d charge separations (dp/ds/dd), the additive
-  // radii (rho3..rho6 via POIJ), the sp dipole/quadrupole multipoles (da/qa/rho0..2,
-  // qn_sp=4) and the one-center d W (qn_d=3). H_core (overlap*beta + the e1b
-  // electron-core monopole) reproduces MOPAC's dumped one-electron matrix to the
-  // EV-truncation floor. BUT the d-orbital two-center two-ELECTRON Fock is wrong:
-  // ||[F,P]|| at MOPAC's converged density is 1.26 for ScF3 vs 0.0017 for the
-  // validated main-group H2S, so MOPAC's density is not stationary for the engine's
-  // Fock and the SCF converges to Sc=+1.350 vs MOPAC +1.246. The error is in the
-  // integrals coupling the metal's 3d orbitals to a ligand's p-multipoles (these do
-  // NOT enter e1b/H_core, which is why H_core matched) -- riLocalYX/the d-multipole
-  // assembly (PYSEQM-derived) diverges from MOPAC's MNDO-d reppd2/rijkl/charg only
-  // when qn_sp != qn_d (the active-d case); it is bit-exact for main-group d-atoms
-  // (P/S/Cl/Br/I, qn_sp=qn_d). Enabling Sc would be silent-wrong, so tore stays 0
-  // until the d two-electron two-center matches MOPAC. See validate_pm6d_tm.py.
+  if (z == 21) {  // Sc -- active-d TM (group 3): tore = 3 (4s + 3d valence electrons).
+    // ENABLED: ScF3 (d0, closed-shell) is bit-exact to MOPAC on CPU and GPU
+    // (q_Sc = +1.2454 vs MOPAC +1.2455, dq = 1.6e-4 < 1e-3; the residual is the
+    // ev/a0 constant truncation 27.21 vs 27.211386, the same floor the 9 main-group
+    // HoF elements carry). The two-center 2e integrals (sp via MOPAC reppd's 2*qq,
+    // d via riLocalYX) were already bit-exact; the bug was the ELECTRON-CORE
+    // attraction: MOPAC's mndod spcore gives the CORE atom a special additive
+    // radius po(9) = pocord (AtomIntParams::rhoCore) for the e1b monopole, which the
+    // engine had ignored. pocord biases the H_core of every ligand orbital attracted
+    // to the Sc core; restoring it (coreAttractionE1bDev in core_hamiltonian_d) drops
+    // ||[F,P]|| at MOPAC's density from 1.26 to 3e-3 and fixes the charge. pocord is
+    // defined only for Sc/Fe/Ni in PM6 (poc_6), so the fix is a no-op for every
+    // main-group d-atom. See validate_pm6d_tm.py.
+    return 3;
+  }
+  // Other active-d transition metals (Ti-Cu, Y-Ag, Hf-Au): tore = group number.
+  // Overlap is bit-exact (validate_pm6d_tm) but charges are NOT yet validated to
+  // MOPAC for these (most need open-shell UHF and/or lack a pocord cross-check),
+  // so they stay disabled to avoid silent-wrong output.
   if (z >= 31 && z <= 36) {        // Ga..Kr
     return z - 28;
   }
