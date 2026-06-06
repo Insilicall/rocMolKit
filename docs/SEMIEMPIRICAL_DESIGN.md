@@ -40,10 +40,13 @@ metal + d-ligand (e.g. MnCl₂ — the UHF YY two-center d contraction; the meta
 treatment applies), heavier TM (Y–Cd, La–Hg param stubs), and the open-shell GPU
 batch (UHF runs on the CPU path).
 
-**Performance.** The batched GPU SCF (`scfBatchDGpu`) is correctness-first
-(one-block-per-molecule, bit-exact); at drug sizes it is currently ~4× slower than
-the CPU loop — cooperative per-block diagonalization is the optimization lever. See
-the **Benchmarks** section at the bottom.
+**Performance.** The batched GPU SCF (`scfBatchDGpu`) runs **one wavefront (32
+lanes) per molecule** with a cooperative deterministic Jacobi diagonalization, and
+is **bit-exact to the CPU (1e-14)**. On gfx1200 over 300 drug-like molecules it is
+**1.4× faster than the CPU loop** (50 vs 35 mol/s — a 5.6× kernel speedup over the
+old one-thread-per-molecule path). Large molecules (≥40 atoms) still wait on the
+O(nB³) Jacobi; wider blocks (the next lever) need `buildFockDDev`'s YY tensor moved
+off-stack. See the **Benchmarks** section at the bottom.
 
 ---
 
@@ -420,38 +423,31 @@ best-of-1 CPU, `maxIter=800`, `convTol=1e-10`.
 
 | path | wall (best) | mol/s | atoms/s |
 |------|------------:|------:|--------:|
-| GPU batch `scfBatchDGpu` (steady) | 33.74 s | **8.9** | **153** |
-| GPU batch (cold, incl. HIP init/JIT/H2D) | 35.63 s | 8.4 | 145 |
-| CPU loop `pm6dCharges` | 8.74 s | 34.3 | 589 |
-| **GPU/CPU speedup** | | **0.26×** | |
+| **GPU batch `scfBatchDGpu`** (cooperative, steady) | 6.02 s | **49.8** | **855** |
+| CPU loop `pm6dCharges` | 8.62 s | 34.8 | 597 |
+| **GPU/CPU speedup** | | **1.43×** | |
 
-### By molecule-size bucket (300 molecules each, capped)
+All 300 converge; GPU == CPU bit-exact (worst |Δq| = 1.24e-14); charge
+conservation `max|Σq − Q_net| = 7e-14 e`.
 
-| bucket (max N) | atoms | GPU mol/s | GPU atoms/s | CPU mol/s | CPU atoms/s | GPU/CPU |
-|----------------|------:|----------:|------------:|----------:|------------:|--------:|
-| ≤15 | 3,690 | 23.9 | 294 | 89.1 | 1,096 | 0.27× |
-| ≤20 | 4,229 | 16.3 | 230 | 64.5 |   909 | 0.25× |
-| ≤25 | 5,145 |  8.7 | 149 | 34.8 |   596 | 0.25× |
+### How it got here (the cooperative-Jacobi rewrite)
 
-### Reading these numbers honestly
+The first cut ran **one SCF per GPU *thread*** — a single RDNA4 lane did the whole
+dense O(nB³) Jacobi diagonalization every iteration while the other 31 lanes idled,
+landing at **0.26× (≈4× slower than CPU)**. The kernel was rewritten to **one
+wavefront (32 lanes) per molecule** (`scf_d_coop_device.h`): a deterministic
+Brent–Luk round-robin Jacobi (n/2 disjoint rotations per parallel step, O(n)
+barriers per sweep) plus lane-split density / DIIS / energy. That is a **5.6×
+kernel speedup**, flipping the GPU from 4× slower to **1.4× faster**, with **no
+loss of bit-exactness** (the fixed rotation schedule keeps GPU == CPU at 1e-14).
 
-The PM6_D batch path is **~4× slower than the CPU loop** at drug-molecule sizes,
-and the gap is stable across buckets (~0.25×). The cause is structural, not a
-bug: `scfBatchDGpu` runs **one whole SCF per GPU thread** with no intra-molecule
-parallelism, so a single RDNA4 lane performs the full dense diagonalization on
-every SCF iteration. Per-molecule cost grows steeply with atom count (GPU mol/s
-falls 24 → 8.7 going from ≤15 to ≤25 atoms), and — because the batch finishes
-only when its **largest** molecule finishes — a single ~70–80-atom molecule at
-the 800-iteration cap can stall the whole batch for minutes (hence the
-`--max-atoms` cap in the harness).
+### Next lever (large molecules)
 
-The batch path's current value is **correctness and self-containment** (fully
-on-device, bit-exact to the CPU/MOPAC, no per-molecule host round-trips), not
-raw throughput at these sizes. It is best suited to **large batches of small
-molecules** (its original "one d-atom + hydrogens" scope). The standing
-throughput work in *What's left* applies directly: a one-block-per-molecule
-layout with shared-memory cooperative diagonalization (instead of
-one-thread-per-molecule) is the lever to make the GPU path win here.
+Molecules ≥40 atoms (nB ~ 130) still saturate the 32 lanes on the O(nB³) Jacobi,
+and the batch waits on its largest member. Widening to 64+ lanes/molecule is wired
+(`ROCMOLKIT_PM6D_BLOCK`) but currently page-faults because `buildFockDDev`'s YY
+9×9×9×9 tensor forces a ~192 KB/thread stack reservation; moving that tensor
+off-stack unblocks wider blocks and the large-molecule win.
 
 **Reproduce:**
 
