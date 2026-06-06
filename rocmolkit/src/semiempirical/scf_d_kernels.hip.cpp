@@ -228,13 +228,17 @@ bool scfBatchDGpu(int nMol, const int* molNAtoms, const int* molNBasis,
     // blocks.
     hipDeviceSetLimit(hipLimitStackSize, 32 * 1024);
 
-    // One-WAVEFRONT-per-molecule (32 lanes): the warp cooperatively runs the
-    // per-molecule SCF, spreading the O(nB^3) Jacobi diagonalization across the
-    // lanes. 32 (a single RDNA4 wavefront) is the safe default; larger blocks
-    // (ROCMOLKIT_PM6D_BLOCK, multiple of 32) parallelize the inner length-nB loops
-    // further for big basis sizes. Now that the Fock/precompute stack footprint is
-    // small, multi-warp blocks no longer risk a scratch page fault.
-    int block = 32;
+    // Block (multiple of 32) per molecule: the block's lanes cooperatively run the
+    // per-molecule SCF, splitting the O(nB^2)/O(nB^3) inner length-nB loops (Jacobi
+    // sweep, density, commutator, DIIS) across the lanes. Moving the YY/YX W
+    // temporaries off the per-lane stack (kYWScrDoubles) dropped the kernel's
+    // private footprint ~13x, which is what makes multi-wavefront blocks viable --
+    // a 96-lane (3-wavefront) block no longer risks a scratch page fault and is the
+    // measured sweet spot on drug-like nB<=~25 molecules (gfx1200: 102 -> 121 mol/s
+    // vs the old 32-lane default; 128+ lanes regress as the extra waves idle past
+    // nB and add barrier/occupancy cost). Override via ROCMOLKIT_PM6D_BLOCK for
+    // larger basis sizes.
+    int block = 96;
     if (const char* e = std::getenv("ROCMOLKIT_PM6D_BLOCK")) {
       int b = std::atoi(e);
       if (b >= 32 && b <= kCoopMaxBlock && (b % 32) == 0) block = b;
