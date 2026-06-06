@@ -280,9 +280,28 @@ ZnCl₂/ZnBr₂/CdCl₂/HgCl₂/ZnClBr and the formerly silently-wrong **GaCl₃
 (group-12 EISOL is uncalibrated). Hg (Z=80) exceeds `kPwcctMaxZ`, so the HoF
 lookups bound-check the index (NaN, no out-of-range read).
 
-**Still open: active-d transition metals** (Sc–Cu, Z=21–29) need `qnD = qn−1`
-(3d) and are mostly open-shell (UHF d is done); heavier TM (Y–Cd, La–Hg) are
-param stubs. The overlap — historically the hard blocker — is no longer one.
+**Al/Si — shipped.** Aluminum and silicon are PM6 d-elements but PYSEQM/mlxmolkit
+never carried them, so their one-center d `W` and d charge separations were
+unbaked — `oneCenterDW(13)` was null (its `false` return was ignored, dropping the
+d two-electron block → the closed-shell SCF oscillated forever) and
+`dChargeSeparations(13)` left `yhWMolecular`'s `W[81]` uninitialized → NaN. Baked
+Al/Si `W`/`W_J`/`W_Kfold` + charge separations from the MOPAC CSV tail exponents,
+hardened `buildFockDDev` to skip an unbaked YH pair, and added their EISOL/EHEAT.
+Charges are **bit-exact to MOPAC** (`validate_pm6d_aluminum.py`: AlH3/AlF3/AlCl3/
+AlBr3/SiH4/SiCl4, Δq ≤ 2e-4), CPU and GPU. Their canonical HoF stays NaN (PWCCT
+core-core uncalibrated for Z 13/14).
+
+**Still open.** (1) **HoF for the uncalibrated elements** is blocked by the *PWCCT
+core-core*, not just EISOL: even group-12 metals — whose charges are bit-exact —
+have a non-transferable `kHofRef` (≈330 kcal/mol spread across ZnF₂/ZnCl₂/ZnBr₂),
+because the metal–ligand PWCCT pair isn't MOPAC-faithful. A faithful HoF needs the
+PWCCT pair params (`pwcct_data.h`) + EISOL/EHEAT (MOPAC `calpar.F90`) re-derived
+per element, transferability-checked. (2) **Active-d transition metals** (Sc–Cu):
+the `qnD = qn−1` overlap is **done and bit-exact** (ScF3/TiCl4/VCl4/CuF/CuCl
+overlap matrices vs MOPAC ~4e-15; on branch `wt/tm-active-d`), but the ScF3 SCF
+charges are still ~0.08 e off — a residual in the d-block Fock / two-center d
+assembly, not the overlap. Heavier TM (Y–Cd, La–Hg) are param stubs. The
+overlap — historically the hard blocker — is no longer one.
 
 ## Two-step methodology
 
