@@ -18,8 +18,11 @@
 //
 // Per-element heat-of-formation reference for the canonical (MOPAC-aligned) PM6
 // heat of formation: HoF(kcal) = kEvToKcal * (E_elec + E_core_PWCCT) - sum kHofRef.
-// Each kHofRef[Z] = kEvToKcal*EISOL - EHEAT, fit by least squares so the simple
-// hydrides reproduce MOPAC's FINAL HEAT OF FORMATION to <0.1 kcal/mol. With the
+// Each kHofRef[Z] = kEvToKcal*EISOL - EHEAT, fit by least squares. The light/halide
+// refs [1,6,7,8,9,15,16,17,35,53] are fit on simple hydrides (<0.1 kcal/mol). The
+// added main-group/metal refs [5,13,14,30,31,32,48,50,80] (B, Al, Si, Zn, Ga, Ge,
+// Cd, Sn, Hg) are fit with the light refs held fixed, on metal halides/hydrides/
+// methyls, and reproduce MOPAC PM6 HoF to <=1.2 kcal/mol per compound. With the
 // PWCCT core-core (bit-exact to MOPAC) and the PYSEQM electronic SCF, the HoF then
 // matches MOPAC PM6 to ~1 kcal/mol for light + Br molecules (iodine looser).
 
@@ -41,7 +44,7 @@ constexpr double kHofRef[kPwcctMaxZ + 1] = {
     0.0,
     0.0,
     0.0,
-    0.0,
+    -1277.0509206233398,  // 5 B
     -2827.2283072936534,  // 6 C
     -4147.26932700559,  // 7 N
     -6680.73353796695,  // 8 O
@@ -49,8 +52,8 @@ constexpr double kHofRef[kPwcctMaxZ + 1] = {
     0.0,
     0.0,
     0.0,
-    0.0,
-    0.0,
+    -1186.9660190768207,  // 13 Al
+    -1685.5568390624558,  // 14 Si
     -3296.2004726280197,  // 15 P
     -4026.764120401334,  // 16 S
     -5861.062212826418,  // 17 Cl
@@ -66,9 +69,9 @@ constexpr double kHofRef[kPwcctMaxZ + 1] = {
     0.0,
     0.0,
     0.0,
-    0.0,
-    0.0,
-    0.0,
+    -662.2118215691428,  // 30 Zn
+    -1383.190583291038,  // 31 Ga
+    -1856.627398337635,  // 32 Ge
     0.0,
     0.0,
     -5260.524490849857,  // 35 Br
@@ -84,12 +87,39 @@ constexpr double kHofRef[kPwcctMaxZ + 1] = {
     0.0,
     0.0,
     0.0,
+    -548.0807424562862,  // 48 Cd
     0.0,
-    0.0,
-    0.0,
+    -1716.3471434989226,  // 50 Sn
     0.0,
     0.0,
     -5747.441387420949,  // 53 I
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    -679.7356408184984,  // 80 Hg
 };
 
 }  // namespace pwcct

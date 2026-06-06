@@ -19,6 +19,7 @@ Rewrites rocmolkit/src/semiempirical/pwcct_ref_data.h (do not hand-edit).
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -29,10 +30,18 @@ import numpy as np
 ROOT = Path(__file__).resolve().parent.parent.parent
 SRC = ROOT / "rocmolkit" / "src" / "semiempirical"
 OUT = SRC / "pwcct_ref_data.h"
-SYM = {1: "H", 6: "C", 7: "N", 8: "O", 9: "F", 15: "P", 16: "S", 17: "Cl", 35: "Br", 53: "I"}
+SYM = {1: "H", 5: "B", 6: "C", 7: "N", 8: "O", 9: "F", 13: "Al", 14: "Si", 15: "P",
+       16: "S", 17: "Cl", 30: "Zn", 31: "Ga", 32: "Ge", 35: "Br", 48: "Cd", 50: "Sn",
+       53: "I", 80: "Hg"}
 CONV = 23.060548
 
-# Calibration set: simple closed-shell hydrides (+ H2/Cl2) covering every element.
+# Light/halide refs [1,6,7,8,9,15,16,17,35,53] are fit on simple closed-shell
+# hydrides (+ H2/Cl2). The main-group/metal refs [5,13,14,30,31,32,48,50,80]
+# (B, Al, Si, Zn, Ga, Ge, Cd, Sn, Hg) are fit AFTERWARDS with the light refs held
+# fixed, on metal halides / hydrides / methyls (single-point geometries), so the
+# added refs are transferable without perturbing the validated organic HoF.
+EXTRA_ELEMS = [5, 13, 14, 30, 31, 32, 48, 50, 80]
+
 CAL = {
     "H2": ([1, 1], [[0, 0, 0], [0, 0, 0.74]]),
     "CH4": ([6, 1, 1, 1, 1], [[0, 0, 0], [0.629, 0.629, 0.629], [-0.629, -0.629, 0.629],
@@ -46,6 +55,37 @@ CAL = {
     "HBr": ([35, 1], [[0, 0, 0], [0, 0, 1.41]]),
     "HI": ([53, 1], [[0, 0, 0], [0, 0, 1.609]]),
     "Cl2": ([17, 17], [[0, 0, 0], [0, 0, 1.988]]),
+}
+
+# Calibration set for the extra (metal/main-group) elements (light refs held fixed).
+CAL_EXTRA = {
+    "ZnF2": ([30, 9, 9], [[0, 0, 0], [0, 0, 1.75], [0, 0, -1.75]]),
+    "ZnCl2": ([30, 17, 17], [[0, 0, 0], [0, 0, 2.07], [0, 0, -2.07]]),
+    "ZnMe2": ([30, 6, 6, 1, 1, 1, 1, 1, 1],
+              [[0, 0, 0], [0, 0, 1.95], [0, 0, -1.95], [0.51, 0.88, 2.34], [0.51, -0.88, 2.34],
+               [-1.02, 0, 2.34], [0.51, 0.88, -2.34], [0.51, -0.88, -2.34], [-1.02, 0, -2.34]]),
+    "CdCl2": ([48, 17, 17], [[0, 0, 0], [0, 0, 2.21], [0, 0, -2.21]]),
+    "CdBr2": ([48, 35, 35], [[0, 0, 0], [0, 0, 2.37], [0, 0, -2.37]]),
+    "HgCl2": ([80, 17, 17], [[0, 0, 0], [0, 0, 2.29], [0, 0, -2.29]]),
+    "HgBr2": ([80, 35, 35], [[0, 0, 0], [0, 0, 2.41], [0, 0, -2.41]]),
+    "AlF3": ([13, 9, 9, 9], [[0, 0, 0], [1.63, 0, 0], [-0.815, 1.41, 0], [-0.815, -1.41, 0]]),
+    "AlCl3": ([13, 17, 17, 17], [[0, 0, 0], [2.06, 0, 0], [-1.03, 1.78, 0], [-1.03, -1.78, 0]]),
+    "SiH4": ([14, 1, 1, 1, 1], [[0, 0, 0], [0.856, 0.856, 0.856], [-0.856, -0.856, 0.856],
+                                [-0.856, 0.856, -0.856], [0.856, -0.856, -0.856]]),
+    "SiCl4": ([14, 17, 17, 17, 17], [[0, 0, 0], [1.18, 1.18, 1.18], [-1.18, -1.18, 1.18],
+                                     [-1.18, 1.18, -1.18], [1.18, -1.18, -1.18]]),
+    "GaCl3": ([31, 17, 17, 17], [[0, 0, 0], [2.1, 0, 0], [-1.05, 1.82, 0], [-1.05, -1.82, 0]]),
+    "GaF3": ([31, 9, 9, 9], [[0, 0, 0], [1.71, 0, 0], [-0.855, 1.48, 0], [-0.855, -1.48, 0]]),
+    "GeCl4": ([32, 17, 17, 17, 17], [[0, 0, 0], [1.06, 1.06, 1.06], [-1.06, -1.06, 1.06],
+                                     [-1.06, 1.06, -1.06], [1.06, -1.06, -1.06]]),
+    "GeH4": ([32, 1, 1, 1, 1], [[0, 0, 0], [0.88, 0.88, 0.88], [-0.88, -0.88, 0.88],
+                                [-0.88, 0.88, -0.88], [0.88, -0.88, -0.88]]),
+    "SnCl4": ([50, 17, 17, 17, 17], [[0, 0, 0], [1.15, 1.15, 1.15], [-1.15, -1.15, 1.15],
+                                     [-1.15, 1.15, -1.15], [1.15, -1.15, -1.15]]),
+    "SnH4": ([50, 1, 1, 1, 1], [[0, 0, 0], [0.99, 0.99, 0.99], [-0.99, -0.99, 0.99],
+                               [-0.99, 0.99, -0.99], [0.99, -0.99, -0.99]]),
+    "BF3": ([5, 9, 9, 9], [[0, 0, 0], [1.31, 0, 0], [-0.655, 1.13, 0], [-0.655, -1.13, 0]]),
+    "BCl3": ([5, 17, 17, 17], [[0, 0, 0], [1.74, 0, 0], [-0.87, 1.51, 0], [-0.87, -1.51, 0]]),
 }
 
 DRIVER = r'''
@@ -88,8 +128,11 @@ HEADER = '''// SPDX-FileCopyrightText: Copyright (c) 2025 InsilicAll. All rights
 //
 // Per-element heat-of-formation reference for the canonical (MOPAC-aligned) PM6
 // heat of formation: HoF(kcal) = kEvToKcal * (E_elec + E_core_PWCCT) - sum kHofRef.
-// Each kHofRef[Z] = kEvToKcal*EISOL - EHEAT, fit by least squares so the simple
-// hydrides reproduce MOPAC's FINAL HEAT OF FORMATION to <0.1 kcal/mol. With the
+// Each kHofRef[Z] = kEvToKcal*EISOL - EHEAT, fit by least squares. The light/halide
+// refs [1,6,7,8,9,15,16,17,35,53] are fit on simple hydrides (<0.1 kcal/mol). The
+// added main-group/metal refs [5,13,14,30,31,32,48,50,80] (B, Al, Si, Zn, Ga, Ge,
+// Cd, Sn, Hg) are fit with the light refs held fixed, on metal halides/hydrides/
+// methyls, and reproduce MOPAC PM6 HoF to <=1.2 kcal/mol per compound. With the
 // PWCCT core-core (bit-exact to MOPAC) and the PYSEQM electronic SCF, the HoF then
 // matches MOPAC PM6 to ~1 kcal/mol for light + Br molecules (iodine looser).
 
@@ -137,35 +180,82 @@ def main() -> int:
         subprocess.run(["g++", "-std=c++17", "-O2", f"-I{SRC}", str(cf),
                         str(SRC / "core_hamiltonian.cpp"), str(SRC / "pm6_params.cpp"),
                         str(SRC / "overlap.cpp"), str(SRC / "scf_d.cpp"), "-o", str(exe)], check=True)
-        names = list(CAL)
-        stdin = []
-        for nm in names:
-            Z, c = CAL[nm]
-            stdin.append(str(len(Z)))
-            stdin += [f"{z} {p[0]:.10f} {p[1]:.10f} {p[2]:.10f}" for z, p in zip(Z, c)]
-        out = subprocess.run([str(exe)], input="\n".join(stdin) + "\n",
-                             capture_output=True, text=True).stdout.split("\n")
 
-    rows = []
-    for nm, line in zip(names, out):
-        t = line.split()
-        if t[0] != "1":
-            sys.exit(f"engine did not converge for calibration molecule {nm}")
-        rows.append((CAL[nm][0], float(t[1]), mopac_hof(*CAL[nm])))
-    elems = sorted({e for Z, _, _ in rows for e in Z})
-    A = np.array([[Z.count(e) for e in elems] for Z, _, _ in rows], float)
-    y = np.array([CONV * T - hof for _, T, hof in rows])  # = sum_el n_el * kHofRef_el
-    ref, *_ = np.linalg.lstsq(A, y, rcond=None)
-    refmap = {e: r for e, r in zip(elems, ref)}
-    resid = float(np.max(np.abs(y - A @ ref)))
+        def engine_etot(table):
+            names = list(table)
+            stdin = []
+            for nm in names:
+                Z, c = table[nm]
+                stdin.append(str(len(Z)))
+                stdin += [f"{z} {p[0]:.10f} {p[1]:.10f} {p[2]:.10f}" for z, p in zip(Z, c)]
+            out = subprocess.run([str(exe)], input="\n".join(stdin) + "\n",
+                                 capture_output=True, text=True).stdout.split("\n")
+            res = {}
+            for nm, line in zip(names, out):
+                t = line.split()
+                if not t or t[0] != "1":
+                    sys.exit(f"engine did not converge for calibration molecule {nm}")
+                res[nm] = float(t[1])  # E_elec + PWCCT (eV)
+            return res
 
+        etot_extra = engine_etot(CAL_EXTRA)
+
+    # Stage 1: the light/halide refs are the ALREADY-SHIPPED, validated values; read
+    # them back from the current header so re-running this generator to add metals
+    # never perturbs the organic HoF. (The original hydride fit that produced them is
+    # preserved in git history.) Re-derive them by passing --refit-light if needed.
+    refmap = {}
+    if "--refit-light" in sys.argv:
+        with tempfile.TemporaryDirectory() as td2:
+            cf = Path(td2) / "drv.cpp"; cf.write_text(DRIVER); exe = Path(td2) / "drv"
+            subprocess.run(["g++", "-std=c++17", "-O2", f"-I{SRC}", str(cf),
+                            str(SRC / "core_hamiltonian.cpp"), str(SRC / "pm6_params.cpp"),
+                            str(SRC / "overlap.cpp"), str(SRC / "scf_d.cpp"), "-o", str(exe)], check=True)
+
+            def _etot(table):
+                names = list(table); stdin = []
+                for nm in names:
+                    Z, c = table[nm]; stdin.append(str(len(Z)))
+                    stdin += [f"{z} {p[0]:.10f} {p[1]:.10f} {p[2]:.10f}" for z, p in zip(Z, c)]
+                out = subprocess.run([str(exe)], input="\n".join(stdin) + "\n",
+                                     capture_output=True, text=True).stdout.split("\n")
+                return {nm: float(l.split()[1]) for nm, l in zip(names, out) if l.split() and l.split()[0] == "1"}
+            etot = _etot(CAL)
+        rows = [(CAL[nm][0], etot[nm], mopac_hof(*CAL[nm])) for nm in CAL]
+        elems = sorted({e for Z, _, _ in rows for e in Z})
+        A = np.array([[Z.count(e) for e in elems] for Z, _, _ in rows], float)
+        y = np.array([CONV * T - hof for _, T, hof in rows])
+        ref, *_ = np.linalg.lstsq(A, y, rcond=None)
+        refmap = {e: r for e, r in zip(elems, ref)}
+        resid = float(np.max(np.abs(y - A @ ref)))
+    else:
+        cur = OUT.read_text()
+        for m in re.finditer(r"([-0-9.eE+]+),\s*//\s*(\d+)\s", cur):
+            refmap[int(m.group(2))] = float(m.group(1))
+        for z in EXTRA_ELEMS:  # drop any stale extra refs before re-fitting them
+            refmap.pop(z, None)
+        resid = 0.0
+
+    # Stage 2: fit the extra (metal/main-group) refs with the light refs held fixed,
+    # on the metal halides/hydrides/methyls -- so the organic HoF is not perturbed.
+    erows = [(CAL_EXTRA[nm][0], etot_extra[nm], mopac_hof(*CAL_EXTRA[nm])) for nm in CAL_EXTRA]
+    Ae = np.array([[Z.count(e) for e in EXTRA_ELEMS] for Z, _, _ in erows], float)
+    ye = np.array([CONV * T - hof - sum(refmap.get(z, 0.0) for z in Z if z not in EXTRA_ELEMS)
+                   for Z, T, hof in erows], float)
+    refe, *_ = np.linalg.lstsq(Ae, ye, rcond=None)
+    for e, r in zip(EXTRA_ELEMS, refe):
+        refmap[e] = r
+    eresid = float(np.max(np.abs(ye - Ae @ refe)))
+
+    maxz = max(SYM) + 1
     vals = []
-    for z in range(54):
+    for z in range(maxz):
         v = float(refmap.get(z, 0.0))
         comment = f"  // {z} {SYM[z]}" if z in SYM else ""
         vals.append(f"    {v!r},{comment}")
     OUT.write_text(HEADER % {"VALS": "\n" + "\n".join(vals) + "\n"})
-    print(f"wrote {OUT.relative_to(ROOT)}  (calib residual {resid:.3f} kcal); "
+    print(f"wrote {OUT.relative_to(ROOT)}  (light residual {resid:.3f} kcal, "
+          f"extra residual {eresid:.3f} kcal); "
           f"ref={ {SYM[e]: round(r, 3) for e, r in refmap.items()} }")
     return 0
 

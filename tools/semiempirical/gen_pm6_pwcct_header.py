@@ -7,9 +7,19 @@ parameters (x, alpha). Our PYSEQM-derived engine reproduces MOPAC's electronic
 structure bit-closely (charges + eigenvalues match), so swapping the core-core to
 PWCCT is what aligns the energy / heat of formation with canonical PM6 / MOPAC.
 
-The parameter values are taken from SCINE Sparrow's PM6 resource (BSD-3-Clause,
-github.com/qcscine/Sparrow, src/Sparrow/Sparrow/Resources/Pm6/parameters.json),
-which encodes Stewart's published PM6 parameters; MOPAC is the verification oracle.
+The light/halide elements [1,6,7,8,9,15,16,17,35,53] are taken from SCINE Sparrow's
+PM6 resource (BSD-3-Clause, github.com/qcscine/Sparrow,
+src/Sparrow/Sparrow/Resources/Pm6/parameters.json), which encodes Stewart's
+published PM6 parameters; MOPAC is the verification oracle.
+
+The additional main-group/metal elements [5,13,14,30,31,32,48,50,80]
+(B, Al, Si, Zn, Ga, Ge, Cd, Sn, Hg) are sourced directly from MOPAC 23.2.5's own
+PM6 parameters and embedded in data/pm6_pwcct_mopac_extra.json: per element the
+PO9 monopole radius (bohr) and the guess1/2/3 unpolarizable-core Gaussian (printed
+by MOPAC under "PARAMETER VALUES USED ..." with the HCORE keyword), and per pair
+the alpb/xfac diatomic factors (from MOPAC's parameters_for_PM6_C.F90). With these,
+the PWCCT core-core reproduces MOPAC's NUCLEAR-NUCLEAR REPULSION bit-exactly for
+these elements too (see validate_pwcct.py / validate_pm6d_hof_pwcct.py).
 
     # one-time: download Sparrow's PM6 parameters.json
     curl -sL https://raw.githubusercontent.com/qcscine/Sparrow/master/src/Sparrow/\\
@@ -29,8 +39,12 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 OUT = ROOT / "rocmolkit" / "src" / "semiempirical" / "pwcct_data.h"
-ELEMS = [1, 6, 7, 8, 9, 15, 16, 17, 35, 53]
-MAXZ = 53
+# MOPAC-sourced extra elements (B, Al, Si, Zn, Ga, Ge, Cd, Sn, Hg) embedded as JSON.
+MOPAC_EXTRA = Path(__file__).resolve().parent / "data" / "pm6_pwcct_mopac_extra.json"
+SPARROW_ELEMS = [1, 6, 7, 8, 9, 15, 16, 17, 35, 53]  # from Sparrow parameters.json
+EXTRA_ELEMS = [5, 13, 14, 30, 31, 32, 48, 50, 80]     # from MOPAC (data file above)
+ELEMS = sorted(SPARROW_ELEMS + EXTRA_ELEMS)
+MAXZ = 80  # bumped to include Hg (Z=80); the NaN guard still gates uncalibrated Z
 
 HEADER = """// SPDX-FileCopyrightText: Copyright (c) 2025 InsilicAll. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
@@ -96,7 +110,7 @@ def main() -> int:
     ga = ["0.0"] * nz
     gb = ["0.0"] * nz
     gc = ["0.0"] * nz
-    for z in ELEMS:
+    for z in SPARROW_ELEMS:
         v = atomic[z]
         pcore[z] = repr(float(v["pack"]["pcore"]))
         g = v.get("gaussianRepulsion", [])
@@ -105,15 +119,32 @@ def main() -> int:
             gb[z] = repr(float(g[0]["b"]))
             gc[z] = repr(float(g[0]["c"]))
 
-    # symmetric pair tables x[zi*nz+zj], alpha[..]
+    # symmetric pair tables x[zi*nz+zj], alpha[..] (Sparrow, light/halide pairs)
     xt = ["0.0"] * (nz * nz)
     at = ["0.0"] * (nz * nz)
-    for zi in ELEMS:
-        for zj in ELEMS:
+    for zi in SPARROW_ELEMS:
+        for zj in SPARROW_ELEMS:
             p = pairs.get((zi, zj)) or pairs.get((zj, zi))
             if p is not None:
                 xt[zi * nz + zj] = repr(float(p[0]))
                 at[zi * nz + zj] = repr(float(p[1]))
+
+    # Layer in the MOPAC-sourced extra elements (B, Al, Si, Zn, Ga, Ge, Cd, Sn, Hg):
+    # per-element PO9 (= pcore, bohr) and guess Gaussian, and every pair that
+    # involves an extra element (alpb/xfac). Baked Sparrow-Sparrow pairs are left
+    # untouched, matching the as-shipped header.
+    extra = json.loads(MOPAC_EXTRA.read_text())
+    for zs, e in extra["elem"].items():
+        z = int(zs)
+        pcore[z] = repr(float(e["pcore"]))
+        if e.get("gauss"):
+            ga[z] = repr(float(e["gauss"][0]))
+            gb[z] = repr(float(e["gauss"][1]))
+            gc[z] = repr(float(e["gauss"][2]))
+    for key, (x, a) in extra["pairs"].items():  # stored once as "i,j" with i >= j
+        zi, zj = (int(t) for t in key.split(","))
+        xt[zi * nz + zj] = xt[zj * nz + zi] = repr(float(x))
+        at[zi * nz + zj] = at[zj * nz + zi] = repr(float(a))
 
     out = [HEADER]
     out.append(f"\nconstexpr double kPcore[kPwcctMaxZ + 1] = {{{', '.join(pcore)}}};\n")
