@@ -48,6 +48,10 @@ namespace {
 // per-(p,q) rotation angle is recomputed identically on every lane, so the
 // converged charges match the CPU reference (relaxation only from cross-lane
 // sum folds, ~1e-12 -- charges still bit-exact to MOPAC).
+// No __launch_bounds__: forcing a min-blocks hint pushes the allocator to the
+// 256-VGPR ceiling and adds register pressure at the actual (96-lane) block,
+// measurably REGRESSING throughput (118 -> 97 mol/s on gfx1200). The default
+// allocation (192 VGPR, 8 waves/SIMD static) benches best.
 __global__ void scfBatchDKernelCoop(int nMol, const AtomIntParams* ap, const int* start,
                                     const int* norb, const double* coords, const int* atomOff,
                                     const int* nAtomsArr, const int* nBasisArr,
