@@ -351,3 +351,70 @@ rocmolkit/src/semiempirical/
   pm6_params_data.h                   # generated PM6 table (107 elements)
   # overlap, H_core, two-electron, SCF, Mulliken, HIP kernels  — to come
 ```
+
+---
+
+## Benchmarks (secondary / perf-only — not a correctness claim)
+
+> This section characterizes the **throughput** of the batched on-device PM6_D
+> SCF (`scfBatchDGpu`). It is a perf note, **not** part of the engine's
+> correctness contract — that is `tools/semiempirical/validate_*` (GPU == CPU,
+> bit-exact to MOPAC). Harness + reproduction:
+> `tools/semiempirical/benchmark/` (`bench_pm6d_gpu.py`, `bench_pm6d_driver.cpp`,
+> `README.md`).
+
+**Device:** AMD **gfx1200** (RDNA4), `rocmolkit:devel-local` container,
+`HIP_VISIBLE_DEVICES=0`. **Molecule set:** 20 supported drug-like base molecules
+(aspirin, caffeine, paracetamol, metformin, nicotine→removed by cap, serotonin,
+dopamine, amino acids, sugars, nucleobases, benzene/toluene/aniline/phenol,
+4-bromoaniline (Br), dimethyl-silanediol (Si), etc.) parsed from SMILES,
+ETKDG-embedded, filtered to PM6_D-supported elements
+(H/C/N/O/F/Si/P/S/Cl/Br/…), then replicated with tiny coordinate jitter to a
+batch of 300. **All molecules converged (100%)**; charge conservation
+`max|Σq − Q_net| ≈ 6e-14 e`. Numbers are real measured runs, best-of-4 GPU /
+best-of-1 CPU, `maxIter=800`, `convTol=1e-10`.
+
+### Headline (300 molecules, ≤25 atoms each, 5,145 atoms total)
+
+| path | wall (best) | mol/s | atoms/s |
+|------|------------:|------:|--------:|
+| GPU batch `scfBatchDGpu` (steady) | 33.74 s | **8.9** | **153** |
+| GPU batch (cold, incl. HIP init/JIT/H2D) | 35.63 s | 8.4 | 145 |
+| CPU loop `pm6dCharges` | 8.74 s | 34.3 | 589 |
+| **GPU/CPU speedup** | | **0.26×** | |
+
+### By molecule-size bucket (300 molecules each, capped)
+
+| bucket (max N) | atoms | GPU mol/s | GPU atoms/s | CPU mol/s | CPU atoms/s | GPU/CPU |
+|----------------|------:|----------:|------------:|----------:|------------:|--------:|
+| ≤15 | 3,690 | 23.9 | 294 | 89.1 | 1,096 | 0.27× |
+| ≤20 | 4,229 | 16.3 | 230 | 64.5 |   909 | 0.25× |
+| ≤25 | 5,145 |  8.7 | 149 | 34.8 |   596 | 0.25× |
+
+### Reading these numbers honestly
+
+The PM6_D batch path is **~4× slower than the CPU loop** at drug-molecule sizes,
+and the gap is stable across buckets (~0.25×). The cause is structural, not a
+bug: `scfBatchDGpu` runs **one whole SCF per GPU thread** with no intra-molecule
+parallelism, so a single RDNA4 lane performs the full dense diagonalization on
+every SCF iteration. Per-molecule cost grows steeply with atom count (GPU mol/s
+falls 24 → 8.7 going from ≤15 to ≤25 atoms), and — because the batch finishes
+only when its **largest** molecule finishes — a single ~70–80-atom molecule at
+the 800-iteration cap can stall the whole batch for minutes (hence the
+`--max-atoms` cap in the harness).
+
+The batch path's current value is **correctness and self-containment** (fully
+on-device, bit-exact to the CPU/MOPAC, no per-molecule host round-trips), not
+raw throughput at these sizes. It is best suited to **large batches of small
+molecules** (its original "one d-atom + hydrogens" scope). The standing
+throughput work in *What's left* applies directly: a one-block-per-molecule
+layout with shared-memory cooperative diagonalization (instead of
+one-thread-per-molecule) is the lever to make the GPU path win here.
+
+**Reproduce:**
+
+```sh
+docker run --rm --device /dev/kfd --device /dev/dri -e HIP_VISIBLE_DEVICES=0 \
+  -v "$PWD":/work -w /work rocmolkit:devel-local \
+  python3 tools/semiempirical/benchmark/bench_pm6d_gpu.py --target 300 --max-atoms 25
+```
