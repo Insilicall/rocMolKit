@@ -201,6 +201,28 @@ within ~0.4 kcal/mol — `validate_pm6d_ions.py` (NH4⁺, CH3NH3⁺, OH⁻, CN�
 HCOO⁻); GPU == CPU to FP rounding. Open-shell (odd-electron) systems still return
 false (RHF only).
 
+### Planned — open-shell (UHF) and transition metals
+
+The SCF is closed-shell RHF (`nElec % 2 == 0`). Open-shell (radicals, most
+transition-metal compounds) needs **UHF**: two spin densities Pα, Pβ with two
+Focks `Fσ = H + J(Pα+Pβ) − K(Pσ)`. The NDDO Fock currently bakes the closed-shell
+factor into each two-electron term (`fockOneCenterSp`, the one-center d `W`
+packing, and the two-center YH/YX/YY J/K loops); UHF requires **decomposing every
+term into a pure Coulomb J (total density) and a pure exchange K (same-spin)**.
+Plan: (1) split the sp + d Fock into J/K; (2) UHF SCF loop with per-spin
+occupation `nα=(nElec+2S)/2, nβ=nElec−nα` and per-spin DIIS; (3) a `mult`/charge
+API; (4) energy `E = ½Σ[Pα(H+Fα)+Pβ(H+Fβ)]`, charges from Pα+Pβ, spin from
+Pα−Pβ. MOPAC UHF targets (PM6, doublet): **CH3• HoF=40.776 kcal, S²=0.754**;
+**NO• HoF=28.015 kcal, S²=0.751**. Start sp-only (CH3•/NO•/OH•), then d.
+
+UHF unblocks the **active-d transition metals** (Sc–Cu, Z=21–29; mostly
+open-shell), which additionally need `qnD = qn−1` (3d, vs the current `qnD = qn`)
+and a **metal-sp(qn 4/5/6) × ligand-d(qn 3) overlap** formula (the historical
+sp-partners were qn ≤ 2). The closed-shell **group-12** metals (Zn/Cd/Hg, d¹⁰
+core → sp) already match MOPAC for sp ligands (ZnF₂ Δq = 0) but need that same
+metal-sp × ligand-d overlap for the halides. Heavier TM (Y–Cd, La–Hg) are param
+stubs to be regenerated from the canonical PYSEQM/MOPAC CSV.
+
 ## Two-step methodology
 
 1. **CPU oracle first.** Rather than write our own NumPy SCF, we reuse the
