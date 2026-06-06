@@ -78,9 +78,23 @@ print("self-test Cl vs golden W:            max|dW|=",np.max(np.abs(Wcl-np.array
 print("self-test Cl WJ vs golden:           max|dWJ|=",np.max(np.abs(WJcl-np.array(g['W_J']['17']))))
 print("self-test Cl WK vs golden:           max|dWK|=",np.max(np.abs(WKcl-np.array(g['W_Kfold']['17']))))
 
-# --- Sc (Z=21): full-precision MOPAC tail exps + F0sd/G2sd, qn_sp=4 qn_d=3 ---
-Wsc,WJsc,WKsc=gen(0.848418,2.451729,0.789372, 4,3, 4.798313,5.380136)
-print("Sc W range:", Wsc.min(), Wsc.max())
-g["W"]["21"]=Wsc.tolist(); g["W_J"]["21"]=WJsc.tolist(); g["W_Kfold"]["21"]=WKsc.tolist()
+# --- Active-d transition metals Sc-Cu (Z=21-29): qn_sp=4, qn_d=3 ---
+# (Z, name, zsn, zpn, zdn, F0SD, G2SD) -- full-precision MOPAC tail exps + F0sd/G2sd
+# from parameters_for_PM6_C.F90 (zsn6/zpn6/zdn6, f0sd6, g2sd6).
+ACTIVE_D = [
+    (21, "Sc", 0.848418, 2.451729, 0.789372, 4.798313, 5.380136),
+    (22, "Ti", 1.045904, 1.076844, 0.717945, 6.560562, 3.396235),
+    (23, "V",  1.094426, 0.755378, 1.099367, 6.810021, 1.831407),
+    (24, "Cr", 1.619853, 0.848266, 1.405015, 6.150136, 2.000300),
+    (25, "Mn", 1.132450, 1.390740, 0.962550, 7.690920, 1.105330),
+    (26, "Fe", 1.459152, 1.392614, 2.161909, 9.300165, 1.601345),
+    (27, "Co", 0.519518, 1.000000, 0.352115, 1.446283, 1.680225),
+    (28, "Ni", 0.746470, 0.753327, 1.461345, 4.651664, 1.880502),
+    (29, "Cu", 1.899598, 3.000000, 1.484317, 9.848807, 9.847577),
+]
+for z, nm, zsn, zpn, zdn, f0sd, g2sd in ACTIVE_D:
+    W, WJ, WK = gen(zsn, zpn, zdn, 4, 3, f0sd, g2sd)
+    print(f"{nm} (Z={z}) W range:", W.min(), W.max())
+    g["W"][str(z)] = W.tolist(); g["W_J"][str(z)] = WJ.tolist(); g["W_Kfold"][str(z)] = WK.tolist()
 json.dump(g, open("tools/semiempirical/data/golden_w_onecenter_d.json","w"), indent=0)
-print("ADDED Sc (Z=21) to golden JSON. Elements now:", list(g["W"].keys()))
+print("ADDED active-d Sc-Cu to golden JSON. Elements now:", sorted(g["W"].keys(), key=int))

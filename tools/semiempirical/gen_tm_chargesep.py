@@ -119,7 +119,21 @@ if __name__ == "__main__":
                0.30216047, 1.03731998, 2.34288535, 0.72430196]
     _report("Cl self-test (vs two_center_d_device.h golden)", cl, cl_gold)
 
-    # Sc (Z=21): full-precision MOPAC orbital + tail exps, G2SD override.
-    sc = charge_separations("A", 21, 4, 1.402469, 1.345196, 1.859012,
-                            0.848418, 2.451729, 0.789372, 5.380136)
-    _report("Sc (Z=21) -> two_center_d_device.h dChargeSeparations", sc)
+    # Active-d transition metals Sc-Cu (Z=21-29): category "A" (sp qn0=4, d qn0-1=3).
+    # (Z, name, zeta_s, zeta_p, zeta_d, zsn, zpn, zdn, G2SD) -- full-precision MOPAC
+    # orbital exponents (zs6/zp6/zd6) + tail exps (zsn6/zpn6/zdn6) + G2SD (g2sd6) from
+    # parameters_for_PM6_C.F90. These -> two_center_d_device.h dChargeSeparations.
+    ACTIVE_D = [
+        (21, "Sc", 1.402469, 1.345196, 1.859012, 0.848418, 2.451729, 0.789372, 5.380136),
+        (22, "Ti", 5.324777, 1.164068, 1.418280, 1.045904, 1.076844, 0.717945, 3.396235),
+        (23, "V",  1.974330, 1.063106, 1.394806, 1.094426, 0.755378, 1.099367, 1.831407),
+        (24, "Cr", 3.283460, 1.029394, 1.623119, 1.619853, 0.848266, 1.405015, 2.000300),
+        (25, "Mn", 2.131680, 1.525880, 2.607800, 1.132450, 1.390740, 0.962550, 1.105330),
+        (26, "Fe", 1.479150, 6.002246, 1.080747, 1.459152, 1.392614, 2.161909, 1.601345),
+        (27, "Co", 1.166613, 3.000000, 1.860218, 0.519518, 1.000000, 0.352115, 1.680225),
+        (28, "Ni", 1.591828, 2.304739, 2.514761, 0.746470, 0.753327, 1.461345, 1.880502),
+        (29, "Cu", 1.669096, 3.000000, 2.734990, 1.899598, 3.000000, 1.484317, 9.847577),
+    ]
+    for z, nm, zs, zp, zd, zsn, zpn, zdn, g2sd in ACTIVE_D:
+        v = charge_separations("A", z, 4, zs, zp, zd, zsn, zpn, zdn, g2sd)
+        _report(f"{nm} (Z={z}) -> two_center_d_device.h dChargeSeparations", v)

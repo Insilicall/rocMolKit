@@ -65,10 +65,32 @@ int pm6ValenceElectrons(int z) {
     // main-group d-atom. See validate_pm6d_tm.py.
     return 3;
   }
-  // Other active-d transition metals (Ti-Cu, Y-Ag, Hf-Au): tore = group number.
-  // Overlap is bit-exact (validate_pm6d_tm) but charges are NOT yet validated to
-  // MOPAC for these (most need open-shell UHF and/or lack a pocord cross-check),
-  // so they stay disabled to avoid silent-wrong output.
+  if (z >= 22 && z <= 24) {  // Ti, V, Cr -- active-d TM, ENABLED (d0 closed-shell).
+    // tore = ios + iop + iod = group number = Z - 18 (MOPAC parameters_C reference
+    // config Ti s2d2, V s2d3, Cr s2d4 -> tore 4/5/6). The full PM6 parameter set
+    // (Uss/Upp/Udd, betas, F0SD/G2SD, tail exps) is in pm6_params_data.h; the
+    // one-center d W is baked by gen_tm_onecenter_w.py and the d charge separations
+    // by gen_tm_chargesep.py. The d0 closed-shell oxidation states are BIT-EXACT to
+    // MOPAC on the RHF (and GPU batch) path: TiF4 q_Ti=+1.5816 vs MOPAC +1.5817
+    // (dq=1.6e-4), TiCl4 dq=3.7e-4, VF5 dq=2.1e-4, CrF6 dq=4.7e-4 (all < 1e-3, the
+    // ev/a0 constant-truncation floor). Because Ti(IV)/V(V)/Cr(VI) are d0, the
+    // metal carries no d electrons, so the two-center d-block 2e integrals never
+    // fire and the SCF reduces to the validated sp + ligand-d path. rhoCore (MOPAC
+    // poc_) is undefined for Ti/V/Cr (rhoCore=0 -> regular e1b monopole, which is
+    // what MOPAC's mndod spcore does for them). See validate_pm6d_tm.py.
+    return z - 18;
+  }
+  // Mn..Cu (25..29) and the heavier active-d TM (Y-Ag, Hf-Au) stay DISABLED. Their
+  // params, one-center d W and d charge separations ARE baked (pm6_params_data.h +
+  // gen_tm_*), and the one-center d-block reproduces MOPAC (Cu+ d10 single-ion HoF
+  // 272.99 vs MOPAC 273.53, the EISOL-rounding floor). What is NOT yet bit-exact is
+  // the TWO-CENTER d-block when the metal d-shell is POPULATED: e.g. CuF (Cu d10)
+  // converges to Cu s-pop 0.18 / q=+0.84 instead of MOPAC's s-pop 0.58 / q=+0.50
+  // (our state is ~3 eV lower, so it is a genuine metal-d<->ligand two-center 2e /
+  // electron-core discrepancy, NOT an SCF local minimum). d0 metals (Ti/V/Cr above)
+  // are immune because they have no d electrons; the populated-d metals need the
+  // two-center d path resolved before they can be enabled bit-exact. They are left
+  // disabled to avoid silent-wrong output.
   if (z >= 31 && z <= 36) {        // Ga..Kr
     return z - 28;
   }

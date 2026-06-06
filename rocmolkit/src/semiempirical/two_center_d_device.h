@@ -53,6 +53,30 @@ NVMOLKIT_HD inline bool dChargeSeparations(int z, double& dp, double& ds, double
                   // by tools/semiempirical/gen_tm_chargesep.py (bit-exact to PYSEQM).
     dp = 0.80054436; ds = 1.61979427; dd = 1.07584029;
     rho3 = 2.45378389; rho4 = 1.60058077; rho5 = 0.85490281; rho6 = 1.15821944;
+  } else if (z == 22) {  // Ti -- active-d TM (qn4 sp, qnD3 d). gen_tm_chargesep.py.
+    dp = 1.12923822; ds = 0.53735085; dd = 1.41015878;
+    rho3 = 2.69790624; rho4 = 1.44653844; rho5 = 0.48319771; rho6 = 1.44688370;
+  } else if (z == 23) {  // V -- active-d TM (qn4 sp, qnD3 d). gen_tm_chargesep.py.
+    dp = 1.10444703; ds = 1.79796529; dd = 1.43389116;
+    rho3 = 1.76187597; rho4 = 1.88688065; rho5 = 1.34717120; rho6 = 1.29691630;
+  } else if (z == 24) {  // Cr -- active-d TM (qn4 sp, qnD3 d). gen_tm_chargesep.py.
+    dp = 0.81804068; ds = 1.12394737; dd = 1.23219554;
+    rho3 = 1.37859617; rho4 = 1.66105265; rho5 = 0.94948843; rho6 = 1.08400979;
+  } else if (z == 25) {  // Mn -- active-d TM (qn4 sp, qnD3 d). gen_tm_chargesep.py.
+    dp = 0.46625016; ds = 1.15939512; dd = 0.76692998;
+    rho3 = 2.01230928; rho4 = 0.75770642; rho5 = 1.15401136; rho6 = 0.85730147;
+  } else if (z == 26) {  // Fe -- active-d TM (qn4 sp, qnD3 d). gen_tm_chargesep.py.
+    dp = 0.07967900; ds = 2.37253445; dd = 1.85057187;
+    rho3 = 0.89594349; rho4 = 0.29474171; rho5 = 1.69582533; rho6 = 1.24492638;
+  } else if (z == 27) {  // Co -- active-d TM (qn4 sp, qnD3 d). gen_tm_chargesep.py.
+    dp = 0.69737492; ds = 1.55654475; dd = 1.07514281;
+    rho3 = 5.50089686; rho4 = 1.82830981; rho5 = 1.25505220; rho6 = 1.42719578;
+  } else if (z == 28) {  // Ni -- active-d TM (qn4 sp, qnD3 d). gen_tm_chargesep.py.
+    dp = 0.65973193; ds = 1.15480804; dd = 0.79530421;
+    rho3 = 1.32545586; rho4 = 1.75705735; rho5 = 0.98587922; rho6 = 0.78520336;
+  } else if (z == 29) {  // Cu -- active-d TM (qn4 sp, qnD3 d). gen_tm_chargesep.py.
+    dp = 0.60596248; ds = 1.04895531; dd = 0.73126410;
+    rho3 = 1.30494247; rho4 = 0.79328192; rho5 = 0.51632783; rho6 = 0.73593787;
   } else if (z == 15) {  // P
     dp = 0.90744734; ds = 1.38477069; dd = 1.62554049;
     rho3 = 0.27098714; rho4 = 1.36916053; rho5 = 0.38883255; rho6 = 0.71981849;
