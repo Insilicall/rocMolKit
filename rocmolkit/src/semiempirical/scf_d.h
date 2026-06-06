@@ -30,8 +30,10 @@ namespace semiempirical {
 // of formation (kcal/mol). atoms: Z array (length nAtoms); coords: nAtoms*3
 // row-major, Angstrom. `charge` is the net molecular charge (0 neutral, +1
 // cation, -1 anion, ...): the electron count is sum(valence) - charge. Returns
-// false on an unsupported element, an odd-electron (open-shell) molecule, or
-// non-convergence. The converged Mulliken charges sum to `charge`.
+// false on an unsupported element or non-convergence. The converged Mulliken
+// charges sum to `charge`. `mult` is the spin multiplicity (2S+1): mult=1 is
+// closed-shell RHF; mult>1 (or an odd electron count) uses open-shell UHF, which
+// is currently sp-only (d-bearing atoms on an open-shell molecule return false).
 //
 // hofKcal (if non-null) receives the PYSEQM-referenced PM6_D heat of formation
 // (AM1-style core-core, bit-exact to the PYSEQM oracle). hofPm6Kcal (if non-null)
@@ -40,7 +42,7 @@ namespace semiempirical {
 // Br molecules (iodine looser). The SCF / charges are identical for both.
 bool pm6dCharges(int nAtoms, const int* atoms, const double* coords, double* q,
                  double* hofKcal = nullptr, int maxIter = 800, double convTol = 1e-10,
-                 double* hofPm6Kcal = nullptr, int charge = 0);
+                 double* hofPm6Kcal = nullptr, int charge = 0, int mult = 1);
 
 // PM6_D energy gradient dE/dR for one molecule, via the frozen-density
 // (Hellmann-Feynman) method: solve the SCF once for the density P, then take the

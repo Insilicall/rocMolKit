@@ -29,13 +29,14 @@
 #include "pm6_params.h"     // pm6ValenceElectrons
 #include "pwcct_device.h"   // heatOfFormationPm6Kcal (canonical/MOPAC core-core)
 #include "scf_d_device.h"
+#include "scf_uhf_device.h"  // scfLoopUHFspDev (open-shell UHF, sp-only)
 
 namespace nvMolKit {
 namespace semiempirical {
 
 bool pm6dCharges(int nAtoms, const int* atoms, const double* coords, double* q,
                  double* hofKcal, int maxIter, double convTol, double* hofPm6Kcal,
-                 int charge) {
+                 int charge, int mult) {
   if (nAtoms <= 0) return false;
 
   std::vector<AtomIntParams> ap(nAtoms);
@@ -49,9 +50,38 @@ bool pm6dCharges(int nAtoms, const int* atoms, const double* coords, double* q,
     nElec += pm6ValenceElectrons(atoms[a]);
   }
   nElec -= charge;  // cation (+) removes electrons; anion (-) adds them
-  if (nBasis == 0 || nElec <= 0 || nElec % 2 != 0) return false;  // unsupported / open shell
-
+  if (nBasis == 0 || nElec <= 0) return false;
   const int n2 = nBasis * nBasis;
+
+  // Open-shell (radicals, mult>1, or odd electrons) -> UHF. Sp-only for now (the
+  // one-center d W folds J and K together, so the d path stays RHF/closed-shell).
+  const int nUnpaired = mult - 1;
+  if (nUnpaired < 0 || nUnpaired > nElec || (nElec - nUnpaired) % 2 != 0) return false;  // bad mult
+  if (mult > 1 || nElec % 2 != 0) {
+    for (int a = 0; a < nAtoms; ++a)
+      if (ap[a].nOrb == 9) return false;  // UHF d-orbital path not yet supported
+    std::vector<double> Hu(n2), Pa(n2), Pb(n2);
+    buildCoreHamiltonianDDev(nBasis, nAtoms, ap.data(), start.data(), norb.data(), coords,
+                             Hu.data());
+    int convU = 0;
+    double eU = 0.0;
+    scfLoopUHFsp(nBasis, nAtoms, ap.data(), start.data(), norb.data(), coords, Hu.data(),
+                 (nElec + nUnpaired) / 2, (nElec - nUnpaired) / 2, maxIter, convTol, Pa.data(),
+                 Pb.data(), &convU, &eU);
+    if (!convU) return false;
+    for (int a = 0; a < nAtoms; ++a) {
+      double pop = 0.0;
+      for (int o = 0; o < norb[a]; ++o)
+        pop += Pa[(start[a] + o) * nBasis + (start[a] + o)] + Pb[(start[a] + o) * nBasis + (start[a] + o)];
+      q[a] = static_cast<double>(pm6ValenceElectrons(atoms[a])) - pop;
+    }
+    if (hofKcal != nullptr)
+      *hofKcal = heatOfFormationKcalDev(eU, nuclearRepulsionAm1Dev(nAtoms, ap.data(), coords),
+                                        nAtoms, ap.data());
+    if (hofPm6Kcal != nullptr) *hofPm6Kcal = heatOfFormationPm6Kcal(eU, nAtoms, atoms, coords);
+    return true;
+  }
+
   std::vector<double> H(n2), density(n2), eval(nBasis), F(n2), eigA(n2), C(n2), Pnew(n2),
       ecom(n2), diisF(kScfDiisMax * n2), diisE(kScfDiisMax * n2);
   buildCoreHamiltonianDDev(nBasis, nAtoms, ap.data(), start.data(), norb.data(), coords, H.data());
