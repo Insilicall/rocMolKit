@@ -41,12 +41,12 @@ treatment applies), heavier TM (Y–Cd, La–Hg param stubs), and the open-shell
 batch (UHF runs on the CPU path).
 
 **Performance.** The batched GPU SCF (`scfBatchDGpu`) runs **one wavefront (32
-lanes) per molecule** with a cooperative deterministic Jacobi diagonalization, and
-is **bit-exact to the CPU (1e-14)**. On gfx1200 over 300 drug-like molecules it is
-**1.4× faster than the CPU loop** (50 vs 35 mol/s — a 5.6× kernel speedup over the
-old one-thread-per-molecule path). Large molecules (≥40 atoms) still wait on the
-O(nB³) Jacobi; wider blocks (the next lever) need `buildFockDDev`'s YY tensor moved
-off-stack. See the **Benchmarks** section at the bottom.
+lanes) per molecule** with a cooperative deterministic Jacobi diagonalization +
+**cached two-center integrals** (computed once/molecule, not per SCF iteration),
+**bit-exact to the CPU (1e-14)**. On gfx1200 over 300 drug-like molecules it is
+**2.4× faster than the CPU loop** (92 vs 38 mol/s). Remaining levers toward 10×:
+pseudo-diagonalization (cheap occ–virt rotations vs the O(nB³) Jacobi), per-molecule
+early-exit, and wider blocks for large molecules. See the **Benchmarks** section.
 
 ---
 
