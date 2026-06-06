@@ -219,11 +219,17 @@ multi-solution case — H_core guess lands 44 kcal/mol too high; the diagonal gu
 fixes it), NF2•, CH3O• (doublets) and **O₂ (triplet)** — worst |Δq| = 1e-4, HoF
 within 0.56 kcal/mol. Closed-shell RHF is unchanged.
 
-**Pending on the UHF path:** (1) the **d-orbital** UHF — the one-center d `W`
+The **Python binding** (`PM6DCharges`) classifies each molecule from its formal
+charge + RDKit radical electrons: closed-shell molecules go into one GPU batch
+(`scfBatchDGpu`), open-shell ones fall back to the CPU UHF `pm6dCharges`, and the
+results are scattered back into the original order — so radicals are usable
+through the binding. Validated on gfx1200: a mixed batch routes correctly (closed
+GPU charges match CPU to <1e-14, radicals solved on CPU UHF).
+
+**Pending on the UHF path:** the **d-orbital** UHF — the one-center d `W`
 packing folds J and K together, so d-bearing open-shell atoms still return false
-(needed for active-d transition metals); (2) **GPU + the Python binding** — UHF
-runs on the CPU `pm6dCharges`; the batched `scfBatchDGpu` and the RDKit binding
-still need the open-shell routing.
+(needed for active-d transition metals). The GPU kernel itself stays closed-shell
+(open-shell is sp-only and cheap on the CPU).
 
 UHF unblocks the **active-d transition metals** (Sc–Cu, Z=21–29; mostly
 open-shell), which additionally need `qnD = qn−1` (3d, vs the current `qnD = qn`)
