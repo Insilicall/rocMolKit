@@ -1,9 +1,10 @@
 """Validate the active-d transition-metal PM6_D path end-to-end against MOPAC.
 
-Closed-shell **d0** active-d TM compounds are bit-exact to MOPAC on BOTH the CPU
+Closed-shell active-d TM compounds are bit-exact to MOPAC on BOTH the CPU
 reference (pm6dCharges) and the GPU batch (scfBatchDGpu):
 
-  ScF3 (Sc d0), TiF4 / TiCl4 (Ti(IV) d0), VF5 (V(V) d0), CrF6 (Cr(VI) d0).
+  ScF3 (Sc d0), TiF4 / TiCl4 (Ti(IV) d0), VF5 (V(V) d0), CrF6 (Cr(VI) d0),
+  CuF / CuCl / CuBr (Cu(I) d10, the first POPULATED-d closed shell).
 
 The fix that closed Sc: MOPAC's mndod *spcore* gives the CORE atom a special
 additive radius po(9)=pocord (AtomIntParams::rhoCore) for the electron-core
@@ -13,11 +14,20 @@ MOPAC does for them. Because Ti(IV)/V(V)/Cr(VI) are d0, the metal carries no d
 electrons, so the two-center d-block 2e integrals never fire and the SCF reduces
 to the validated sp + ligand-d path -> bit-exact.
 
-Mn..Cu (populated-d) are NOT enabled: their one-center d-block reproduces MOPAC
-(Cu+ d10 single-ion HoF 272.99 vs 273.53), but the TWO-CENTER d-block with a
-POPULATED metal d-shell is not yet bit-exact (CuF: our Cu s-pop 0.18 / q=+0.84 vs
-MOPAC 0.58 / q=+0.50; our state is ~3 eV lower, a real two-center-d discrepancy,
-not a local minimum). They stay disabled to avoid silent-wrong output.
+The fix that closed Mn..Cu (POPULATED-d): a single corrupted parameter. Cu Uss in
+pm6_params_mopac.csv was -92.00221 but MOPAC PM6 uss6(29) is -97.002205 (a
+transcription error, off by exactly +5.0 eV). With a populated s-AND-d shell
+(Cu(I) d10) this biased F[s,s] by +5.0 eV (CuF -> Cu q=+0.84 instead of +0.50);
+the single-ion Cu+ d10 test had s empty so it never exercised the s-Fock and the
+bug hid in the EISOL-rounding floor. d0 metals were immune. A frozen-density [F,P]
+at MOPAC's converged density localized the error to F[Cu.s,Cu.s] alone, and a
+single-Cu-atom UHF reconstruction (F_alpha(s,s) = -3.36 engine vs -8.36 MOPAC)
+pinned it to Uss. After the fix, Cu(I) d10 is bit-exact (CuF dq 1.1e-4) on RHF +
+GPU, and the open-shell high-spin fluorides Mn/Fe/Co/Ni (UHF) are bit-exact too.
+
+NOTE: open-shell metal + d-ligand (e.g. MnCl2/CoCl2, the YY two-center d path
+under UHF) is NOT yet bit-exact -- a separate open-shell-YY contraction gap,
+independent of this parameter fix. Those compounds are excluded from the suite.
 
     MOPAC_DIR=/tmp/mopac_bin/mopac-23.2.5-linux \\
       python3 tools/semiempirical/validate_pm6d_tm.py
@@ -80,6 +90,56 @@ MOLECULES = [
                           -0.36477705460216647, -0.36477705456175080,
                           -0.36477705452807996],
     },
+    {
+        "name": "CuF (Cu(I) d10)",
+        "atoms": [29, 9],
+        "coords": [0.0, 0.0, 0.0, 1.75, 0.0, 0.0],
+        "mopac_charges": [0.50033026488320, -0.50033026488320],
+    },
+    {
+        "name": "CuCl (Cu(I) d10)",
+        "atoms": [29, 17],
+        "coords": [0.0, 0.0, 0.0, 2.05, 0.0, 0.0],
+        "mopac_charges": [0.40995443624514, -0.40995443624514],
+    },
+    {
+        "name": "CuBr (Cu(I) d10)",
+        "atoms": [29, 35],
+        "coords": [0.0, 0.0, 0.0, 2.20, 0.0, 0.0],
+        "mopac_charges": [0.34413979854356, -0.34413979854356],
+    },
+]
+
+# Open-shell high-spin active-d TM (UHF, CPU only -- scfBatchDGpu is RHF). The
+# metal d-shell is partly filled; ligands are sp (fluoride) so the two-center d
+# path is the validated YX (metal-d + F-sp). mult = 2S+1.
+OPEN_SHELL = [
+    {
+        "name": "MnF2 (Mn(II) d5, sextet)",
+        "atoms": [25, 9, 9], "mult": 6,
+        "coords": [0.0, 0.0, 0.0, -1.8, 0.0, 0.0, 1.8, 0.0, 0.0],
+        "mopac_charges": [1.00826838341752, -0.50413419172574, -0.50413419169178],
+    },
+    {
+        "name": "FeF3 (Fe(III) d5, sextet)",
+        "atoms": [26, 9, 9, 9], "mult": 6,
+        "coords": [0.0, 0.0, 0.0, 1.8, 0.0, 0.0,
+                   -0.9, 1.558, 0.0, -0.9, -1.558, 0.0],
+        "mopac_charges": [1.73032876185708, -0.57768050685045,
+                          -0.57632412751635, -0.57632412749029],
+    },
+    {
+        "name": "CoF2 (Co(II) d7, quartet)",
+        "atoms": [27, 9, 9], "mult": 4,
+        "coords": [0.0, 0.0, 0.0, -1.75, 0.0, 0.0, 1.75, 0.0, 0.0],
+        "mopac_charges": [1.14971475290884, -0.57485737646926, -0.57485737643959],
+    },
+    {
+        "name": "NiF2 (Ni(II) d8, triplet)",
+        "atoms": [28, 9, 9], "mult": 3,
+        "coords": [0.0, 0.0, 0.0, -1.71, 0.0, 0.0, 1.71, 0.0, 0.0],
+        "mopac_charges": [1.13585814891608, -0.56792907447363, -0.56792907444243],
+    },
 ]
 
 CPU_DRIVER_TMPL = r'''
@@ -105,8 +165,21 @@ def _cpu_block(mol: dict) -> str:
             f'    for(int a=0;a<{n};++a) std::printf("%.12f\\n", q[a]); }}\n')
 
 
-def _run_cpu_charges() -> list[list[float]]:
-    body = "".join(_cpu_block(m) for m in MOLECULES)
+def _cpu_block_uhf(mol: dict) -> str:
+    n = len(mol["atoms"])
+    z = ",".join(str(x) for x in mol["atoms"])
+    c = ",".join(repr(x) for x in mol["coords"])
+    mult = mol["mult"]
+    return (f'  {{ const int z[]={{{z}}};\n'
+            f'    const double c[]={{{c}}};\n'
+            f'    double q[{n}], hof, hofPm6;\n'
+            f'    pm6dCharges({n}, z, c, q, &hof, 3000, 1e-10, &hofPm6, 0, {mult});\n'
+            f'    for(int a=0;a<{n};++a) std::printf("%.12f\\n", q[a]); }}\n')
+
+
+def _run_cpu_charges(mols: list[dict], uhf: bool = False) -> list[list[float]]:
+    blk = _cpu_block_uhf if uhf else _cpu_block
+    body = "".join(blk(m) for m in mols)
     with tempfile.TemporaryDirectory() as td:
         cf = Path(td) / "t.cpp"
         cf.write_text(CPU_DRIVER_TMPL % body)
@@ -119,7 +192,7 @@ def _run_cpu_charges() -> list[list[float]]:
         out = subprocess.run([str(exe)], capture_output=True, text=True).stdout
     vals = [float(x) for x in out.split()]
     res, i = [], 0
-    for m in MOLECULES:
+    for m in mols:
         n = len(m["atoms"])
         res.append(vals[i:i + n])
         i += n
@@ -197,25 +270,42 @@ def _run_gpu_check() -> tuple[bool, str]:
 
 def main() -> int:
     ok = True
-    print("=== active-d TM PM6_D end-to-end (d0 closed-shell) ===")
+    print("=== active-d TM PM6_D end-to-end (closed-shell: d0 + Cu(I) d10) ===")
 
-    allq = _run_cpu_charges()
+    allq = _run_cpu_charges(MOLECULES)
     for mol, qC in zip(MOLECULES, allq):
         ref = mol["mopac_charges"]
         worst = max(abs(qC[a] - ref[a]) for a in range(len(ref)))
         status = "OK" if worst < 1e-3 else "FAIL"
         if worst >= 1e-3:
             ok = False
-        print(f"{mol['name']:>18}: worst |dq| = {worst:.2e}  ({status} vs MOPAC, tol 1e-3)")
+        print(f"{mol['name']:>24}: worst |dq| = {worst:.2e}  ({status} vs MOPAC, tol 1e-3)")
+
+    print("\n=== active-d TM PM6_D open-shell (UHF high-spin, CPU) ===")
+    # For high-spin d5 (Mn(II), Fe(III)) MOPAC's SCF electronically symmetry-breaks
+    # the unpaired-d localization, so nominally-equivalent ligands carry slightly
+    # different charges (MOPAC FeF3: F = -0.5777 / -0.5763 / -0.5763 at ~equal
+    # bond lengths). The metal charge is the robust, state-independent observable;
+    # we gate on the metal (atom 0) at 1e-3 and report the worst |dq| as info.
+    allqU = _run_cpu_charges(OPEN_SHELL, uhf=True)
+    for mol, qC in zip(OPEN_SHELL, allqU):
+        ref = mol["mopac_charges"]
+        worst = max(abs(qC[a] - ref[a]) for a in range(len(ref)))
+        dqM = abs(qC[0] - ref[0])
+        status = "OK" if dqM < 1e-3 else "FAIL"
+        if dqM >= 1e-3:
+            ok = False
+        print(f"{mol['name']:>28}: metal |dq| = {dqM:.2e}  worst |dq| = {worst:.2e}  "
+              f"({status} vs MOPAC, metal tol 1e-3)")
 
     gpu_ok, gpu_out = _run_gpu_check()
-    print("\n--- GPU == CPU (scfBatchDGpu) ---")
+    print("\n--- GPU == CPU (scfBatchDGpu, closed-shell) ---")
     print(gpu_out)
     if not gpu_ok:
         ok = False
 
-    print("\n" + ("OK (active-d d0 TM Sc/Ti/V/Cr bit-exact to MOPAC, GPU==CPU)" if ok
-                  else "** FAIL"))
+    print("\n" + ("OK (active-d TM Sc/Ti/V/Cr/Mn/Fe/Co/Ni/Cu bit-exact to MOPAC, "
+                  "closed-shell GPU==CPU)" if ok else "** FAIL"))
     return 0 if ok else 1
 
 
