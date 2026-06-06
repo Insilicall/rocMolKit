@@ -49,9 +49,11 @@ NVMOLKIT_HD inline bool dChargeSeparations(int z, double& dp, double& ds, double
   } else if (z == 35) {  // Br (qn4 sp, qnD4 d)
     dp = 1.02888957; ds = 0.56131331; dd = 1.66693804;
     rho3 = 0.88253204; rho4 = 0.82718856; rho5 = 0.36545910; rho6 = 1.13300353;
-  } else if (z == 53) {  // I (qn5 sp, qnD5 d)
-    dp = 0.89580123; ds = 0.96308550; dd = 1.12764841;
-    rho3 = 0.80039306; rho4 = 0.98075022; rho5 = 0.83292785; rho6 = 0.83321383;
+  } else if (z == 53) {  // I (qn5 sp, qnD5 d) -- canonical zeta_d=1.87518 (was a
+                         // corrupted 2.72301 inherited from mlxmolkit's hardcoded
+                         // pm6_params.py; PYSEQM CSV + MOPAC both use 1.87518)
+    dp = 1.29634098; ds = 0.77747287; dd = 1.63749501;
+    rho3 = 0.80039306; rho4 = 1.20097689; rho5 = 0.71635330; rho6 = 1.06583498;
   } else {
     return false;
   }

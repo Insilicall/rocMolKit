@@ -70,7 +70,9 @@ NVMOLKIT_HD inline void dsBlockDev(double zd, double zs, double Rb, int dqnA, in
   const double m3 = -A[1] * (3 * B[3] - B[5]) - A[3] * (3 * B[5] - B[3]) - 4 * A[2] * B[4];
   const double m4 = A[0] * (3 * B[4] - B[6]) + A[2] * (3 * B[6] - B[4]) + 4 * A[1] * B[5];
   const double p6 = m1 + 2.0 * m2 - 2.0 * m3 - m4;
-  const double p651 = m1 - 2.0 * m2 - 2.0 * m3 + m4;
+  const double p651 = m1 - 2.0 * m2 + 2.0 * m3 - m4;  // d-s sigma (I-H): m3/m4 signs
+                                                      // were flipped (transpile bug),
+                                                      // gave <I_z2|H_s>=0.701 vs MOPAC 0.462
   // jcall 752 (qn5 d - qn2 s): six groups (uses A/B up to index 7).
   const double n1 = A[5] * (3 * B[0] - B[2]) + A[7] * (3 * B[2] - B[0]) + 4 * A[6] * B[1];
   const double n2 = -A[4] * (3 * B[1] - B[3]) - A[6] * (3 * B[3] - B[1]) - 4 * A[5] * B[2];

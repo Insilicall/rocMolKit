@@ -11,8 +11,12 @@ s-d / p-d block, so the engine routes them through the transpiled, PYSEQM-faithf
   * the 9x9x9x9 YY two-center two-electron tensor via ``yyWMolecular`` vs the
     oracle ``_yy_pair_w_pyseqm``.
 
-The transpile reproduces even the oracle's unphysical qn5 overlap entries
-(e.g. I-Br S[3,0] > 1) bit-exact, so nothing is excluded.
+NOTE: this checks bit-exactness to the PYSEQM/mlxmolkit oracle, which carries
+genuine qn5 sign bugs (e.g. I-Br S[3,0] > 1) AND a corrupted iodine zeta_d
+(2.72301 vs canonical 1.87518). The engine has since been FIXED to canonical
+MOPAC for iodine, so the iodine pairs (I-Cl/I-S/I-Br) now intentionally DIVERGE
+from this oracle -- validate them against MOPAC's AUX OVERLAP_MATRIX with
+validate_overlap_mopac.py instead. The Br-Cl/Br-S pairs still match the oracle.
 
     MLXMOLKIT=/tmp/mlxmolkit_inspect/mlxmolkit \\
       /tmp/semienv/bin/python tools/semiempirical/validate_interhalide_components.py

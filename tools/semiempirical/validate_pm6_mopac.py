@@ -6,8 +6,9 @@ compares it to MOPAC 23.2.5's own FINAL HEAT OF FORMATION (frozen below). The
 electronic SCF is PYSEQM PM6_D (charges/eigenvalues ~MOPAC), so the agreement is:
 
   * light + Br molecules: ~1 kcal/mol (tol 1.5);
-  * iodine: looser (~kcal, PYSEQM's qn5 d-treatment diverges from MOPAC; tol 8);
-  * IBr is excluded -- PYSEQM has an unphysical qn5 s-d overlap (S>1) there that
+  * iodine incl. IBr: now canonical (zeta_d=1.87518 + fixed qn5 overlap), ~0.16
+    kcal/mol of MOPAC; charges bit-exact. (Was: looser, IBr excluded for S>1.)
+  * [historical] PYSEQM had an unphysical qn5 s-d overlap (S>1) at IBr that
     the engine faithfully reproduces, so its energy is meaningless (MOPAC is fine).
 
     g++ -std=c++17 -O2 -I../../rocmolkit/src/semiempirical validate_pm6_mopac.py ...
@@ -44,11 +45,12 @@ CASES = [
     ("BrCl", [35, 17], [[0, 0, 0], [0, 0, 1.94]], 20.2277, 1.5),
     ("CHBrCl2", [6, 35, 17, 17, 1], [[0, 0, 0], [0, 0, 1.94], [1.7, 0, -0.7],
                                      [-0.85, 1.47, -0.7], [-0.6, -1.0, -0.4]], 3.2144, 1.5),
-    # iodine: looser tolerance (PYSEQM qn5 vs MOPAC)
+    # iodine: canonical (zeta_d=1.87518) -- now within ~0.16 kcal of MOPAC, incl. IBr
     ("HI", [53, 1], [[0, 0, 0], [0, 0, 1.609]], 2.2526, 1.5),
     ("CH3I", [53, 6, 1, 1, 1], [[0, 0, 2.139], [0, 0, 0], [1.028, 0, -0.363],
-                                [-0.514, 0.89, -0.363], [-0.514, -0.89, -0.363]], 7.5565, 8.0),
-    ("ICl", [53, 17], [[0, 0, 0], [0, 0, 2.32]], 3.1249, 8.0),
+                                [-0.514, 0.89, -0.363], [-0.514, -0.89, -0.363]], 7.5565, 1.5),
+    ("ICl", [53, 17], [[0, 0, 0], [0, 0, 2.32]], 3.1249, 1.5),
+    ("IBr", [53, 35], [[0, 0, 0], [0, 0, 2.47]], 9.6648, 1.5),
 ]
 
 

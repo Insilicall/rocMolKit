@@ -438,8 +438,11 @@ NVMOLKIT_HD inline int diatomOverlapSpDev(const AtomIntParams& pA, const double 
               - 4.0 * B111[6] * A111[3] - 4.0 * B111[7] * A111[2] + A111[1] * B111[8]
               + A111[0] * B111[9]) / (s10 * 241920.0);
     if (nA > 1 && nB > 1) {
+      // sigma p(n=5,A)-s(n=4,B): integrand (xi^2-eta^2)^4 (1+xi*eta) gives the clean
+      // binomial C(4,j)(-1)^j [A_{8-2j}B_{2j} + A_{9-2j}B_{2j+1}] -- the A9*B1 term is
+      // ADDED (the prior '-' was a transpile bug, giving the unphysical I-Br S[pz,s]>1).
       S211 = std::pow(zsB, 4.5) * std::pow(zpA, 5.5) * std::pow(Rb, 10)
-             * ((A211[8] * B211[0] - A211[9] * B211[1]) - 4.0 * (A211[6] * B211[2] + A211[7] * B211[3])
+             * ((A211[8] * B211[0] + A211[9] * B211[1]) - 4.0 * (A211[6] * B211[2] + A211[7] * B211[3])
                 + 6.0 * (A211[4] * B211[4] + A211[5] * B211[5]) - 4.0 * (A211[2] * B211[6] + A211[3] * B211[7])
                 + (A211[0] * B211[8] + A211[1] * B211[9])) / (80640.0 * s30);
       S121 = std::pow(zpB, 4.5) * std::pow(zsA, 5.5) * std::pow(Rb, 10)

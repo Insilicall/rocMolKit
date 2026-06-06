@@ -133,7 +133,7 @@ anchor to an external reference. Here the anchor is **PYSEQM/MOPAC**.
 A result counts only when it matches the golden charges (and, once added, the
 heat of formation) to the stated tolerance — never timing alone.
 
-## Canonical PM6 (MOPAC) and known limitations — iodine & IBr
+## Canonical PM6 (MOPAC) — bit-exact charges incl. iodine & IBr
 
 The engine exposes **two heats of formation** (the SCF / charges are identical for
 both; only the post-SCF energy reference differs):
@@ -149,53 +149,43 @@ both; only the post-SCF energy reference differs):
 
 Agreement of `hof_pm6` with MOPAC 23.2.5 (`validate_pm6_mopac.py`):
 
-| elements | `hof_pm6` vs MOPAC |
-| -------- | ------------------ |
-| H, C, N, O, F, P, S, Cl, **Br** | **~0.5–1 kcal/mol** (canonical PM6) |
-| **I** (iodine) | looser, ~kcal (up to ~8 for CH3I) |
-| **IBr** | excluded — energy meaningless (see below) |
+| elements | `hof_pm6` vs MOPAC | charges vs MOPAC |
+| -------- | ------------------ | ---------------- |
+| H, C, N, O, F, P, S, Cl, **Br** | **~0.1–1 kcal/mol** | bit-exact (≤1e-4 e) |
+| **I** (iodine, incl. IBr) | **≤0.16 kcal/mol** | **bit-exact (≤1e-4 e)** |
 
-**Known limitation (iodine).** Iodine's 5d treatment in PYSEQM is *not* identical
-to MOPAC's, so although the charges/eigenvalues stay close, the total electronic
-energy — and hence `hof_pm6` — diverges from MOPAC by a few kcal/mol for
-iodine-containing molecules. The core-core (PWCCT) is correct; the gap is in the
-**electronic** d-treatment for qn5. **IBr** is worse: PYSEQM's qn5 s–d overlap
-there is unphysical (S > 1), which the engine reproduces faithfully (bit-exact to
-PYSEQM, by design), so that single energy is meaningless (MOPAC computes it
-correctly).
+**Iodine — resolved (now canonical MOPAC).** Iodine was diagnosed against MOPAC's
+own overlap matrix (MOPAC `AUX(PRECISION=12)` dumps `OVERLAP_MATRIX` + `AO_ZETA`)
+and fixed to bit-exact charges. The earlier divergence had **two** independent
+causes:
 
-This was investigated in depth and is **not a quick fix** (the naive routes
-regress):
+1. **A corrupted parameter, not a PYSEQM-vs-MOPAC difference.** The iodine valence
+   d-shell we carried (`zeta_d = 2.72301`, `U_dd = -23.46`, `beta_d = -5.25`) was a
+   *data bug* inherited from the upstream NumPy port (mlxmolkit's hardcoded
+   `pm6_params.py`), which contradicts **its own CSV, the canonical PYSEQM
+   `parameters_PM6_MOPAC.csv`, and MOPAC** — all three of which use
+   `zeta_d = 1.87518`, `U_dd = -28.8226`, `beta_d = -7.67611`. PYSEQM and MOPAC
+   never disagreed on iodine. (The one-center d W integrals use the *tail*
+   exponents, not the valence `zeta_d`, so they were already correct; only the
+   overlap, `U_dd`/`beta_d`, and the two-center d charge separations — regenerated
+   from `pyseqm_d_params(zeta_d = 1.87518)` — moved.)
+2. **Genuine sign bugs in PYSEQM's qn5 diatomic-overlap formulas**, confirmed in
+   the canonical `lanl/PYSEQM` source (`seqm/seqm_functions/diat_overlapD.py`) and
+   the cause of the unphysical IBr `S > 1`: the σ p–s term of jcall 9 (I–Br) had
+   `A[8]B[0] − A[9]B[1]` where it must be `+`; jcall 853 (I–Cl/I–S) σ/π p–p used a
+   wrong coefficient pattern; and the I–H d–s term (jcall 651) had `m1 − 2m2 −
+   2m3 + m4` where it must be `m1 − 2m2 + 2m3 − m4` (gave `<I_z2|H_s> = 0.701` vs
+   MOPAC `0.462`). Each was re-derived from the exact analytic Slater overlap
+   (spheroidal-coordinate expansion → `Σ cᵢⱼ A_i(p) B_j(q)`) and validated
+   bit-close to MOPAC's `OVERLAP_MATRIX` for all five interhalides + the hydride.
 
-- The divergence is a *parameter* difference — PYSEQM's iodine d-shell
-  (`zeta_d = 2.723`, `U_dd = -23.46`, `beta_d = -5.25`, and the one-center d
-  `F0SD/G2SD`) differs from the published Stewart/Sparrow PM6 values
-  (`zeta_d = 1.875`, `U_dd = -28.82`, `beta_d = -7.68`, `F0SD = 20.50`,
-  `G2SD = 2.16`). All other elements (incl. Br) already match.
-- But **Sparrow's iodine parameters are stale relative to MOPAC 23.2.5**:
-  substituting them (d-params and the regenerated one-center d) makes the iodine
-  total energy move *further* from MOPAC, not closer (HI 0.10 eV → 0.39 eV). The
-  current PYSEQM iodine parametrisation is already the *closest* of the three to
-  MOPAC 23.2.5 (~0.1 eV / 2 kcal on HI).
-- **Proof that it is a *formula* mismatch, not a parameter one.** We fetched
-  MOPAC 23.2.5's own PM6 iodine parameters from the openmopac source
-  (`src/models/parameters_for_PM6_C.F90`: `zd=1.875175`, `udd=-28.822603`,
-  `betad=-7.676107`, and *no* F0SD/G2SD override — they are computed from the
-  Slater–Condon integrals), substituted them into the engine, and regenerated the
-  one-center d. Result: the iodine total energy moves *even further* from MOPAC
-  (HI 0.10 eV → 0.73 eV; ICl → 1.06 eV; CH3I → 1.33 eV). Feeding MOPAC's *own*
-  parameters into our engine makes it agree with MOPAC *less*, which can only mean
-  the **electronic formulas** (the qn5 diatomic overlap, the two-center integrals,
-  and the one-center d Slater–Condon) differ from MOPAC's. PYSEQM's iodine
-  parameters (`zd=2.723`) are an internally-consistent fit to PYSEQM's *formulas*;
-  they are not MOPAC's, and no parameter substitution can close a formula gap.
-
-So matching MOPAC 23.2.5 for iodine is a **port of MOPAC's qn5 electronic
-formulas** (diatomic overlap + two-center + one-center d), validated against
-MOPAC — effectively a MOPAC-faithful d-electronic engine for period-5 elements,
-not a parameter tweak. That is a large, separate project. Until then `hof_pm6`
-for iodine is the PYSEQM-electronics value (~2–8 kcal of MOPAC, the closest of the
-PYSEQM/Sparrow/MOPAC-param options), and IBr is excluded.
+With both fixed, the PM6_D SCF is **bit-exact to MOPAC** (worst `|Δq| = 1e-4 e`
+over HI/ICl/IBr/CH3I and every light/Br molecule) and `hof_pm6` is within **0.16
+kcal/mol** of MOPAC 23.2.5 for iodine (`validate_pm6_mopac.py`). IBr — previously
+`HoF = −1115 kcal` (garbage, from `S > 1`) — is now physical and matches MOPAC.
+The reference `kHofRef[53]` was re-fit for the corrected parameters
+(`gen_pm6_hof_ref.py`, calibration residual 0.081 kcal). The diatomic overlap is
+swept against MOPAC's `OVERLAP_MATRIX` by `_sweep_overlap_mopac.py`.
 
 Everything above (both HoFs, charges, the PWCCT core-core, the interhalide
 overlap) is verified **GPU == CPU on real gfx1200 hardware** to floating-point
