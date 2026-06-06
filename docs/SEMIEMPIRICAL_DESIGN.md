@@ -154,6 +154,18 @@ Agreement of `hof_pm6` with MOPAC 23.2.5 (`validate_pm6_mopac.py`):
 | H, C, N, O, F, P, S, Cl, **Br** | **~0.1–1 kcal/mol** | bit-exact (≤1e-4 e) |
 | **I** (iodine, incl. IBr) | **≤0.16 kcal/mol** | **bit-exact (≤1e-4 e)** |
 
+**HoF element coverage (calibrated set + NaN guard).** `kHofRef` (canonical) and
+`EISOL`/`EHEAT` (NDDO) are calibrated only for the validated set above. Extending
+the HoF to other elements is **not** a table fill-in: a single hydride fit gives a
+`kHofRef` that reproduces *that* molecule but the absolute energetics are
+non-transferable (e.g. fitting B from BH₃ then evaluating BF₃ misses MOPAC by
+~3000 kcal/mol — the PWCCT core-core + params for B are themselves uncalibrated).
+So a faithful extension requires per-element **energetics** calibration (params +
+PWCCT), a separate effort. To avoid shipping a silently-wrong number, both HoF
+paths now **return NaN for any element outside the calibrated set** (`pwcct_device.h`,
+`energy_device.h`): such molecules still produce charges (if the SCF converges)
+but report HoF as explicitly unavailable rather than a plausible-looking lie.
+
 **Iodine — resolved (now canonical MOPAC).** Iodine was diagnosed against MOPAC's
 own overlap matrix (MOPAC `AUX(PRECISION=12)` dumps `OVERLAP_MATRIX` + `AO_ZETA`)
 and fixed to bit-exact charges. The earlier divergence had **two** independent

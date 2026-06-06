@@ -169,6 +169,10 @@ NVMOLKIT_HD inline double heatOfFormationKcalDev(double eElec, double eNuc, int 
   constexpr double kEvToKcal = 23.061;
   double eisol = 0.0, eheat = 0.0;
   for (int a = 0; a < nAtoms; ++a) {
+    // EISOL is only set for the validated element set; for any other element the
+    // HoF is uncalibrated, so report it unavailable (NaN) instead of a silently
+    // wrong finite value.
+    if (ap[a].eisol == 0.0) return NAN;
     eisol += ap[a].eisol;
     eheat += ap[a].eheat;
   }

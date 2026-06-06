@@ -118,7 +118,13 @@ inline double heatOfFormationPm6Kcal(double eElec, int nAtoms, const int* atoms,
                                      const double* coords) {
   using namespace pwcct;
   double ref = 0.0;
-  for (int a = 0; a < nAtoms; ++a) ref += kHofRef[atoms[a]];
+  for (int a = 0; a < nAtoms; ++a) {
+    // kHofRef is calibrated (and the PWCCT core-core is faithful) only for the
+    // validated element set; for any other element the absolute energetics are
+    // uncalibrated, so the HoF is unavailable (NaN) rather than silently wrong.
+    if (kHofRef[atoms[a]] == 0.0) return NAN;
+    ref += kHofRef[atoms[a]];
+  }
   return kEvToKcal * (eElec + pwcctCoreCoreDev(nAtoms, atoms, coords)) - ref;
 }
 
@@ -128,7 +134,10 @@ NVMOLKIT_HD inline double heatOfFormationPm6KcalAp(double eElec, int nAtoms,
                                                    const AtomIntParams* ap, const double* coords) {
   using namespace pwcct;
   double ref = 0.0, ecc = 0.0;
-  for (int a = 0; a < nAtoms; ++a) ref += kHofRef[ap[a].z];
+  for (int a = 0; a < nAtoms; ++a) {
+    if (kHofRef[ap[a].z] == 0.0) return NAN;  // uncalibrated element -> HoF unavailable
+    ref += kHofRef[ap[a].z];
+  }
   for (int i = 0; i < nAtoms - 1; ++i)
     for (int j = i + 1; j < nAtoms; ++j) {
       const double dx = coords[3 * j] - coords[3 * i];
