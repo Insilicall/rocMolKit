@@ -26,71 +26,127 @@
 #include <vector>
 
 #include "semiempirical/scf_d_kernels.h"  // scfBatchDGpu
-#include "semiempirical/scf_d.h"          // pm6dGradient
-#include "semiempirical/pm6_params.h"     // pm6NumOrbitals
+#include "semiempirical/scf_d.h"          // pm6dGradient, pm6dCharges
+#include "semiempirical/pm6_params.h"     // pm6NumOrbitals, pm6ValenceElectrons
 #include "semiempirical/h4_device.h"      // pm6dD3H4Correction
 
 namespace {
 
 using namespace boost::python;
 
-// PM6_D charges + heat of formation for a list of RDKit molecules (each must
-// carry a 3D conformer). Returns a list of length len(mols); each element is
-// either a tuple (list[float] charges, float hof_kcal) or None when the molecule
-// is unsupported / open-shell / did not converge.
+// Per-molecule geometry + electronic bookkeeping pulled once from RDKit.
+struct MolInfo {
+  int na = 0;                  // atom count
+  int nBasis = 0;              // PM6_D basis size
+  int charge = 0;             // net formal charge
+  int mult = 1;               // spin multiplicity (2S+1)
+  bool openShell = false;     // route to the CPU UHF path
+  bool hasD = false;          // any 9-orbital (d-bearing) atom
+  std::vector<int> atoms;     // Z per atom
+  std::vector<double> coords;  // 3*na, Angstrom
+};
+
+// Read one molecule's atoms/coords and classify it. The spin multiplicity is
+// nRadical+1 (high spin) when RDKit carries radical electrons, else a doublet if
+// the valence electron count is odd, else closed-shell. Open-shell molecules go
+// to the CPU UHF path; the GPU batch handles closed-shell only.
+MolInfo readMol(const RDKit::ROMol* mol) {
+  MolInfo info;
+  info.na = static_cast<int>(mol->getNumAtoms());
+  const RDKit::Conformer& conf = mol->getConformer();  // throws if none
+  int nElec = 0, nRad = 0;
+  for (int a = 0; a < info.na; ++a) {
+    const RDKit::Atom* atom = mol->getAtomWithIdx(a);
+    const int z = static_cast<int>(atom->getAtomicNum());
+    info.atoms.push_back(z);
+    const int no = nvMolKit::semiempirical::pm6NumOrbitals(z);
+    info.nBasis += no;
+    if (no == 9) info.hasD = true;
+    info.charge += atom->getFormalCharge();
+    nElec += nvMolKit::semiempirical::pm6ValenceElectrons(z);
+    nRad += static_cast<int>(atom->getNumRadicalElectrons());
+    const RDGeom::Point3D& p = conf.getAtomPos(a);
+    info.coords.push_back(p.x);
+    info.coords.push_back(p.y);
+    info.coords.push_back(p.z);
+  }
+  nElec -= info.charge;
+  info.mult = nRad > 0 ? nRad + 1 : (nElec % 2 != 0 ? 2 : 1);
+  info.openShell = info.mult > 1 || nElec % 2 != 0;
+  return info;
+}
+
+// PM6_D charges + heats of formation for a list of RDKit molecules (each must
+// carry a 3D conformer). Closed-shell molecules run on the GPU batch; open-shell
+// (radical / odd-electron) molecules fall back to the CPU UHF path so radicals
+// are usable through the binding. Returns a list of length len(mols); each
+// element is either a tuple (charges, hof_nddo, hof_pm6, hof_d3h4) or None when
+// the molecule is unsupported / did not converge.
 boost::python::object pm6dChargesBatch(const boost::python::list& mols) {
   const int nMol = static_cast<int>(len(mols));
-  std::vector<const RDKit::ROMol*> molsVec(nMol);
+  std::vector<MolInfo> info(nMol);
   for (int m = 0; m < nMol; ++m)
-    molsVec[m] = extract<const RDKit::ROMol*>(boost::python::object(mols[m]));
+    info[m] = readMol(extract<const RDKit::ROMol*>(boost::python::object(mols[m])));
 
-  std::vector<int> molNAtoms(nMol), molNBasis(nMol), molCharge(nMol), atomsAll;
+  // Gather the closed-shell subset into one GPU batch (open-shell -> CPU below).
+  std::vector<int> gpuMolIdx, molNAtoms, molNBasis, molCharge, atomsAll;
   std::vector<double> coordsAll;
   for (int m = 0; m < nMol; ++m) {
-    const RDKit::ROMol* mol = molsVec[m];
-    const int na = static_cast<int>(mol->getNumAtoms());
-    const RDKit::Conformer& conf = mol->getConformer();  // throws if none
-    molNAtoms[m] = na;
-    int nb = 0, charge = 0;
-    for (int a = 0; a < na; ++a) {
-      const RDKit::Atom* atom = mol->getAtomWithIdx(a);
-      const int z = static_cast<int>(atom->getAtomicNum());
-      atomsAll.push_back(z);
-      nb += nvMolKit::semiempirical::pm6NumOrbitals(z);
-      charge += atom->getFormalCharge();
-      const RDGeom::Point3D& p = conf.getAtomPos(a);
-      coordsAll.push_back(p.x);
-      coordsAll.push_back(p.y);
-      coordsAll.push_back(p.z);
-    }
-    molNBasis[m] = nb;
-    molCharge[m] = charge;  // net formal charge -> ionic electron count
+    if (info[m].openShell) continue;
+    gpuMolIdx.push_back(m);
+    molNAtoms.push_back(info[m].na);
+    molNBasis.push_back(info[m].nBasis);
+    molCharge.push_back(info[m].charge);
+    atomsAll.insert(atomsAll.end(), info[m].atoms.begin(), info[m].atoms.end());
+    coordsAll.insert(coordsAll.end(), info[m].coords.begin(), info[m].coords.end());
   }
 
-  std::vector<double> chargesAll(atomsAll.size()), hofAll(nMol), hofPm6All(nMol);
-  std::vector<int> convAll(nMol);
-  const bool ok = nvMolKit::semiempirical::scfBatchDGpu(
-      nMol, molNAtoms.data(), molNBasis.data(), atomsAll.data(), coordsAll.data(),
-      chargesAll.data(), hofAll.data(), convAll.data(), 800, 1e-10, hofPm6All.data(),
-      molCharge.data());
+  const int nGpu = static_cast<int>(gpuMolIdx.size());
+  std::vector<double> chargesAll(atomsAll.size()), hofAll(nGpu), hofPm6All(nGpu);
+  std::vector<int> convAll(nGpu, 0);
+  bool gpuOk = true;
+  if (nGpu > 0)
+    gpuOk = nvMolKit::semiempirical::scfBatchDGpu(
+        nGpu, molNAtoms.data(), molNBasis.data(), atomsAll.data(), coordsAll.data(),
+        chargesAll.data(), hofAll.data(), convAll.data(), 800, 1e-10, hofPm6All.data(),
+        molCharge.data());
 
-  boost::python::list out;
-  int off = 0, coff = 0;
-  for (int m = 0; m < nMol; ++m) {
-    const int na = molNAtoms[m];
-    if (!ok || !convAll[m]) {
-      out.append(boost::python::object());  // None
-    } else {
+  // Scatter the GPU results back into per-molecule slots (indexed by original m).
+  std::vector<boost::python::object> result(nMol);
+  for (int m = 0; m < nMol; ++m) result[m] = boost::python::object();  // None
+  int off = 0;
+  for (int g = 0; g < nGpu; ++g) {
+    const int m = gpuMolIdx[g];
+    const int na = info[m].na;
+    if (gpuOk && convAll[g]) {
       boost::python::list q;
       for (int a = 0; a < na; ++a) q.append(chargesAll[off + a]);
-      // PM6-D3H4 = NDDO heat of formation + the post-SCF D3 + H4 + H-H correction.
       const double corr = nvMolKit::semiempirical::pm6dD3H4Correction(
-          na, &atomsAll[coff], &coordsAll[3 * coff]);
-      out.append(boost::python::make_tuple(q, hofAll[m], hofPm6All[m], hofAll[m] + corr));
+          na, info[m].atoms.data(), info[m].coords.data());
+      result[m] = boost::python::make_tuple(q, hofAll[g], hofPm6All[g], hofAll[g] + corr);
     }
     off += na;
-    coff += na;
   }
+
+  // Open-shell molecules: solve each on the CPU UHF path with its multiplicity.
+  for (int m = 0; m < nMol; ++m) {
+    if (!info[m].openShell) continue;
+    const int na = info[m].na;
+    std::vector<double> q(na);
+    double hof = 0.0, hofPm6 = 0.0;
+    const bool ok = nvMolKit::semiempirical::pm6dCharges(
+        na, info[m].atoms.data(), info[m].coords.data(), q.data(), &hof, 800, 1e-10,
+        &hofPm6, info[m].charge, info[m].mult);
+    if (!ok) continue;  // None (d-bearing open-shell unsupported, or non-converged)
+    boost::python::list qList;
+    for (int a = 0; a < na; ++a) qList.append(q[a]);
+    const double corr = nvMolKit::semiempirical::pm6dD3H4Correction(
+        na, info[m].atoms.data(), info[m].coords.data());
+    result[m] = boost::python::make_tuple(qList, hof, hofPm6, hof + corr);
+  }
+
+  boost::python::list out;
+  for (int m = 0; m < nMol; ++m) out.append(result[m]);
   return out;
 }
 
@@ -173,12 +229,14 @@ BOOST_PYTHON_MODULE(_Semiempirical) {
       "PM6_D (d-orbital NDDO) Mulliken charges + heats of formation for a list of "
       "RDKit molecules with 3D conformers. Returns a list of "
       "(charges, hof_nddo_kcal, hof_pm6_kcal, hof_d3h4_kcal) tuples (or None per "
-      "molecule if unsupported / open-shell / non-converged): hof_nddo is the "
+      "molecule if unsupported / non-converged): hof_nddo is the "
       "PYSEQM-referenced PM6_D heat of formation (AM1-style core-core), hof_pm6 is "
       "the canonical MOPAC-aligned PM6 heat of formation (PWCCT core-core; ~1 "
       "kcal/mol of MOPAC for light + Br, looser for iodine), and hof_d3h4 adds the "
-      "post-SCF PM6-D3H4 correction to hof_nddo. The whole d-orbital SCF runs on "
-      "the GPU.");
+      "post-SCF PM6-D3H4 correction to hof_nddo. Closed-shell molecules run the "
+      "whole d-orbital SCF on the GPU; open-shell ones (radicals / odd electron "
+      "count, detected via formal charge + radical electrons) fall back to the CPU "
+      "UHF path (sp-only — d-bearing open-shell molecules return None).");
   def("PM6DGradient", &pm6dGradientBatch, (arg("molecules")),
       "PM6_D (d-orbital NDDO) frozen-density energy gradient (eV/Angstrom) for a "
       "list of RDKit molecules with 3D conformers. Returns a list of per-molecule "
