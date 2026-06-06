@@ -8,6 +8,14 @@ overlap (sp + d-s/d-p radials) vs overlap_d_molecular_frame, and the YX
 two-center tensor vs _yx_pair_w_pyseqm.
 
     python3 tools/semiempirical/validate_organohalide_components.py
+
+NOTE: the I-C case (golden_ic_*.json) was captured from the PYSEQM/mlxmolkit
+oracle, which carries a corrupted iodine zeta_d (2.72301 vs canonical 1.87518)
+and qn5 overlap sign bugs. The engine has since been fixed to canonical MOPAC for
+iodine, so I-C now intentionally DIVERGES from these stale oracle captures --
+CH3I is validated end-to-end against MOPAC instead (charges bit-exact, HoF within
+0.16 kcal: validate_pm6_mopac.py; overlap: validate_overlap_mopac.py). The Br-C
+case still matches the oracle.
 """
 
 from __future__ import annotations
