@@ -232,11 +232,35 @@ are the unit of parallel work, so throughput scales with both the molecule count
 (N) and conformers per molecule (k). See [docs/PERFORMANCE_HIP.md](docs/PERFORMANCE_HIP.md)
 for the architecture and the optimization history.
 
+## Semi-empirical quantum chemistry — PM6_D (new)
+
+A from-scratch **NDDO PM6 / PM6_D** semi-empirical SCF engine in HIP — not in
+nvMolKit (which has no quantum chemistry). The **entire SCF runs on the GPU** (one
+`__host__ __device__` codebase feeds both the CPU reference and the HIP kernels,
+so GPU == CPU by construction), validated **bit-exact to MOPAC 23.2.5** — Mulliken
+charges and heats of formation, not just speed.
+
+- **28 elements**, charges bit-exact to MOPAC: H, B, C, N, O, F, Al, Si, P, S, Cl,
+  **the whole first transition row Sc–Cu** (Sc Ti V Cr Mn Fe Co Ni Cu), Zn, Ga,
+  Ge, Br, Cd, Sn, I, Hg.
+- **Heat of formation** (canonical PM6) for 19 elements, within ~1 kcal/mol of MOPAC.
+- **Open-shell UHF** radicals (doublets/triplets incl. NO₂•, O₂), **ions** (net
+  charge), **group-12 metals**, the **general MOPAC analytic Slater overlap** (any
+  n, l incl. d), energy **gradient + L-BFGS geometry optimization**, and the
+  post-SCF **PM6-D3H4** correction.
+- **On-GPU throughput:** one wavefront per molecule with a cooperative
+  deterministic Jacobi + cached two-center integrals — **~2.3× faster than the CPU
+  loop** on gfx1200 over drug-like molecules, bit-exact (GPU == CPU to 1e-14).
+
+Design, provenance, validators and the full supported-element table:
+[docs/SEMIEMPIRICAL_DESIGN.md](docs/SEMIEMPIRICAL_DESIGN.md). The result counts
+only when it matches MOPAC to the stated tolerance — never timing alone.
+
 ## Roadmap
 
 Core modules are ported and validated (ETKDG, MMFF94, UFF, batched forcefield,
-conformer RMSD, fingerprints, similarity, Butina clustering, substructure, TFD).
-See [PLAN.md](PLAN.md).
+conformer RMSD, fingerprints, similarity, Butina clustering, substructure, TFD),
+plus the **PM6_D semi-empirical SCF** (above). See [PLAN.md](PLAN.md).
 
 ## License
 

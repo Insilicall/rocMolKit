@@ -1,0 +1,144 @@
+{
+  "device": "gfx1200 (RDNA4)",
+  "branch": "wt/bench-gpu",
+  "engine": "PM6_D scfBatchDGpu (batched on-device SCF)",
+  "n_base_molecules": 20,
+  "skipped": [
+    [
+      "ibuprofen",
+      "N=33>max_atoms(25)"
+    ],
+    [
+      "sulfamethoxazole",
+      "N=28>max_atoms(25)"
+    ],
+    [
+      "chlorpromazine",
+      "N=40>max_atoms(25)"
+    ],
+    [
+      "fluoxetine",
+      "N=40>max_atoms(25)"
+    ],
+    [
+      "diazepam",
+      "N=33>max_atoms(25)"
+    ],
+    [
+      "naproxen",
+      "N=31>max_atoms(25)"
+    ],
+    [
+      "warfarin",
+      "N=39>max_atoms(25)"
+    ],
+    [
+      "atorvastatin_core",
+      "N=76>max_atoms(25)"
+    ],
+    [
+      "salbutamol",
+      "N=38>max_atoms(25)"
+    ],
+    [
+      "propranolol",
+      "N=40>max_atoms(25)"
+    ],
+    [
+      "amoxicillin",
+      "N=44>max_atoms(25)"
+    ],
+    [
+      "penicillin_g",
+      "N=41>max_atoms(25)"
+    ],
+    [
+      "ciprofloxacin",
+      "N=42>max_atoms(25)"
+    ],
+    [
+      "omeprazole",
+      "N=43>max_atoms(25)"
+    ],
+    [
+      "ranitidine",
+      "N=43>max_atoms(25)"
+    ],
+    [
+      "acetaminophen_dimer",
+      "N=37>max_atoms(25)"
+    ],
+    [
+      "nicotine",
+      "N=26>max_atoms(25)"
+    ],
+    [
+      "tryptophan",
+      "N=27>max_atoms(25)"
+    ],
+    [
+      "imatinib_frag",
+      "N=68>max_atoms(25)"
+    ],
+    [
+      "celecoxib",
+      "N=40>max_atoms(25)"
+    ],
+    [
+      "ketoprofen",
+      "N=33>max_atoms(25)"
+    ],
+    [
+      "diclofenac",
+      "N=30>max_atoms(25)"
+    ],
+    [
+      "bromhexine",
+      "N=38>max_atoms(25)"
+    ],
+    [
+      "triethyl_phosphate",
+      "N=26>max_atoms(25)"
+    ],
+    [
+      "phenyltrimethoxysilane",
+      "N=27>max_atoms(25)"
+    ],
+    [
+      "zinc_acetate",
+      "multi-fragment"
+    ]
+  ],
+  "buckets": {
+    "<20": {
+      "molecules": 150,
+      "atoms": 1845
+    },
+    "20-40": {
+      "molecules": 150,
+      "atoms": 3300
+    },
+    "40+": {
+      "molecules": 0,
+      "atoms": 0
+    }
+  },
+  "gpu_repeats": 5,
+  "cpu_repeats": 1,
+  "seed": 12648430,
+  "max_atoms": 25,
+  "nMol": 300,
+  "atomsTotal": 5145,
+  "converged": 300,
+  "gpu_cold_s": 3.682179,
+  "gpu_best_s": 2.936667,
+  "cpu_best_s": 6.684405,
+  "gpu_mol_s": 102.1566,
+  "gpu_atom_s": 1751.9859,
+  "gpu_cold_mol_s": 81.4735,
+  "cpu_mol_s": 44.8806,
+  "cpu_atom_s": 769.702,
+  "speedup": 2.2762,
+  "worst_net_charge": 8.537615e-14,
+  "ok": 1
+}
